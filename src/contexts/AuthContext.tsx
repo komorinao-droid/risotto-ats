@@ -1,0 +1,153 @@
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import type { Client, ClientData } from '@/types';
+import { storage, getDefaultClientData } from '@/utils/storage';
+
+export interface AuthState {
+  isLoggedIn: boolean;
+  client: Client | null;
+  clientData: ClientData | null;
+}
+
+interface AuthContextValue extends AuthState {
+  login: (clientId: string, password: string) => boolean;
+  logout: () => void;
+  updateClientData: (updater: (data: ClientData) => ClientData) => void;
+  reloadClientData: () => void;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return ctx;
+}
+
+function filterDataByBase(data: ClientData, baseName: string): ClientData {
+  return {
+    ...data,
+    applicants: data.applicants.filter((a) => a.base === baseName),
+    events: data.events.filter((e) => e.base === baseName),
+  };
+}
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [client, setClient] = useState<Client | null>(null);
+  const [clientData, setClientData] = useState<ClientData | null>(null);
+
+  const resolveClientId = useCallback((c: Client): string => {
+    return c.accountType === 'child' && c.parentId ? c.parentId : c.id;
+  }, []);
+
+  const loadClientData = useCallback(
+    (c: Client) => {
+      const dataId = resolveClientId(c);
+      let data = storage.getClientData(dataId);
+
+      // 子アカウントの場合、拠点でフィルタ
+      if (c.accountType === 'child' && c.baseName) {
+        data = filterDataByBase(data, c.baseName);
+      }
+      setClientData(data);
+    },
+    [resolveClientId]
+  );
+
+  const login = useCallback(
+    (clientId: string, password: string): boolean => {
+      const clients = storage.getClients();
+      const found = clients.find((c) => c.id === clientId && c.password === password);
+      if (!found) return false;
+      if (found.status === 'inactive') return false;
+
+      setClient(found);
+      loadClientData(found);
+      return true;
+    },
+    [loadClientData]
+  );
+
+  const logout = useCallback(() => {
+    setClient(null);
+    setClientData(null);
+  }, []);
+
+  const updateClientData = useCallback(
+    (updater: (data: ClientData) => ClientData) => {
+      if (!client) return;
+      const dataId = resolveClientId(client);
+      const current = storage.getClientData(dataId);
+      const updated = updater(current);
+      storage.saveClientData(dataId, updated);
+
+      // 子アカウントの場合、フィルタした結果をstateに
+      if (client.accountType === 'child' && client.baseName) {
+        setClientData(filterDataByBase(updated, client.baseName));
+      } else {
+        setClientData(updated);
+      }
+    },
+    [client, resolveClientId]
+  );
+
+  const reloadClientData = useCallback(() => {
+    if (client) {
+      loadClientData(client);
+    }
+  }, [client, loadClientData]);
+
+  // 初期化: デモ用にデフォルトクライアントが無い場合は作成
+  useEffect(() => {
+    const clients = storage.getClients();
+    const hasDemo = clients.some(c => c.id === 'demo');
+    if (!hasDemo) {
+      const defaultClient: Client = {
+        id: 'demo',
+        companyName: 'デモ企業',
+        password: 'demo',
+        accountType: 'parent',
+        plan: 'professional',
+        status: 'active',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        contactName: '管理者 太郎',
+        contactEmail: 'admin@risotto.co.jp',
+        memo: 'デモ用アカウント',
+        permissions: {
+          status: true,
+          source: true,
+          base: true,
+          job: true,
+          hearing: true,
+          filtercond: true,
+          mailtemplate: true,
+          exclusion: true,
+        },
+        members: [
+          { id: 1, name: '管理者 太郎', email: 'admin@risotto.co.jp', phone: '09012345678', notifyEmail: true, notifySms: false },
+          { id: 2, name: '採用 花子', email: 'hanako@risotto.co.jp', phone: '08098765432', notifyEmail: true, notifySms: true },
+        ],
+        notificationEmail: 'admin@risotto.co.jp',
+        smsPhone: '09012345678',
+      };
+      const updatedClients = clients.filter(c => c.id !== 'demo');
+      updatedClients.push(defaultClient);
+      storage.saveClients(updatedClients);
+      storage.saveClientData('demo', getDefaultClientData());
+    }
+  }, []);
+
+  const value: AuthContextValue = {
+    isLoggedIn: !!client,
+    client,
+    clientData,
+    login,
+    logout,
+    updateClientData,
+    reloadClientData,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
