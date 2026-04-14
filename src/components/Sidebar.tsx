@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/applicants', label: '応募者管理', icon: '\u{1D5E0}' },
   { path: '/progress', label: '進捗ボード', icon: '\u{1F4CA}' },
   { path: '/calendar', label: '面接カレンダー', icon: '\u{1F4C5}' },
+  { path: '/snapshots', label: '日次進捗保存', icon: '\u{1F4BE}' },
   { path: '/statuses', label: 'ステータス管理', icon: '\u2699', permission: 'status' },
   { path: '/sources', label: '応募媒体管理', icon: '\u{1F4E2}', permission: 'source' },
   { path: '/bases', label: '拠点管理', icon: '\u{1F3E2}', permission: 'base' },

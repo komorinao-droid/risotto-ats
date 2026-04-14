@@ -4,6 +4,8 @@ import type {
   Status,
   EmailTemplate,
   PrefDateTime,
+  DailySnapshot,
+  SnapshotConfig,
 } from '@/types';
 
 /** prefDates を旧フォーマット（string[]）から新フォーマット（PrefDateTime[]）へ移行 */
@@ -361,3 +363,92 @@ class StorageService {
 }
 
 export const storage = new StorageService();
+
+// ─── スナップショット ───────────────────────────────────────────────────────
+
+const SNAPSHOT_MAX_DAYS = 365;
+
+function snapshotKey(clientId: string): string {
+  return `hireflow:client:${clientId}:snapshots`;
+}
+
+function snapshotConfigKey(clientId: string): string {
+  return `hireflow:client:${clientId}:snapshot_config`;
+}
+
+export function getSnapshots(clientId: string): DailySnapshot[] {
+  try {
+    const raw = localStorage.getItem(snapshotKey(clientId));
+    if (raw) return JSON.parse(raw) as DailySnapshot[];
+  } catch { /* ignore */ }
+  return [];
+}
+
+export function saveSnapshot(clientId: string, snapshot: DailySnapshot): void {
+  const existing = getSnapshots(clientId);
+  // 同じ日の既存スナップショットを上書き（同日複数保存不可）
+  const filtered = existing.filter(s => s.date !== snapshot.date);
+  const updated = [snapshot, ...filtered].slice(0, SNAPSHOT_MAX_DAYS);
+  localStorage.setItem(snapshotKey(clientId), JSON.stringify(updated));
+}
+
+export function getSnapshotConfig(clientId: string): SnapshotConfig {
+  try {
+    const raw = localStorage.getItem(snapshotConfigKey(clientId));
+    if (raw) return JSON.parse(raw) as SnapshotConfig;
+  } catch { /* ignore */ }
+  return { enabled: true, scheduleTime: '18:00' };
+}
+
+export function saveSnapshotConfig(clientId: string, config: SnapshotConfig): void {
+  localStorage.setItem(snapshotConfigKey(clientId), JSON.stringify(config));
+}
+
+export function takeSnapshot(clientId: string): DailySnapshot {
+  const data = storage.getClientData(clientId);
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+
+  // ステータス別カウント
+  const statusMap: Record<string, number> = {};
+  data.applicants.forEach(a => {
+    statusMap[a.stage] = (statusMap[a.stage] || 0) + 1;
+  });
+
+  // 媒体別カウント
+  const sourceMap: Record<string, number> = {};
+  data.applicants.forEach(a => {
+    sourceMap[a.src] = (sourceMap[a.src] || 0) + 1;
+  });
+
+  // 拠点別カウント
+  const baseMap: Record<string, number> = {};
+  data.applicants.forEach(a => {
+    baseMap[a.base] = (baseMap[a.base] || 0) + 1;
+  });
+
+  // 本日新規
+  const newToday = data.applicants.filter(a => a.date === today).length;
+
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  const snapshot: DailySnapshot = {
+    id: `${today}_${hhmm}`,
+    date: today,
+    savedAt: now.toISOString(),
+    totalApplicants: data.applicants.length,
+    activeApplicants: data.applicants.filter(a => a.active).length,
+    newApplicantsToday: newToday,
+    statusCounts: Object.entries(statusMap)
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count),
+    sourceCounts: Object.entries(sourceMap)
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count),
+    baseCounts: Object.entries(baseMap)
+      .map(([base, count]) => ({ base, count }))
+      .sort((a, b) => b.count - a.count),
+  };
+
+  saveSnapshot(clientId, snapshot);
+  return snapshot;
+}
