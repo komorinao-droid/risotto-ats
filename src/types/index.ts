@@ -236,24 +236,6 @@ export interface ChatQuestionGroup {
   questions: ChatQuestion[];
 }
 
-// 日次スナップショット
-export interface DailySnapshot {
-  id: string;           // YYYY-MM-DD_HHmm
-  date: string;         // YYYY-MM-DD
-  savedAt: string;      // ISO datetime
-  totalApplicants: number;
-  activeApplicants: number;
-  newApplicantsToday: number;
-  statusCounts: { status: string; count: number }[];
-  sourceCounts: { source: string; count: number }[];
-  baseCounts: { base: string; count: number }[];
-}
-
-export interface SnapshotConfig {
-  enabled: boolean;
-  scheduleTime: string;  // HH:mm
-}
-
 // ストレージに保存するデータ全体
 export interface ClientData {
   applicants: Applicant[];

@@ -8,7 +8,6 @@ import Calendar from '@/client/pages/Calendar';
 import ApplicantList from '@/client/pages/ApplicantList';
 import ApplicantDetail from '@/client/pages/ApplicantDetail';
 import ProgressBoard from '@/client/pages/ProgressBoard';
-import SnapshotHistory from '@/client/pages/SnapshotHistory';
 import StatusManagement from '@/client/pages/settings/StatusManagement';
 import SourceManagement from '@/client/pages/settings/SourceManagement';
 import BaseManagement from '@/client/pages/settings/BaseManagement';
@@ -19,13 +18,9 @@ import ExclusionList from '@/client/pages/settings/ExclusionList';
 import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManagement';
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
-import { useDailySnapshotScheduler } from '@/client/hooks/useDailySnapshotScheduler';
 
 const AuthenticatedApp: React.FC = () => {
   const { client, logout } = useAuth();
-
-  // 毎日指定時刻に自動スナップショット保存
-  useDailySnapshotScheduler(client?.id ?? '');
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -47,7 +42,6 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/settings/email-templates" element={<EmailTemplateManagement />} />
           <Route path="/settings/chatbot" element={<ChatbotManagement />} />
           <Route path="/settings/account" element={<AccountSettings />} />
-          <Route path="/snapshots" element={<SnapshotHistory />} />
         </Routes>
       </main>
     </div>
