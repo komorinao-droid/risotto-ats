@@ -327,7 +327,6 @@ function getDemoData(): ClientData {
               { id: 3, label: '週4日程度', judgment: 'ok' as const, action: 'next' as const },
               { id: 4, label: '週5日程度', judgment: 'ok' as const, action: 'next' as const },
             ],
-            subQuestions: [],
           },
           {
             id: 2,
@@ -339,7 +338,6 @@ function getDemoData(): ClientData {
               { id: 3, label: '土日どちらも可能', judgment: 'ok' as const, action: 'next' as const },
               { id: 4, label: '土日どちらも不可', judgment: 'ng' as const, action: 'ng_immediate' as const },
             ],
-            subQuestions: [],
           },
           {
             id: 3,
@@ -352,7 +350,6 @@ function getDemoData(): ClientData {
               { id: 4, label: '自火報盤・中央監視盤を扱う', judgment: 'ok' as const, action: 'next' as const },
               { id: 5, label: '特になし', judgment: 'ok' as const, action: 'next' as const },
             ],
-            subQuestions: [],
           },
         ],
         ngMessageImmediate: '大変申し訳ございませんが、ご希望の条件では採用が難しい状況です。またの機会にご応募いただければ幸いです。',
