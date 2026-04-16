@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type {
   ChatLeadSetting, ChatLeadQuestion, ChatLeadChoice,
-  ChatLeadSubQuestion, ChatInterviewCalendar,
+  ChatInterviewCalendar,
 } from '@/types';
 
 // ── ヘルパー ──────────────────────────────────────────────────────────────────
@@ -38,6 +38,8 @@ function secStyle(): React.CSSProperties {
   };
 }
 
+const ALL_METHODS = ['対面', 'WEB', '電話'] as const;
+
 // ── 回答タイプ切替 ────────────────────────────────────────────────────────────
 
 type AnsType = 'single' | 'multiple' | 'freetext';
@@ -56,7 +58,7 @@ const AnsTypeToggle: React.FC<{ value: AnsType; onChange: (v: AnsType) => void }
   </div>
 );
 
-// ── 選択肢エディタ（共通）────────────────────────────────────────────────────
+// ── 選択肢エディタ ────────────────────────────────────────────────────────────
 
 const ChoiceList: React.FC<{
   choices: ChatLeadChoice[];
@@ -75,7 +77,6 @@ const ChoiceList: React.FC<{
         <div key={c.id} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
           <input value={c.label} onChange={e => set(c.id, { label: e.target.value })}
             style={{ ...S.inp, width: '160px' }} placeholder="選択肢ラベル" />
-          {/* 判定 */}
           <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
             {(['ok', 'ng'] as const).map(j => (
               <button key={j} onClick={() => set(c.id, { judgment: j })} style={{
@@ -86,7 +87,6 @@ const ChoiceList: React.FC<{
               }}>{j.toUpperCase()}</button>
             ))}
           </div>
-          {/* 挙動 */}
           <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
             {([['next', '次へ'], ['ng_immediate', 'NG即時']] as [ChatLeadChoice['action'], string][]).map(([val, lbl]) => (
               <button key={val} onClick={() => set(c.id, { action: val })} style={{
@@ -109,39 +109,6 @@ const ChoiceList: React.FC<{
   );
 };
 
-// ── サブ質問カード ────────────────────────────────────────────────────────────
-
-const SubQuestionCard: React.FC<{
-  sq: ChatLeadSubQuestion;
-  idx: number;
-  onChange: (sq: ChatLeadSubQuestion) => void;
-  onDelete: () => void;
-}> = ({ sq, idx, onChange, onDelete }) => {
-  const upd = (patch: Partial<ChatLeadSubQuestion>) => onChange({ ...sq, ...patch });
-  return (
-    <div style={{ border: '1px solid #c7d2fe', borderRadius: '8px', padding: '12px', marginBottom: '8px', background: '#f5f3ff' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <span style={{ fontWeight: 600, fontSize: '0.82rem', color: '#4f46e5' }}>サブ質問 {idx + 1}</span>
-        <button onClick={onDelete}
-          style={{ padding: '2px 8px', border: '1px solid #c4b5fd', borderRadius: '4px', background: '#ede9fe', color: '#7c3aed', cursor: 'pointer', fontSize: '0.72rem' }}>削除</button>
-      </div>
-      <div style={{ display: 'grid', gap: '10px' }}>
-        <div>
-          <span style={S.lbl}>質問内容</span>
-          <textarea value={sq.content} onChange={e => upd({ content: e.target.value })} style={ta(2)} placeholder="サブ質問の内容を入力" />
-        </div>
-        <div>
-          <span style={S.lbl}>回答パターン</span>
-          <AnsTypeToggle value={sq.answerType} onChange={v => upd({ answerType: v, choices: v === 'freetext' ? [] : sq.choices })} />
-        </div>
-        {sq.answerType !== 'freetext' && (
-          <ChoiceList choices={sq.choices} onChange={cs => upd({ choices: cs })} />
-        )}
-      </div>
-    </div>
-  );
-};
-
 // ── 質問カード ────────────────────────────────────────────────────────────────
 
 const QuestionCard: React.FC<{
@@ -154,19 +121,9 @@ const QuestionCard: React.FC<{
   onMoveDown: () => void;
 }> = ({ q, idx, total, onChange, onDelete, onMoveUp, onMoveDown }) => {
   const upd = (patch: Partial<ChatLeadQuestion>) => onChange({ ...q, ...patch });
-  const subs = q.subQuestions || [];
-
-  const addSub = () => upd({
-    subQuestions: [...subs, { id: newId(subs), content: '', answerType: 'single', choices: [] }],
-  });
-  const updSub = (i: number, sq: ChatLeadSubQuestion) => {
-    const next = [...subs]; next[i] = sq; upd({ subQuestions: next });
-  };
-  const delSub = (i: number) => upd({ subQuestions: subs.filter((_, j) => j !== i) });
 
   return (
     <div style={S.card}>
-      {/* ヘッダー */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1f2937' }}>質問設定 {idx + 1}</span>
         <div style={{ display: 'flex', gap: '4px' }}>
@@ -178,38 +135,19 @@ const QuestionCard: React.FC<{
             style={{ padding: '3px 10px', border: '1px solid #fca5a5', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '0.75rem' }}>削除</button>
         </div>
       </div>
-
       <div style={{ display: 'grid', gap: '10px' }}>
-        {/* 質問内容 */}
         <div>
           <span style={S.lbl}>質問内容</span>
           <textarea value={q.content} onChange={e => upd({ content: e.target.value })}
             style={ta(2)} placeholder="例: ご希望の週の勤務日数を選択してください。" />
         </div>
-        {/* 回答パターン */}
         <div>
           <span style={S.lbl}>回答パターン</span>
           <AnsTypeToggle value={q.answerType} onChange={v => upd({ answerType: v, choices: v === 'freetext' ? [] : q.choices })} />
         </div>
-        {/* 選択肢 */}
         {q.answerType !== 'freetext' && (
           <ChoiceList choices={q.choices} onChange={cs => upd({ choices: cs })} />
         )}
-
-        {/* サブ質問 */}
-        {subs.length > 0 && (
-          <div style={{ marginTop: '8px' }}>
-            <span style={{ ...S.lbl, color: '#4f46e5' }}>サブ質問</span>
-            {subs.map((sq, i) => (
-              <SubQuestionCard key={sq.id} sq={sq} idx={i}
-                onChange={nsq => updSub(i, nsq)} onDelete={() => delSub(i)} />
-            ))}
-          </div>
-        )}
-        <button onClick={addSub}
-          style={{ padding: '5px 14px', border: '1px dashed #c4b5fd', borderRadius: '6px', background: '#faf5ff', cursor: 'pointer', fontSize: '0.8rem', color: '#7c3aed', alignSelf: 'flex-start' }}>
-          + サブ質問追加
-        </button>
       </div>
     </div>
   );
@@ -225,6 +163,13 @@ const CalendarCard: React.FC<{
   onDelete: () => void;
 }> = ({ cal, bases, idx, onChange, onDelete }) => {
   const upd = (patch: Partial<ChatInterviewCalendar>) => onChange({ ...cal, ...patch });
+
+  const toggleMethod = (m: string) => {
+    const has = cal.methods.includes(m);
+    const next = has ? cal.methods.filter(x => x !== m) : [...cal.methods, m];
+    if (next.length > 0) upd({ methods: next });
+  };
+
   return (
     <div style={S.card}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -241,16 +186,36 @@ const CalendarCard: React.FC<{
           </select>
         </div>
         <div>
-          <span style={S.lbl}>面接方法 *</span>
-          <select value={cal.method} onChange={e => upd({ method: e.target.value })} style={S.inp}>
-            {['対面', 'WEB', '電話'].map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+          <span style={S.lbl}>
+            面接方法
+            <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: '6px', fontSize: '0.75rem' }}>
+              {cal.methods.length === 1 ? '（1つのみ選択 → 応募者への選択なし）' : `（${cal.methods.length}つ選択 → 応募者が選択）`}
+            </span>
+          </span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {ALL_METHODS.map(m => {
+              const active = cal.methods.includes(m);
+              return (
+                <label key={m} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', padding: '5px 12px', border: `1px solid ${active ? '#3b82f6' : '#d1d5db'}`, borderRadius: '6px', background: active ? '#eff6ff' : '#fff', fontSize: '0.85rem', color: active ? '#2563eb' : '#374151', fontWeight: active ? 600 : 400 }}>
+                  <input type="checkbox" checked={active} onChange={() => toggleMethod(m)} style={{ display: 'none' }} />
+                  {m}
+                </label>
+              );
+            })}
+          </div>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
           <span style={S.lbl}>面接希望日/面接日選択前メッセージ</span>
           <textarea value={cal.preDateMessage} onChange={e => upd({ preDateMessage: e.target.value })}
             style={ta(2)} placeholder="面接希望日程（第1〜第3）を入力してください。" />
         </div>
+        {cal.methods.length > 1 && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <span style={S.lbl}>面接方法決定後メッセージ</span>
+            <textarea value={cal.methodDecidedMessage} onChange={e => upd({ methodDecidedMessage: e.target.value })}
+              style={ta(2)} placeholder="入力ありがとうございます。次に面接時間の調整をします。" />
+          </div>
+        )}
         <div>
           <span style={S.lbl}>チャット終了メッセージ</span>
           <textarea value={cal.chatEndMessage} onChange={e => upd({ chatEndMessage: e.target.value })}
@@ -260,11 +225,6 @@ const CalendarCard: React.FC<{
           <span style={S.lbl}>面接確定時メッセージ</span>
           <textarea value={cal.confirmedMessage} onChange={e => upd({ confirmedMessage: e.target.value })}
             style={ta(2)} placeholder="面接日程が確定しました。" />
-        </div>
-        <div style={{ gridColumn: '1 / -1' }}>
-          <span style={S.lbl}>面接方法決定後メッセージ</span>
-          <textarea value={cal.methodDecidedMessage} onChange={e => upd({ methodDecidedMessage: e.target.value })}
-            style={ta(2)} placeholder="入力ありがとうございます。次に面接時間の調整をします。" />
         </div>
       </div>
     </div>
@@ -276,12 +236,12 @@ const CalendarCard: React.FC<{
 type PMsg = { text: string; isBot: boolean };
 interface PState {
   msgs: PMsg[];
-  phase: 'idle' | 'question' | 'subquestion' | 'ng' | 'calendar' | 'done';
+  phase: 'idle' | 'question' | 'ng' | 'method' | 'calendar' | 'done';
   qi: number;
-  sqi: number; // sub-question index
+  calIdx: number;
 }
 
-const initP = (): PState => ({ msgs: [], phase: 'idle', qi: 0, sqi: 0 });
+const initP = (): PState => ({ msgs: [], phase: 'idle', qi: 0, calIdx: 0 });
 
 const FreetextInput: React.FC<{ onSend: (t: string) => void }> = ({ onSend }) => {
   const [v, setV] = useState('');
@@ -307,31 +267,32 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
   const push = (add: PMsg[], extra?: Partial<PState>) =>
     setPs(p => ({ ...p, msgs: [...p.msgs, ...add], ...extra }));
 
-  const calLabel = (cal: ChatInterviewCalendar) =>
-    `${cal.baseName}（${cal.method}）`;
+  // 全質問終了後にカレンダーフェーズへ
+  const goCalendar = (um: PMsg) => {
+    if (!lead || lead.interviewCalendars.length === 0) {
+      push([um, { text: 'ありがとうございました！', isBot: true }], { phase: 'done' });
+      return;
+    }
+    const cal = lead.interviewCalendars[0];
+    // 面接方法が1つなら自動確定、2つ以上なら選択
+    if (cal.methods.length === 1) {
+      const methodMsg = cal.methodDecidedMessage || '';
+      const msgs: PMsg[] = [um];
+      if (cal.preDateMessage) msgs.push({ text: cal.preDateMessage, isBot: true });
+      setPs(p => ({ ...p, msgs: [...p.msgs, ...msgs], phase: 'calendar', calIdx: 0 }));
+    } else {
+      const msgs: PMsg[] = [um, { text: `面接方法を選択してください。`, isBot: true }];
+      setPs(p => ({ ...p, msgs: [...p.msgs, ...msgs], phase: 'method', calIdx: 0 }));
+    }
+  };
 
   const goNextQuestion = (um: PMsg, qi: number) => {
     if (!lead) return;
     const next = qi + 1;
     if (next < lead.questions.length) {
-      push([um, { text: lead.questions[next].content, isBot: true }], { phase: 'question', qi: next, sqi: 0 });
-    } else if (lead.interviewCalendars.length > 0) {
-      const msg = lead.interviewCalendars[0].preDateMessage || '面接希望日程を教えてください。';
-      push([um, { text: msg, isBot: true }], { phase: 'calendar' });
+      push([um, { text: lead.questions[next].content, isBot: true }], { phase: 'question', qi: next });
     } else {
-      push([um, { text: 'ありがとうございました！', isBot: true }], { phase: 'done' });
-    }
-  };
-
-  const goNextSubOrNext = (um: PMsg, qi: number, sqi: number) => {
-    if (!lead) return;
-    const q = lead.questions[qi];
-    const subs = q.subQuestions || [];
-    const nextSqi = sqi + 1;
-    if (nextSqi < subs.length) {
-      push([um, { text: subs[nextSqi].content, isBot: true }], { phase: 'subquestion', sqi: nextSqi });
-    } else {
-      goNextQuestion(um, qi);
+      goCalendar(um);
     }
   };
 
@@ -340,60 +301,56 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
     const init: PMsg[] = [{ text: lead.startMessage || 'チャットを開始します', isBot: true }];
     if (lead.questions.length > 0) {
       init.push({ text: lead.questions[0].content, isBot: true });
-      setPs({ msgs: init, phase: 'question', qi: 0, sqi: 0 });
+      setPs({ msgs: init, phase: 'question', qi: 0, calIdx: 0 });
     } else if (lead.interviewCalendars.length > 0) {
-      init.push({ text: lead.interviewCalendars[0].preDateMessage || '面接希望日程を教えてください。', isBot: true });
-      setPs({ msgs: init, phase: 'calendar', qi: 0, sqi: 0 });
+      const cal = lead.interviewCalendars[0];
+      if (cal.methods.length === 1) {
+        if (cal.preDateMessage) init.push({ text: cal.preDateMessage, isBot: true });
+        setPs({ msgs: init, phase: 'calendar', qi: 0, calIdx: 0 });
+      } else {
+        init.push({ text: '面接方法を選択してください。', isBot: true });
+        setPs({ msgs: init, phase: 'method', qi: 0, calIdx: 0 });
+      }
     } else {
-      setPs({ msgs: init, phase: 'done', qi: 0, sqi: 0 });
+      setPs({ msgs: init, phase: 'done', qi: 0, calIdx: 0 });
     }
   };
 
-  const onChoice = (q: ChatLeadQuestion | ChatLeadSubQuestion, c: ChatLeadChoice, isSubQ: boolean) => {
+  const onChoice = (q: ChatLeadQuestion, c: ChatLeadChoice) => {
     if (!lead) return;
     const um: PMsg = { text: c.label, isBot: false };
     if (c.action === 'ng_immediate') {
       push([um, { text: lead.ngMessageImmediate || '選考対象外となりました。', isBot: true }], { phase: 'ng' });
       return;
     }
-    if (isSubQ) {
-      goNextSubOrNext(um, ps.qi, ps.sqi);
-    } else {
-      const mainQ = q as ChatLeadQuestion;
-      const subs = mainQ.subQuestions || [];
-      if (subs.length > 0) {
-        push([um, { text: subs[0].content, isBot: true }], { phase: 'subquestion', sqi: 0 });
-      } else {
-        goNextQuestion(um, ps.qi);
-      }
-    }
+    goNextQuestion(um, ps.qi);
   };
 
   const onFree = (text: string) => {
     if (!lead) return;
-    const um: PMsg = { text, isBot: false };
-    if (ps.phase === 'subquestion') {
-      goNextSubOrNext(um, ps.qi, ps.sqi);
-    } else {
-      const q = lead.questions[ps.qi];
-      const subs = q?.subQuestions || [];
-      if (subs.length > 0) {
-        push([um, { text: subs[0].content, isBot: true }], { phase: 'subquestion', sqi: 0 });
-      } else {
-        goNextQuestion(um, ps.qi);
-      }
-    }
+    goNextQuestion({ text, isBot: false }, ps.qi);
   };
 
-  const onCalendar = (cal: ChatInterviewCalendar) => {
-    push([
-      { text: calLabel(cal), isBot: false },
-      { text: cal.confirmedMessage || '面接が確定しました。', isBot: true },
-    ], { phase: 'done' });
+  const onMethodSelect = (method: string) => {
+    if (!lead) return;
+    const cal = lead.interviewCalendars[ps.calIdx];
+    const msgs: PMsg[] = [{ text: method, isBot: false }];
+    if (cal.methodDecidedMessage) msgs.push({ text: cal.methodDecidedMessage, isBot: true });
+    if (cal.preDateMessage) msgs.push({ text: cal.preDateMessage, isBot: true });
+    push(msgs, { phase: 'calendar' });
+  };
+
+  const onCalendarFree = (text: string) => {
+    if (!lead) return;
+    const cal = lead.interviewCalendars[ps.calIdx];
+    const msgs: PMsg[] = [{ text, isBot: false }];
+    if (cal.confirmedMessage) msgs.push({ text: cal.confirmedMessage, isBot: true });
+    if (cal.chatEndMessage) msgs.push({ text: cal.chatEndMessage, isBot: true });
+    push(msgs, { phase: 'done' });
   };
 
   const curQ = lead?.questions[ps.qi];
-  const curSubQ = curQ ? (curQ.subQuestions || [])[ps.sqi] : undefined;
+  const curCal = lead?.interviewCalendars[ps.calIdx];
 
   let btns: React.ReactNode = null;
   if (ps.phase === 'question' && curQ) {
@@ -403,7 +360,7 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
       btns = (
         <div style={{ padding: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
           {curQ.choices.map(c => (
-            <button key={c.id} onClick={() => onChoice(curQ, c, false)} style={{
+            <button key={c.id} onClick={() => onChoice(curQ, c)} style={{
               padding: '5px 12px', borderRadius: '999px', cursor: 'pointer', fontSize: '0.78rem',
               border: `1px solid ${c.judgment === 'ng' ? '#ef4444' : '#3b82f6'}`,
               background: '#fff', color: c.judgment === 'ng' ? '#ef4444' : '#3b82f6',
@@ -412,33 +369,19 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
         </div>
       );
     }
-  } else if (ps.phase === 'subquestion' && curSubQ) {
-    if (curSubQ.answerType === 'freetext') {
-      btns = <FreetextInput onSend={onFree} />;
-    } else {
-      btns = (
-        <div style={{ padding: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-          {curSubQ.choices.map(c => (
-            <button key={c.id} onClick={() => onChoice(curSubQ, c, true)} style={{
-              padding: '5px 12px', borderRadius: '999px', cursor: 'pointer', fontSize: '0.78rem',
-              border: `1px solid ${c.judgment === 'ng' ? '#ef4444' : '#7c3aed'}`,
-              background: '#fff', color: c.judgment === 'ng' ? '#ef4444' : '#7c3aed',
-            }}>{c.label}</button>
-          ))}
-        </div>
-      );
-    }
-  } else if (ps.phase === 'calendar') {
+  } else if (ps.phase === 'method' && curCal) {
     btns = (
       <div style={{ padding: '8px', borderTop: '1px solid #e5e7eb', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-        {lead?.interviewCalendars.map(cal => (
-          <button key={cal.id} onClick={() => onCalendar(cal)} style={{
-            padding: '5px 12px', border: '1px solid #10b981', borderRadius: '999px',
-            background: '#fff', color: '#10b981', cursor: 'pointer', fontSize: '0.78rem',
-          }}>{calLabel(cal)}</button>
+        {curCal.methods.map(m => (
+          <button key={m} onClick={() => onMethodSelect(m)} style={{
+            padding: '5px 12px', border: '1px solid #f59e0b', borderRadius: '999px',
+            background: '#fff', color: '#d97706', cursor: 'pointer', fontSize: '0.78rem',
+          }}>{m}</button>
         ))}
       </div>
     );
+  } else if (ps.phase === 'calendar') {
+    btns = <FreetextInput onSend={onCalendarFree} />;
   }
 
   return (
@@ -497,7 +440,7 @@ const LeadEditor: React.FC<{
 
   const updQ = (i: number, q: ChatLeadQuestion) => { const qs = [...lead.questions]; qs[i] = q; upd({ questions: qs }); };
   const delQ = (i: number) => upd({ questions: lead.questions.filter((_, j) => j !== i) });
-  const addQ = () => upd({ questions: [...lead.questions, { id: newId(lead.questions), content: '', answerType: 'single', choices: [], subQuestions: [] }] });
+  const addQ = () => upd({ questions: [...lead.questions, { id: newId(lead.questions), content: '', answerType: 'single', choices: [] }] });
   const moveQ = (from: number, to: number) => {
     const qs = [...lead.questions]; [qs[from], qs[to]] = [qs[to], qs[from]]; upd({ questions: qs });
   };
@@ -507,14 +450,13 @@ const LeadEditor: React.FC<{
   const addCal = () => upd({
     interviewCalendars: [...lead.interviewCalendars, {
       id: newId(lead.interviewCalendars), baseName: bases[0] || '',
-      method: '対面', preDateMessage: '', chatEndMessage: '', confirmedMessage: '', methodDecidedMessage: '',
+      methods: ['対面'], preDateMessage: '', chatEndMessage: '', confirmedMessage: '', methodDecidedMessage: '',
     }],
   });
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 32px', minWidth: 0 }}>
 
-      {/* ── リード情報 ── */}
       <span style={secStyle()}>リード情報</span>
       <div style={{ display: 'grid', gap: '10px', marginBottom: '10px' }}>
         <div>
@@ -529,7 +471,6 @@ const LeadEditor: React.FC<{
         </div>
       </div>
 
-      {/* ── 質問設定 ── */}
       <span style={secStyle()}>質問設定</span>
       {lead.questions.map((q, i) => (
         <QuestionCard key={q.id} q={q} idx={i} total={lead.questions.length}
@@ -541,7 +482,6 @@ const LeadEditor: React.FC<{
         + 質問追加
       </button>
 
-      {/* ── 選考NGメッセージ ── */}
       <span style={secStyle()}>選考NGメッセージ</span>
       <div style={{ display: 'grid', gap: '10px' }}>
         <div>
@@ -556,7 +496,6 @@ const LeadEditor: React.FC<{
         </div>
       </div>
 
-      {/* ── 面接方法カレンダー ── */}
       <span style={secStyle()}>面接方法カレンダー</span>
       {lead.interviewCalendars.map((cal, i) => (
         <CalendarCard key={cal.id} cal={cal} bases={bases} idx={i}
@@ -567,7 +506,6 @@ const LeadEditor: React.FC<{
         + 面接方法カレンダー追加
       </button>
 
-      {/* ── アクション ── */}
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
         <button onClick={onDelete}
           style={{ padding: '8px 24px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: '8px', cursor: 'pointer', fontSize: '0.875rem' }}>
@@ -621,7 +559,6 @@ const ChatbotManagement: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
-      {/* ── 左: リスト ── */}
       <div style={{ width: '220px', minWidth: '220px', borderRight: '1px solid #e5e7eb', padding: '20px 16px 16px', display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <span style={{ fontWeight: 700, fontSize: '1rem', color: '#1f2937' }}>チャット設定</span>
@@ -643,7 +580,6 @@ const ChatbotManagement: React.FC = () => {
         ))}
       </div>
 
-      {/* ── 中央: エディタ ── */}
       {selected ? (
         <LeadEditor key={selected.id} lead={selected} bases={bases} onChange={onChange} onDelete={deleteLead} />
       ) : (
@@ -652,7 +588,6 @@ const ChatbotManagement: React.FC = () => {
         </div>
       )}
 
-      {/* ── 右: プレビュー ── */}
       <div style={{ padding: '20px 20px 20px 0' }}>
         <ChatPreview lead={selected} />
       </div>

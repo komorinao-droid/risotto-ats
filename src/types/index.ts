@@ -216,25 +216,17 @@ export interface ChatLeadChoice {
   action: 'next' | 'ng_immediate';
 }
 
-export interface ChatLeadSubQuestion {
-  id: number;
-  content: string;
-  answerType: 'single' | 'multiple' | 'freetext';
-  choices: ChatLeadChoice[];
-}
-
 export interface ChatLeadQuestion {
   id: number;
   content: string;
   answerType: 'single' | 'multiple' | 'freetext';
   choices: ChatLeadChoice[];
-  subQuestions?: ChatLeadSubQuestion[];
 }
 
 export interface ChatInterviewCalendar {
   id: number;
   baseName: string;
-  method: string;
+  methods: string[];
   preDateMessage: string;
   chatEndMessage: string;
   confirmedMessage: string;

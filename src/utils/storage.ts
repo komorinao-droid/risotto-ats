@@ -361,7 +361,7 @@ function getDemoData(): ClientData {
           {
             id: 1,
             baseName: '大阪支社',
-            method: '対面',
+            methods: ['対面', 'WEB'],
             preDateMessage: '面接希望日程（第1〜第3）を入力してください。\n※第1・第2希望は必須\n※日付と面接可能時間帯の順でご入力ください。',
             chatEndMessage: 'ご入力ありがとうございました。',
             confirmedMessage: 'ご希望の日程から面接日を調整し、確定後に再度ご連絡します。',
