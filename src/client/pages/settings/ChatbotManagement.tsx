@@ -276,7 +276,6 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
     const cal = lead.interviewCalendars[0];
     // 面接方法が1つなら自動確定、2つ以上なら選択
     if (cal.methods.length === 1) {
-      const methodMsg = cal.methodDecidedMessage || '';
       const msgs: PMsg[] = [um];
       if (cal.preDateMessage) msgs.push({ text: cal.preDateMessage, isBot: true });
       setPs(p => ({ ...p, msgs: [...p.msgs, ...msgs], phase: 'calendar', calIdx: 0 }));
@@ -316,7 +315,7 @@ const ChatPreview: React.FC<{ lead: ChatLeadSetting | null }> = ({ lead }) => {
     }
   };
 
-  const onChoice = (q: ChatLeadQuestion, c: ChatLeadChoice) => {
+  const onChoice = (_q: ChatLeadQuestion, c: ChatLeadChoice) => {
     if (!lead) return;
     const um: PMsg = { text: c.label, isBot: false };
     if (c.action === 'ng_immediate') {
