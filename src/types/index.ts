@@ -207,6 +207,50 @@ export interface SlotSetting {
   };
 }
 
+// ─── チャット設定（リード）新設計 ────────────────────────────────────────────
+
+export interface ChatLeadChoice {
+  id: number;
+  label: string;
+  judgment: 'ok' | 'ng';
+  action: 'next' | 'ng_immediate';
+}
+
+export interface ChatLeadSubQuestion {
+  id: number;
+  content: string;
+  answerType: 'single' | 'multiple' | 'freetext';
+  choices: ChatLeadChoice[];
+}
+
+export interface ChatLeadQuestion {
+  id: number;
+  content: string;
+  answerType: 'single' | 'multiple' | 'freetext';
+  choices: ChatLeadChoice[];
+  subQuestions?: ChatLeadSubQuestion[];
+}
+
+export interface ChatInterviewCalendar {
+  id: number;
+  baseName: string;
+  method: string;
+  preDateMessage: string;
+  chatEndMessage: string;
+  confirmedMessage: string;
+  methodDecidedMessage: string;
+}
+
+export interface ChatLeadSetting {
+  id: number;
+  leadName: string;
+  startMessage: string;
+  questions: ChatLeadQuestion[];
+  ngMessageImmediate: string;
+  ngMessageAfterAll: string;
+  interviewCalendars: ChatInterviewCalendar[];
+}
+
 // チャットボット
 export interface ChatButton {
   label: string;
@@ -251,4 +295,5 @@ export interface ClientData {
   slotSettings: { [baseName: string]: SlotSetting };
   chatScenarios: ChatScenario[];
   chatQuestionGroups: ChatQuestionGroup[];
+  chatLeadSettings?: ChatLeadSetting[];
 }

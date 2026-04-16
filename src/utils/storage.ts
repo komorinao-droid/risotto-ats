@@ -311,6 +311,65 @@ function getDemoData(): ClientData {
     slotSettings,
     chatScenarios,
     chatQuestionGroups,
+    chatLeadSettings: [
+      {
+        id: 1,
+        leadName: '警備スタッフ応募フロー',
+        startMessage: 'この度はご応募いただきありがとうございます。\n簡単な質問と面接のご案内を進めさせていただきますので、下記の案内に沿ってご入力をお願いします。',
+        questions: [
+          {
+            id: 1,
+            content: 'ご希望の「週の勤務日数」を選択してください。',
+            answerType: 'single' as const,
+            choices: [
+              { id: 1, label: '週2日程度', judgment: 'ok' as const, action: 'next' as const },
+              { id: 2, label: '週3日程度', judgment: 'ok' as const, action: 'next' as const },
+              { id: 3, label: '週4日程度', judgment: 'ok' as const, action: 'next' as const },
+              { id: 4, label: '週5日程度', judgment: 'ok' as const, action: 'next' as const },
+            ],
+            subQuestions: [],
+          },
+          {
+            id: 2,
+            content: '土日の勤務に関して、勤務可能な曜日を選択してください。',
+            answerType: 'multiple' as const,
+            choices: [
+              { id: 1, label: '土曜', judgment: 'ok' as const, action: 'next' as const },
+              { id: 2, label: '日曜', judgment: 'ok' as const, action: 'next' as const },
+              { id: 3, label: '土日どちらも可能', judgment: 'ok' as const, action: 'next' as const },
+              { id: 4, label: '土日どちらも不可', judgment: 'ng' as const, action: 'ng_immediate' as const },
+            ],
+            subQuestions: [],
+          },
+          {
+            id: 3,
+            content: 'いままでの警備・設備等の仕事経験を教えてください。\n該当するものを全て選択してください。',
+            answerType: 'multiple' as const,
+            choices: [
+              { id: 1, label: '警備経験3年未満', judgment: 'ok' as const, action: 'next' as const },
+              { id: 2, label: '施設警備3年以上', judgment: 'ok' as const, action: 'next' as const },
+              { id: 3, label: '設備員経験3年以上', judgment: 'ok' as const, action: 'next' as const },
+              { id: 4, label: '自火報盤・中央監視盤を扱う', judgment: 'ok' as const, action: 'next' as const },
+              { id: 5, label: '特になし', judgment: 'ok' as const, action: 'next' as const },
+            ],
+            subQuestions: [],
+          },
+        ],
+        ngMessageImmediate: '大変申し訳ございませんが、ご希望の条件では採用が難しい状況です。またの機会にご応募いただければ幸いです。',
+        ngMessageAfterAll: '選考の結果、今回はご希望に沿えませんでした。何卒ご了承ください。',
+        interviewCalendars: [
+          {
+            id: 1,
+            baseName: '大阪支社',
+            method: '対面',
+            preDateMessage: '面接希望日程（第1〜第3）を入力してください。\n※第1・第2希望は必須\n※日付と面接可能時間帯の順でご入力ください。',
+            chatEndMessage: 'ご入力ありがとうございました。',
+            confirmedMessage: 'ご希望の日程から面接日を調整し、確定後に再度ご連絡します。',
+            methodDecidedMessage: '入力ありがとうございます。次に面接時間の調整をします。',
+          },
+        ],
+      },
+    ],
   };
 }
 
