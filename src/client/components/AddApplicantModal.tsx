@@ -45,7 +45,7 @@ const requiredMark: React.CSSProperties = {
 };
 
 const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }) => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, updateClientData, logAction } = useAuth();
 
   const [name, setName] = useState('');
   const [furigana, setFurigana] = useState('');
@@ -284,6 +284,7 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       });
       return { ...data, applicants: [...updatedApplicants, applicant] };
     });
+    logAction('applicant', '応募者追加', applicant.name || '(名前なし)', applicant.job || undefined);
 
     if (exclusionMsg) {
       // Keep modal open to show alert, then close

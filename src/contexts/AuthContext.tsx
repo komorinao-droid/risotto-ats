@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import type { Client, ClientData } from '@/types';
+import type { Client, ClientData, ClientOperationLog } from '@/types';
 import { storage, getDefaultClientData } from '@/utils/storage';
+import { pushClientLog } from '@/utils/clientLog';
 
 export interface AuthState {
   isLoggedIn: boolean;
@@ -8,11 +9,14 @@ export interface AuthState {
   clientData: ClientData | null;
 }
 
+type LogCategory = ClientOperationLog['category'];
+
 interface AuthContextValue extends AuthState {
   login: (clientId: string, password: string) => boolean;
   logout: () => void;
   updateClientData: (updater: (data: ClientData) => ClientData) => void;
   reloadClientData: () => void;
+  logAction: (category: LogCategory, action: string, target: string, detail?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -64,15 +68,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setClient(found);
       loadClientData(found);
+      // ログ記録
+      const dataId = found.accountType === 'child' && found.parentId ? found.parentId : found.id;
+      const operator = found.accountType === 'parent'
+        ? (found.contactName || found.companyName)
+        : `${found.companyName}${found.baseName ? ' / ' + found.baseName : ''}`;
+      pushClientLog(dataId, {
+        operator,
+        category: 'auth',
+        action: 'ログイン',
+        target: found.companyName,
+      });
       return true;
     },
     [loadClientData]
   );
 
   const logout = useCallback(() => {
+    if (client) {
+      const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const operator = client.accountType === 'parent'
+        ? (client.contactName || client.companyName)
+        : `${client.companyName}${client.baseName ? ' / ' + client.baseName : ''}`;
+      pushClientLog(dataId, {
+        operator,
+        category: 'auth',
+        action: 'ログアウト',
+        target: client.companyName,
+      });
+    }
     setClient(null);
     setClientData(null);
-  }, []);
+  }, [client]);
+
+  const logAction = useCallback(
+    (category: LogCategory, action: string, target: string, detail?: string) => {
+      if (!client) return;
+      const dataId = resolveClientId(client);
+      const operator = client.accountType === 'parent'
+        ? (client.contactName || client.companyName)
+        : `${client.companyName}${client.baseName ? ' / ' + client.baseName : ''}`;
+      pushClientLog(dataId, { operator, category, action, target, detail });
+    },
+    [client, resolveClientId]
+  );
 
   const updateClientData = useCallback(
     (updater: (data: ClientData) => ClientData) => {
@@ -124,6 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           filtercond: true,
           mailtemplate: true,
           exclusion: true,
+          chatbot: true,
         },
         members: [
           { id: 1, name: '管理者 太郎', email: 'admin@risotto.co.jp', phone: '09012345678', notifyEmail: true, notifySms: false },
@@ -147,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     updateClientData,
     reloadClientData,
+    logAction,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

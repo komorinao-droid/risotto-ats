@@ -540,8 +540,10 @@ const LeadEditor: React.FC<{
 // ── メインコンポーネント ──────────────────────────────────────────────────────
 
 const ChatbotManagement: React.FC = () => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, updateClientData, client } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const canEdit = !client || client.accountType === 'parent' || client.permissions.chatbot;
 
   const leads = clientData?.chatLeadSettings || [];
   const bases = (clientData?.bases || []).map(b => b.name);
@@ -584,6 +586,10 @@ const ChatbotManagement: React.FC = () => {
     }));
     setSelectedId(null);
   };
+
+  if (!canEdit) {
+    return <div style={{ padding: '2rem', color: '#6b7280' }}>この機能へのアクセス権がありません。</div>;
+  }
 
   return (
     <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 64px)', overflow: 'hidden' }}>

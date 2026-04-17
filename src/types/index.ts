@@ -160,6 +160,17 @@ export interface Job {
   color: string;
 }
 
+// クライアント操作ログ
+export interface ClientOperationLog {
+  id: string;
+  timestamp: string;
+  operator: string;
+  category: 'applicant' | 'email' | 'auth' | 'other';
+  action: string;
+  target: string;
+  detail?: string;
+}
+
 // クライアント権限
 export interface ClientPermissions {
   status: boolean;
@@ -170,6 +181,7 @@ export interface ClientPermissions {
   filtercond: boolean;
   mailtemplate: boolean;
   exclusion: boolean;
+  chatbot: boolean;
 }
 
 // クライアント

@@ -159,7 +159,7 @@ const IMPORT_FIELDS = [
 // ─── Main component ───
 const ApplicantList: React.FC = () => {
   const navigate = useNavigate();
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, updateClientData, logAction } = useAuth();
 
   // ─── State ───
   const [page, setPage] = useState(1);
@@ -323,14 +323,22 @@ const ApplicantList: React.FC = () => {
   // ─── Inline status change ───
   const handleStatusChange = useCallback(
     (applicantId: number, newStatus: string) => {
-      updateClientData((data) => ({
-        ...data,
-        applicants: data.applicants.map((a) =>
-          a.id === applicantId ? { ...a, stage: newStatus } : a
-        ),
-      }));
+      let prevStage = '';
+      let applicantName = '';
+      updateClientData((data) => {
+        const target = data.applicants.find((a) => a.id === applicantId);
+        prevStage = target?.stage || '';
+        applicantName = target?.name || String(applicantId);
+        return {
+          ...data,
+          applicants: data.applicants.map((a) =>
+            a.id === applicantId ? { ...a, stage: newStatus } : a
+          ),
+        };
+      });
+      logAction('applicant', 'ステータス変更', applicantName, `${prevStage} → ${newStatus}`);
     },
-    [updateClientData]
+    [updateClientData, logAction]
   );
 
   // ─── Reset filters ───
@@ -454,6 +462,7 @@ const ApplicantList: React.FC = () => {
         ...data,
         applicants: [...data.applicants, ...newApplicants],
       }));
+      logAction('applicant', '応募者一括取込', `${newApplicants.length}件`);
     }
 
     setImportModalOpen(false);
@@ -551,10 +560,10 @@ const ApplicantList: React.FC = () => {
           }}
         >
           <span style={{ fontWeight: 500 }}>{selectedIds.size}件選択中</span>
-          <button style={btnStyle} onClick={() => alert('SMS一括送信 (placeholder)')}>
+          <button style={btnStyle} onClick={() => { logAction('email', 'SMS一括送信', `${selectedIds.size}件`); alert('SMS一括送信 (placeholder)'); }}>
             SMS送信
           </button>
-          <button style={btnStyle} onClick={() => alert('メール一括送信 (placeholder)')}>
+          <button style={btnStyle} onClick={() => { logAction('email', 'メール一括送信', `${selectedIds.size}件`); alert('メール一括送信 (placeholder)'); }}>
             メール送信
           </button>
           <button

@@ -33,7 +33,7 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/filter', label: 'フィルタ条件', icon: '', permission: 'filtercond' },
       { path: '/settings/exclusion', label: '除外リスト', icon: '', permission: 'exclusion' },
       { path: '/settings/email-templates', label: 'メールテンプレート', icon: '', permission: 'mailtemplate' },
-      { path: '/settings/chatbot', label: 'チャットボット', icon: '' },
+      { path: '/settings/chatbot', label: 'チャットボット', icon: '', permission: 'chatbot' },
       { path: '/settings/account', label: 'アカウント', icon: '' },
     ],
   },

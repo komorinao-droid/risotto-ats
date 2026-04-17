@@ -135,7 +135,7 @@ interface ApplicantDetailProps {
 }
 
 const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, onBack }) => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, updateClientData, logAction } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(propId ?? getApplicantIdFromURL());
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -182,6 +182,7 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
       applicants: data.applicants.filter((a) => a.id !== applicant.id),
       events: data.events.filter((e) => e.applicantId !== applicant.id),
     }));
+    logAction('applicant', '応募者削除', applicant.name || String(applicant.id));
     setDeleteConfirm(false);
     if (onBack) onBack();
     else {
@@ -467,6 +468,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
   updateApplicant,
   updateClientData,
 }) => {
+  const { logAction } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Applicant>>({});
   const [birthDateInput, setBirthDateInput] = useState('');
@@ -529,6 +531,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
       ...a,
       ...(editData as Partial<Applicant>),
     }));
+    logAction('applicant', '応募者編集', applicant.name || String(applicant.id));
     setIsEditing(false);
     setEditData({});
     setBaseChangeWarning('');
@@ -580,7 +583,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
   }
 
   function handleStatusChange(newStatus: string) {
+    const prev = applicant.stage;
     updateApplicant((a) => ({ ...a, stage: newStatus, subStatus: '' }));
+    logAction('applicant', 'ステータス変更', applicant.name || String(applicant.id), `${prev} → ${newStatus}`);
   }
 
   function handleSubStatusChange(sub: string) {

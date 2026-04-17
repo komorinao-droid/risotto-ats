@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
-import type { Client, ClientData, ClientPermissions } from '@/types';
+import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
+import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
 
 /* ============================================================
    定数 / ヘルパー
@@ -31,6 +32,7 @@ const PERMISSION_LABELS: Record<keyof ClientPermissions, string> = {
   filtercond: 'フィルタ条件',
   mailtemplate: 'メールテンプレート',
   exclusion: '除外リスト',
+  chatbot: 'チャットボット管理',
 };
 
 const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS) as (keyof ClientPermissions)[];
@@ -38,6 +40,7 @@ const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS) as (keyof ClientPermissio
 const defaultPermissions = (): ClientPermissions => ({
   status: true, source: true, base: true, job: true,
   hearing: true, filtercond: true, mailtemplate: true, exclusion: true,
+  chatbot: true,
 });
 
 function emptyClient(): Client {
@@ -72,15 +75,6 @@ interface AdminAccount {
   createdAt: string;
 }
 
-interface OperationLog {
-  id: string;
-  timestamp: string;
-  operator: string;
-  action: string;
-  target: string;
-  detail?: string;
-}
-
 interface MediaIntegration {
   id: string;
   name: string;
@@ -97,21 +91,8 @@ interface MediaIntegration {
 /* ============================================================
    管理用ストレージヘルパー
    ============================================================ */
-const ADMIN_LOGS_KEY = 'risotto:admin:logs';
 const ADMIN_ACCOUNTS_KEY = 'risotto:admin:accounts';
 const ADMIN_MEDIA_KEY = 'risotto:admin:media';
-
-function getLogs(): OperationLog[] {
-  try { return JSON.parse(localStorage.getItem(ADMIN_LOGS_KEY) || '[]'); } catch { return []; }
-}
-function saveLogs(logs: OperationLog[]) {
-  localStorage.setItem(ADMIN_LOGS_KEY, JSON.stringify(logs));
-}
-function pushLog(operator: string, action: string, target: string, detail?: string) {
-  const logs = getLogs();
-  logs.unshift({ id: String(Date.now()), timestamp: new Date().toISOString(), operator, action, target, detail });
-  saveLogs(logs.slice(0, 1000));
-}
 
 function getAdminAccounts(): AdminAccount[] {
   try {
@@ -744,6 +725,106 @@ const ClientDetail: React.FC<{
           </div>
         )}
       </div>
+
+      {/* 操作ログ */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <h3 style={sectionTitle}>操作ログ（このクライアント）</h3>
+        <ClientLogsSection client={client} />
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   クライアント詳細内の操作ログセクション
+   ============================================================ */
+const CATEGORY_LABELS: Record<ClientOperationLog['category'], { label: string; color: string; bg: string }> = {
+  applicant: { label: '応募者', color: '#1D4ED8', bg: '#DBEAFE' },
+  email: { label: 'メール', color: '#9333EA', bg: '#F3E8FF' },
+  auth: { label: '認証', color: '#15803D', bg: '#DCFCE7' },
+  other: { label: 'その他', color: '#6B7280', bg: '#F3F4F6' },
+};
+
+const ClientLogTable: React.FC<{ logs: ClientOperationLog[]; totalCount?: number }> = ({ logs, totalCount }) => {
+  const headers = ['日時', '操作者', 'カテゴリ', 'アクション', '対象', '詳細'];
+  return (
+    <div style={{ ...cardStyle, overflow: 'hidden' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#F9FAFB' }}>
+            {headers.map(h => (
+              <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {logs.length === 0 && (
+            <tr><td colSpan={headers.length} style={{ textAlign: 'center', padding: '2.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>ログがありません</td></tr>
+          )}
+          {logs.map(l => {
+            const cat = CATEGORY_LABELS[l.category] || CATEGORY_LABELS.other;
+            return (
+              <tr key={l.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                <td style={{ padding: '0.625rem 1rem', fontSize: '0.75rem', color: '#6b7280', whiteSpace: 'nowrap' }}>{formatLogTimestamp(l.timestamp)}</td>
+                <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 500 }}>{l.operator}</td>
+                <td style={{ padding: '0.625rem 1rem' }}>
+                  <span style={{ padding: '0.125rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, backgroundColor: cat.bg, color: cat.color }}>{cat.label}</span>
+                </td>
+                <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem' }}>{l.action}</td>
+                <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem' }}>{l.target}</td>
+                <td style={{ padding: '0.625rem 1rem', fontSize: '0.75rem', color: '#6b7280' }}>{l.detail || '-'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {totalCount !== undefined && (
+        <div style={{ padding: '0.625rem 1rem', borderTop: '1px solid #e5e7eb', fontSize: '0.75rem', color: '#9ca3af' }}>
+          {logs.length} 件 / 合計 {totalCount} 件
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ClientLogsSection: React.FC<{ client: Client }> = ({ client }) => {
+  // 子アカウントは親IDのバケツを参照
+  const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+  const [logs, setLogs] = useState<ClientOperationLog[]>([]);
+  const [filterCategory, setFilterCategory] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [search, setSearch] = useState<string>('');
+
+  useEffect(() => { setLogs(getClientLogs(dataId)); }, [dataId]);
+
+  const filtered = useMemo(() => {
+    return logs.filter(l => {
+      if (filterCategory && l.category !== filterCategory) return false;
+      if (filterDate && !l.timestamp.startsWith(filterDate)) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return l.action.toLowerCase().includes(q)
+          || l.target.toLowerCase().includes(q)
+          || l.operator.toLowerCase().includes(q)
+          || (l.detail || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [logs, filterCategory, filterDate, search]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <input type="text" placeholder="キーワード検索..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width: '200px' }} />
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
+          <option value="">全カテゴリ</option>
+          {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+        <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: '150px' }} />
+      </div>
+      <ClientLogTable logs={filtered.slice(0, 100)} totalCount={filtered.length} />
     </div>
   );
 };
@@ -1201,7 +1282,7 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
 /* ============================================================
    初期データ設定
    ============================================================ */
-const InitDataPage: React.FC<{ clients: Client[]; onLog: (action: string, target: string, detail?: string) => void }> = ({ clients, onLog }) => {
+const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
   const [srcId, setSrcId] = useState('');
   const [dstIds, setDstIds] = useState<string[]>([]);
   const [copyItems, setCopyItems] = useState({ statuses: true, sources: true, bases: true, jobs: true, hearingItems: true, mailTemplates: false, filterConditions: false });
@@ -1250,8 +1331,6 @@ const InitDataPage: React.FC<{ clients: Client[]; onLog: (action: string, target
       } catch { /* skip */ }
     }
 
-    const srcClient = clients.find(c => c.id === srcId);
-    onLog('初期データコピー', `${srcClient?.companyName || srcId} → ${dstIds.length}社`, Object.entries(copyItems).filter(([,v])=>v).map(([k])=>k).join(','));
     setResult(`${successCount}社へのデータコピーが完了しました`);
     setDstIds([]);
   };
@@ -1321,100 +1400,9 @@ const InitDataPage: React.FC<{ clients: Client[]; onLog: (action: string, target
 };
 
 /* ============================================================
-   操作ログ
-   ============================================================ */
-const LogsPage: React.FC = () => {
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [filterAction, setFilterAction] = useState('');
-  const [filterDate, setFilterDate] = useState('');
-  const [search, setSearch] = useState('');
-
-  useEffect(() => { setLogs(getLogs()); }, []);
-
-  const actionTypes = useMemo(() => {
-    const set = new Set(logs.map(l => l.action));
-    return Array.from(set).sort();
-  }, [logs]);
-
-  const filtered = useMemo(() => {
-    return logs.filter(l => {
-      if (filterAction && l.action !== filterAction) return false;
-      if (filterDate && !l.timestamp.startsWith(filterDate)) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return l.action.includes(q) || l.target.includes(q) || l.operator.includes(q) || (l.detail || '').includes(q);
-      }
-      return true;
-    });
-  }, [logs, filterAction, filterDate, search]);
-
-  const handleClear = () => {
-    if (!window.confirm('操作ログをすべて削除しますか？')) return;
-    saveLogs([]);
-    setLogs([]);
-  };
-
-  const formatTimestamp = (ts: string) => {
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
-  return (
-    <div style={{ padding: '1.5rem 2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>操作ログ</h2>
-        <button onClick={handleClear} style={btnDanger}>ログをクリア</button>
-      </div>
-
-      {/* フィルター */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <input type="text" placeholder="キーワード検索..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width: '200px' }} />
-        <select value={filterAction} onChange={e => setFilterAction(e.target.value)} style={{ ...inputStyle, width: '160px' }}>
-          <option value="">全アクション</option>
-          {actionTypes.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...inputStyle, width: '150px' }} />
-      </div>
-
-      <div style={{ ...cardStyle, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#F9FAFB' }}>
-              {['日時', '操作者', 'アクション', '対象', '詳細'].map(h => (
-                <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>ログがありません</td></tr>
-            )}
-            {filtered.map(l => (
-              <tr key={l.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: '0.625rem 1rem', fontSize: '0.75rem', color: '#6b7280', whiteSpace: 'nowrap' }}>{formatTimestamp(l.timestamp)}</td>
-                <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', fontWeight: 500 }}>{l.operator}</td>
-                <td style={{ padding: '0.625rem 1rem' }}>
-                  <span style={{ padding: '0.125rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#FFF7ED', color: '#C2570C' }}>{l.action}</span>
-                </td>
-                <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem' }}>{l.target}</td>
-                <td style={{ padding: '0.625rem 1rem', fontSize: '0.75rem', color: '#6b7280' }}>{l.detail || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ padding: '0.625rem 1rem', borderTop: '1px solid #e5e7eb', fontSize: '0.75rem', color: '#9ca3af' }}>
-          {filtered.length} 件 / 合計 {logs.length} 件
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ============================================================
    管理者アカウント管理
    ============================================================ */
-const AdminAccountsPage: React.FC<{ onLog: (action: string, target: string) => void }> = ({ onLog }) => {
+const AdminAccountsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminAccount | null>(null);
@@ -1454,10 +1442,8 @@ const AdminAccountsPage: React.FC<{ onLog: (action: string, target: string) => v
     let updated: AdminAccount[];
     if (editing) {
       updated = accounts.map(a => a.id === editing.id ? form : a);
-      onLog('管理者アカウント編集', form.name);
     } else {
       updated = [...accounts, form];
-      onLog('管理者アカウント追加', form.name);
     }
     saveAdminAccounts(updated);
     setAccounts(updated);
@@ -1473,7 +1459,6 @@ const AdminAccountsPage: React.FC<{ onLog: (action: string, target: string) => v
     const updated = accounts.filter(a => a.id !== acc.id);
     saveAdminAccounts(updated);
     setAccounts(updated);
-    onLog('管理者アカウント削除', acc.name);
   };
 
   const f = (key: keyof AdminAccount, val: string) => {
@@ -1583,9 +1568,8 @@ function simulateConnectionCheck(m: MediaIntegration): Promise<'ok' | 'error'> {
    媒体連携管理
    ============================================================ */
 const MediaIntegrationPage: React.FC<{
-  onLog: (action: string, target: string) => void;
   onConnectionError?: (count: number) => void;
-}> = ({ onLog, onConnectionError }) => {
+}> = ({ onConnectionError }) => {
   const [integrations, setIntegrations] = useState<MediaIntegration[]>([]);
   const [form, setForm] = useState<MediaIntegration>({ id: '', name: '', type: 'custom', status: 'inactive' });
   const [modalOpen, setModalOpen] = useState(false);
@@ -1620,9 +1604,6 @@ const MediaIntegrationPage: React.FC<{
             onConnectionError?.(errCount);
             return updated;
           });
-          if (result === 'error') {
-            onLog('接続エラー検出', `${m.name}（自動チェック）`);
-          }
         });
       });
     }, 30000);
@@ -1642,8 +1623,6 @@ const MediaIntegrationPage: React.FC<{
     });
     setCheckingIds(prev => { const s = new Set(prev); s.delete(m.id); return s; });
     setDismissedAlert(false);
-    if (result === 'error') onLog('接続テスト失敗', m.name);
-    else onLog('接続テスト成功', m.name);
   };
 
   const openEdit = (m: MediaIntegration) => {
@@ -1655,7 +1634,6 @@ const MediaIntegrationPage: React.FC<{
     const updated = integrations.map(m => m.id === form.id ? { ...form, connectionStatus: undefined, lastChecked: undefined } : m);
     saveMediaIntegrations(updated);
     setIntegrations(updated);
-    onLog('媒体連携設定変更', form.name);
     setModalOpen(false);
   };
 
@@ -1667,8 +1645,6 @@ const MediaIntegrationPage: React.FC<{
     setIntegrations(updated);
     const errCount = updated.filter(x => x.status === 'active' && x.connectionStatus === 'error').length;
     onConnectionError?.(errCount);
-    const target = updated.find(m => m.id === id);
-    onLog('媒体連携ステータス変更', `${target?.name || id}: ${target?.status}`);
   };
 
   const validateNew = () => {
@@ -1685,7 +1661,6 @@ const MediaIntegrationPage: React.FC<{
     const updated = [...integrations, newForm];
     saveMediaIntegrations(updated);
     setIntegrations(updated);
-    onLog('媒体連携追加', newForm.name);
     setAddModal(false);
     setNewForm({ id: '', name: '', type: 'custom', status: 'inactive' });
     setErrors({});
@@ -1698,7 +1673,6 @@ const MediaIntegrationPage: React.FC<{
     setIntegrations(updated);
     const errCount = updated.filter(x => x.status === 'active' && x.connectionStatus === 'error').length;
     onConnectionError?.(errCount);
-    onLog('媒体連携削除', m.name);
   };
 
   const handleCheckAll = () => {
@@ -1881,7 +1855,7 @@ const MediaIntegrationPage: React.FC<{
    ============================================================ */
 const AdminApp: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'clients' | 'detail' | 'add' | 'contracts' | 'initdata' | 'logs' | 'adminaccounts' | 'media'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'clients' | 'detail' | 'add' | 'contracts' | 'initdata' | 'adminaccounts' | 'media'>('dashboard');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
 
@@ -1898,10 +1872,6 @@ const AdminApp: React.FC = () => {
     const integrations = getMediaIntegrations();
     return integrations.filter(m => m.status === 'active' && m.connectionStatus === 'error').length;
   });
-
-  const addLogEntry = useCallback((action: string, target: string, detail?: string) => {
-    pushLog('システム管理者', action, target, detail);
-  }, []);
 
   // クライアント読み込み
   const loadClients = useCallback(() => {
@@ -1934,8 +1904,6 @@ const AdminApp: React.FC = () => {
       setCurrentView('contracts');
     } else if (view === 'initdata') {
       setCurrentView('initdata');
-    } else if (view === 'logs') {
-      setCurrentView('logs');
     } else if (view === 'adminaccounts') {
       setCurrentView('adminaccounts');
     } else if (view === 'media') {
@@ -1954,7 +1922,6 @@ const AdminApp: React.FC = () => {
       updated = [...clients, client];
     }
     saveAndReload(updated);
-    addLogEntry(existing >= 0 ? 'クライアント編集' : 'クライアント追加', client.companyName, `ID: ${client.id}`);
     setModalOpen(false);
     setEditingClient(null);
     setDefaultParentId(undefined);
@@ -1984,7 +1951,6 @@ const AdminApp: React.FC = () => {
       onConfirm: () => {
         const updated = clients.map(cl => cl.id === id ? { ...cl, status: newStatus as 'active' | 'inactive' } : cl);
         saveAndReload(updated);
-        addLogEntry('ステータス変更', c.companyName, newStatus);
         setConfirmDialog(null);
       },
     });
@@ -2001,7 +1967,6 @@ const AdminApp: React.FC = () => {
         const idsToDelete = new Set([id, ...children.map(ch => ch.id)]);
         const updated = clients.filter(cl => !idsToDelete.has(cl.id));
         saveAndReload(updated);
-        addLogEntry('クライアント削除', c.companyName);
         setConfirmDialog(null);
         if (selectedClientId && idsToDelete.has(selectedClientId)) {
           setCurrentView('clients');
@@ -2028,7 +1993,6 @@ const AdminApp: React.FC = () => {
     { key: 'clients', label: 'クライアント管理', icon: '👥' },
     { key: 'contracts', label: '契約・請求管理', icon: '💳' },
     { key: 'initdata', label: '初期データ設定', icon: '📋' },
-    { key: 'logs', label: '操作ログ', icon: '📝' },
     { key: 'adminaccounts', label: '管理者アカウント', icon: '🔐' },
     { key: 'media', label: '媒体連携管理', icon: '🔗' },
   ];
@@ -2112,16 +2076,13 @@ const AdminApp: React.FC = () => {
           <ContractPage clients={clients} />
         )}
         {currentView === 'initdata' && (
-          <InitDataPage clients={clients} onLog={addLogEntry} />
-        )}
-        {currentView === 'logs' && (
-          <LogsPage />
+          <InitDataPage clients={clients} />
         )}
         {currentView === 'adminaccounts' && (
-          <AdminAccountsPage onLog={addLogEntry} />
+          <AdminAccountsPage />
         )}
         {currentView === 'media' && (
-          <MediaIntegrationPage onLog={addLogEntry} onConnectionError={setMediaErrorCount} />
+          <MediaIntegrationPage onConnectionError={setMediaErrorCount} />
         )}
       </main>
 
