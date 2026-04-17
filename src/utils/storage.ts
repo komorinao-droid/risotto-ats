@@ -109,10 +109,10 @@ function getDemoData(): ClientData {
   const daysLater = (n: number) => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
 
   const bases = [
-    { id: 1, name: '東京本社', color: '#3B82F6', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
-    { id: 2, name: '大阪支社', color: '#10B981', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
-    { id: 3, name: '名古屋支社', color: '#F59E0B', slotInterval: 60, startTime: '10:00', endTime: '17:00' },
-    { id: 4, name: '福岡支社', color: '#8B5CF6', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
+    { id: 1, name: '東京本社', nameKana: 'トウキョウホンシャ', address: '東京都千代田区丸の内1-1-1', phone: '03-1234-5678', matchingCondition: '関東エリア希望者', notes: '', registeredDate: '2025-04-01', color: '#3B82F6', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
+    { id: 2, name: '大阪支社', nameKana: 'オオサカシシャ', address: '大阪府大阪市北区梅田2-2-2', phone: '06-2345-6789', matchingCondition: '関西エリア希望者', notes: '', registeredDate: '2025-04-01', color: '#10B981', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
+    { id: 3, name: '名古屋支社', nameKana: 'ナゴヤシシャ', address: '愛知県名古屋市中村区名駅3-3-3', phone: '052-3456-7890', matchingCondition: '東海エリア希望者', notes: '', registeredDate: '2025-06-15', color: '#F59E0B', slotInterval: 60, startTime: '10:00', endTime: '17:00' },
+    { id: 4, name: '福岡支社', nameKana: 'フクオカシシャ', address: '福岡県福岡市博多区博多駅前4-4-4', phone: '092-4567-8901', matchingCondition: '九州エリア希望者', notes: '', registeredDate: '2025-08-01', color: '#8B5CF6', slotInterval: 30, startTime: '09:00', endTime: '18:00' },
   ];
 
   const jobs = [
@@ -314,6 +314,7 @@ function getDemoData(): ClientData {
     chatLeadSettings: [
       {
         id: 1,
+        baseName: '大阪支社',
         leadName: '警備スタッフ応募フロー',
         startMessage: 'この度はご応募いただきありがとうございます。\n簡単な質問と面接のご案内を進めさせていただきますので、下記の案内に沿ってご入力をお願いします。',
         questions: [

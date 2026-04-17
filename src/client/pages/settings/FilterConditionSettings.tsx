@@ -52,17 +52,27 @@ function matchesFilter(a: Applicant, fc: FilterCondition): boolean {
   return false;
 }
 
+const defaultFC: FilterCondition = {
+  ageEnabled: false, ageMin: 18, ageMax: 65,
+  genderFilter: [], sourceFilter: [], jobFilter: [],
+  excludeStatus: '', flagAges: [],
+};
+
 const FilterConditionSettings: React.FC = () => {
   const { clientData, updateClientData, client } = useAuth();
   const [flagAgeInput, setFlagAgeInput] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<{ count: number; done: boolean } | null>(null);
 
-  const fc = clientData?.filterCondition || {
-    ageEnabled: false, ageMin: 18, ageMax: 65,
-    genderFilter: [], sourceFilter: [], jobFilter: [],
-    excludeStatus: '', flagAges: [],
-  };
+  const bases = clientData?.bases || [];
+  const [selectedBase, setSelectedBase] = useState<string>(() => bases[0]?.name || '');
+
+  const filterConditions = clientData?.filterConditions || {};
+  const legacyFC = clientData?.filterCondition;
+
+  // 選択中拠点のフィルタ: 拠点別設定 → 旧グローバル → デフォルト の順にフォールバック
+  const fc: FilterCondition = filterConditions[selectedBase] || legacyFC || defaultFC;
+
   const applicants = clientData?.applicants || [];
   const sources = clientData?.sources || [];
   const jobs = clientData?.jobs || [];
@@ -71,16 +81,23 @@ const FilterConditionSettings: React.FC = () => {
   const canEdit = !client || client.accountType === 'parent' || client.permissions.filtercond;
 
   const updateFC = (partial: Partial<FilterCondition>) => {
-    updateClientData((data) => ({
-      ...data,
-      filterCondition: { ...data.filterCondition, ...partial },
-    }));
+    if (!selectedBase) return;
+    updateClientData((data) => {
+      const current = (data.filterConditions || {})[selectedBase] || data.filterCondition || defaultFC;
+      return {
+        ...data,
+        filterConditions: {
+          ...(data.filterConditions || {}),
+          [selectedBase]: { ...current, ...partial },
+        },
+      };
+    });
   };
 
-  // Preview: applicants that would be excluded
+  // Preview: 選択中拠点の応募者のみを対象
   const affected = useMemo(() => {
-    return applicants.filter((a) => a.active && matchesFilter(a, fc));
-  }, [applicants, fc]);
+    return applicants.filter((a) => a.active && a.base === selectedBase && matchesFilter(a, fc));
+  }, [applicants, fc, selectedBase]);
 
   const addFlagAge = () => {
     const n = parseInt(flagAgeInput, 10);
@@ -121,9 +138,10 @@ const FilterConditionSettings: React.FC = () => {
     }
     const count = affected.length;
     updateClientData((data) => {
+      const currentFC = (data.filterConditions || {})[selectedBase] || data.filterCondition || defaultFC;
       const affectedIds = new Set(
         data.applicants
-          .filter((a) => a.active && matchesFilter(a, data.filterCondition))
+          .filter((a) => a.active && a.base === selectedBase && matchesFilter(a, currentFC))
           .map((a) => a.id)
       );
       return {
@@ -141,9 +159,28 @@ const FilterConditionSettings: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6b7280' }}>この機能へのアクセス権がありません。</div>;
   }
 
+  if (bases.length === 0) {
+    return (
+      <div style={{ padding: '2rem', color: '#6b7280' }}>
+        拠点が登録されていません。先に拠点管理で拠点を登録してください。
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: '1.5rem' }}>
       <h2 style={{ margin: '0 0 1rem', fontSize: '1.25rem', fontWeight: 600 }}>フィルタ条件設定</h2>
+
+      {/* Base selector */}
+      <div style={{ ...sectionStyle, background: '#f0f7ff', borderColor: '#bfdbfe', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <label style={{ ...labelStyle, margin: 0, fontWeight: 600 }}>編集対象拠点:</label>
+        <select value={selectedBase} onChange={e => { setSelectedBase(e.target.value); setResult(null); }} style={{ ...inputStyle, minWidth: '200px' }}>
+          {bases.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+        </select>
+        <span style={{ fontSize: '0.8125rem', color: '#6b7280' }}>
+          {filterConditions[selectedBase] ? '(この拠点専用の設定)' : '(デフォルト設定を継承中 — 保存すると拠点専用になります)'}
+        </span>
+      </div>
 
       {/* Age */}
       <div style={sectionStyle}>

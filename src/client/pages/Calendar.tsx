@@ -635,7 +635,11 @@ const Calendar: React.FC = () => {
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()));
   // 拠点
   const bases = clientData?.bases ?? [];
-  const [selectedBase, setSelectedBase] = useState(() => bases[0]?.name ?? '');
+  const [selectedBase, setSelectedBase] = useState(() => {
+    const urlBase = new URLSearchParams(window.location.search).get('base');
+    if (urlBase && bases.some(b => b.name === urlBase)) return urlBase;
+    return bases[0]?.name ?? '';
+  });
   // 設定
   const currentBase = bases.find(b => b.name === selectedBase);
   const [slotInterval, setSlotInterval] = useState(currentBase?.slotInterval ?? 30);

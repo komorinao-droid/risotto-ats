@@ -1534,6 +1534,59 @@ const JobInfoTab: React.FC<JobInfoTabProps> = ({ applicant, updateApplicant }) =
           )}
         </div>
       </div>
+
+      {/* === Education & Work History Card === */}
+      <div style={{ ...cardStyle, marginTop: '1rem' }}>
+        <div style={cardHeaderStyle}>
+          <h3 style={cardTitleStyle}>学歴・職務経歴</h3>
+        </div>
+        <div style={cardBodyStyle}>
+          <div>
+            {[
+              { key: 'finalEducation',   label: '最終学歴' },
+              { key: 'graduationYear',   label: '卒業年' },
+              { key: 'employmentStatus', label: '就業状況' },
+              { key: 'jobChangeCount',   label: '転職回数' },
+              { key: 'workHistory',      label: '職務経歴' },
+              { key: 'workHistoryOther', label: '職務経歴その他' },
+              { key: 'qualifications',   label: '資格・スキル' },
+            ].map(({ key, label }, i, arr) => (
+              <div key={key} style={i === arr.length - 1 ? { ...tableRowStyle, borderBottom: 'none' } : tableRowStyle}>
+                <span style={tableLabelStyle}>{label}</span>
+                <span style={tableValueStyle}>
+                  {(applicant.educationWorkHistory as unknown as Record<string, string> | undefined)?.[key] || '-'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* === Desired Conditions & Motivation Card === */}
+      <div style={{ ...cardStyle, marginTop: '1rem' }}>
+        <div style={cardHeaderStyle}>
+          <h3 style={cardTitleStyle}>希望条件・動機</h3>
+        </div>
+        <div style={cardBodyStyle}>
+          <div>
+            {[
+              { key: 'preferredLocation', label: '希望勤務地' },
+              { key: 'availableDays',     label: '勤務可能曜日' },
+              { key: 'availableHours',    label: '勤務可能時間帯' },
+              { key: 'selfPr',            label: '自己PR' },
+              { key: 'motivation',        label: '志望動機' },
+              { key: 'otherQuestions',    label: '質問ほか' },
+            ].map(({ key, label }, i, arr) => (
+              <div key={key} style={i === arr.length - 1 ? { ...tableRowStyle, borderBottom: 'none' } : tableRowStyle}>
+                <span style={tableLabelStyle}>{label}</span>
+                <span style={tableValueStyle}>
+                  {(applicant.desiredConditions as unknown as Record<string, string> | undefined)?.[key] || '-'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

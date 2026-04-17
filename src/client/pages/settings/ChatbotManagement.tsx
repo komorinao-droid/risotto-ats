@@ -69,12 +69,25 @@ const ChoiceList: React.FC<{
   const add = () =>
     onChange([...choices, { id: newId(choices), label: '選択肢', judgment: 'ok', action: 'next' }]);
   const del = (cid: number) => onChange(choices.filter(c => c.id !== cid));
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= choices.length) return;
+    const next = [...choices];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    onChange(next);
+  };
 
   return (
     <div>
       <span style={S.lbl}>回答選択肢</span>
-      {choices.map(c => (
+      {choices.map((c, i) => (
         <div key={c.id} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <button onClick={() => move(i, i - 1)} disabled={i === 0}
+              style={{ padding: '0 6px', border: '1px solid #e5e7eb', borderRadius: '3px', background: '#fff', cursor: i === 0 ? 'default' : 'pointer', opacity: i === 0 ? 0.35 : 1, fontSize: '0.65rem', lineHeight: 1.2 }}>▲</button>
+            <button onClick={() => move(i, i + 1)} disabled={i === choices.length - 1}
+              style={{ padding: '0 6px', border: '1px solid #e5e7eb', borderRadius: '3px', background: '#fff', cursor: i === choices.length - 1 ? 'default' : 'pointer', opacity: i === choices.length - 1 ? 0.35 : 1, fontSize: '0.65rem', lineHeight: 1.2 }}>▼</button>
+          </div>
           <input value={c.label} onChange={e => set(c.id, { label: e.target.value })}
             style={{ ...S.inp, width: '160px' }} placeholder="選択肢ラベル" />
           <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
@@ -458,10 +471,19 @@ const LeadEditor: React.FC<{
 
       <span style={secStyle()}>リード情報</span>
       <div style={{ display: 'grid', gap: '10px', marginBottom: '10px' }}>
-        <div>
-          <span style={S.lbl}>リード名 *</span>
-          <input value={lead.leadName} onChange={e => upd({ leadName: e.target.value })}
-            style={S.inp} placeholder="例: 警備スタッフ応募フロー" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div>
+            <span style={S.lbl}>リード名 *</span>
+            <input value={lead.leadName} onChange={e => upd({ leadName: e.target.value })}
+              style={S.inp} placeholder="例: 警備スタッフ応募フロー" />
+          </div>
+          <div>
+            <span style={S.lbl}>拠点</span>
+            <select value={lead.baseName || ''} onChange={e => upd({ baseName: e.target.value })} style={S.inp}>
+              <option value="">選択してください</option>
+              {bases.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
         </div>
         <div>
           <span style={S.lbl}>チャット開始メッセージ</span>
@@ -526,7 +548,14 @@ const ChatbotManagement: React.FC = () => {
   const selected = leads.find(l => l.id === selectedId) || null;
 
   useEffect(() => {
-    if (leads.length > 0 && selectedId === null) setSelectedId(leads[0].id);
+    if (leads.length > 0 && selectedId === null) {
+      const urlBase = new URLSearchParams(window.location.search).get('base');
+      if (urlBase) {
+        const match = leads.find(l => l.baseName === urlBase);
+        if (match) { setSelectedId(match.id); return; }
+      }
+      setSelectedId(leads[0].id);
+    }
   }, [leads.length]);
 
   const onChange = (lead: ChatLeadSetting) => {
@@ -539,7 +568,7 @@ const ChatbotManagement: React.FC = () => {
   const addLead = () => {
     const id = newId(leads);
     const nl: ChatLeadSetting = {
-      id, leadName: '新しいチャット設定', startMessage: '',
+      id, baseName: '', leadName: '新しいチャット設定', startMessage: '',
       questions: [], ngMessageImmediate: '', ngMessageAfterAll: '',
       interviewCalendars: [],
     };

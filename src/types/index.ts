@@ -15,6 +15,27 @@ export interface JobInfo {
   companyName: string;
 }
 
+// 学歴・職務経歴
+export interface EducationWorkHistory {
+  finalEducation: string;
+  graduationYear: string;
+  employmentStatus: string;
+  jobChangeCount: string;
+  workHistory: string;
+  workHistoryOther: string;
+  qualifications: string;
+}
+
+// 希望条件・動機
+export interface DesiredConditions {
+  preferredLocation: string;
+  availableDays: string;
+  availableHours: string;
+  selfPr: string;
+  motivation: string;
+  otherQuestions: string;
+}
+
 // チャット回答
 export interface ChatAnswer {
   question: string;
@@ -66,6 +87,8 @@ export interface Applicant {
   duplicate: boolean;
   files: FileAttachment[];
   jobInfo: JobInfo;
+  educationWorkHistory?: EducationWorkHistory;
+  desiredConditions?: DesiredConditions;
   chatAnswers: ChatAnswer[];
   cancelledInterviews?: CancelledInterview[];
 }
@@ -118,6 +141,12 @@ export interface Source {
 export interface Base {
   id: number;
   name: string;
+  nameKana: string;
+  address: string;
+  phone: string;
+  matchingCondition: string;
+  notes: string;
+  registeredDate: string;
   color: string;
   slotInterval: number;
   startTime: string;
@@ -235,6 +264,7 @@ export interface ChatInterviewCalendar {
 
 export interface ChatLeadSetting {
   id: number;
+  baseName: string;
   leadName: string;
   startMessage: string;
   questions: ChatLeadQuestion[];
@@ -283,6 +313,7 @@ export interface ClientData {
   emailTemplates: EmailTemplate[];
   exclusionList: ExclusionEntry[];
   filterCondition: FilterCondition;
+  filterConditions?: { [baseName: string]: FilterCondition };
   hearingTemplates: HearingTemplate[];
   slotSettings: { [baseName: string]: SlotSetting };
   chatScenarios: ChatScenario[];
