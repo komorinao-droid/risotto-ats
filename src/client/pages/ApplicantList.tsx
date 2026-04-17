@@ -198,11 +198,22 @@ const ApplicantList: React.FC = () => {
   // ─── Duplicate detection ───
   const duplicateMap = useMemo(() => detectDuplicates(applicants), [applicants]);
 
-  // ─── Flag ages ───
-  const flagAges = useMemo(
-    () => new Set(clientData.filterCondition.flagAges || []),
-    [clientData.filterCondition.flagAges]
+  // ─── Flag ages (per-base with fallback to legacy global) ───
+  const flagAgesByBase = useMemo(() => {
+    const map: { [base: string]: Set<number> } = {};
+    const fcs = clientData.filterConditions || {};
+    Object.keys(fcs).forEach(base => {
+      map[base] = new Set(fcs[base].flagAges || []);
+    });
+    return map;
+  }, [clientData.filterConditions]);
+  const legacyFlagAges = useMemo(
+    () => new Set(clientData.filterCondition?.flagAges || []),
+    [clientData.filterCondition?.flagAges]
   );
+  const getFlagAgeSet = (baseName: string): Set<number> => {
+    return flagAgesByBase[baseName] || legacyFlagAges;
+  };
 
   // ─── Event map ───
   const eventMap = useMemo(() => {
@@ -757,7 +768,7 @@ const ApplicantList: React.FC = () => {
                 const evt = eventMap.get(a.id);
                 const isDupe = duplicateMap.has(a.id);
                 const ageNum = typeof a.age === 'number' ? a.age : parseInt(String(a.age), 10);
-                const isFlagAge = !isNaN(ageNum) && flagAges.has(ageNum);
+                const isFlagAge = !isNaN(ageNum) && getFlagAgeSet(a.base).has(ageNum);
                 const stColor = statusColorMap.get(a.stage) || '#6b7280';
 
                 return (

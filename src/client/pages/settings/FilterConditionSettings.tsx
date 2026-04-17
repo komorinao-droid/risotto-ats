@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Applicant, FilterCondition } from '@/types';
 import Modal from '@/components/Modal';
@@ -51,6 +51,26 @@ function matchesFilter(a: Applicant, fc: FilterCondition): boolean {
 
   return false;
 }
+
+const AgeInput: React.FC<{ value: number; onChange: (n: number) => void }> = ({ value, onChange }) => {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => {
+        // Allow only digits, strip leading zeros (except for "0")
+        const cleaned = e.target.value.replace(/[^0-9]/g, '').replace(/^0+(\d)/, '$1');
+        setText(cleaned);
+        onChange(cleaned === '' ? 0 : Number(cleaned));
+      }}
+      onBlur={() => setText(String(value))}
+      style={{ padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.875rem', boxSizing: 'border-box', width: '80px' }}
+    />
+  );
+};
 
 const defaultFC: FilterCondition = {
   ageEnabled: false, ageMin: 18, ageMax: 65,
@@ -204,19 +224,9 @@ const FilterConditionSettings: React.FC = () => {
         </div>
         {fc.ageEnabled && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="number"
-              value={fc.ageMin}
-              onChange={(e) => updateFC({ ageMin: Number(e.target.value) || 0 })}
-              style={{ ...inputStyle, width: '80px' }}
-            />
+            <AgeInput value={fc.ageMin} onChange={(n) => updateFC({ ageMin: n })} />
             <span>歳 〜</span>
-            <input
-              type="number"
-              value={fc.ageMax}
-              onChange={(e) => updateFC({ ageMax: Number(e.target.value) || 0 })}
-              style={{ ...inputStyle, width: '80px' }}
-            />
+            <AgeInput value={fc.ageMax} onChange={(n) => updateFC({ ageMax: n })} />
             <span>歳</span>
           </div>
         )}
