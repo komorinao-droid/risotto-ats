@@ -23,7 +23,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   fontWeight: 500,
 });
 
-const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{{応募媒体}}'];
+const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{{拠点住所}}', '{{確定面接日}}', '{{応募媒体}}'];
 
 const EmailTemplateManagement: React.FC = () => {
   const { clientData, updateClientData, client } = useAuth();
