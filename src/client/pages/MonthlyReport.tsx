@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { BarChart3, FileText, ClipboardList, CalendarDays, CheckCircle2, Trophy, XCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 /* ============================
@@ -106,7 +107,7 @@ function svgToPng(svgEl: SVGSVGElement, filename: string) {
 // ---------- sub-components ----------
 
 // Summary card
-const SummaryCard: React.FC<{ label: string; value: number; color: string; icon: string }> = ({
+const SummaryCard: React.FC<{ label: string; value: number; color: string; icon: React.ReactNode }> = ({
   label,
   value,
   color,
@@ -498,13 +499,13 @@ const MonthlyReport: React.FC = () => {
                   style={pageStyles.dlMenuItem}
                   onClick={() => { exportMainChartPng(); setDlMenuOpen(false); }}
                 >
-                  &#128202; グラフ画像（PNG）
+                  <BarChart3 size={14} /> グラフ画像（PNG）
                 </button>
                 <button
                   style={pageStyles.dlMenuItem}
                   onClick={() => { exportOverviewCsv(); setDlMenuOpen(false); }}
                 >
-                  &#128196; 集計データ（CSV）
+                  <FileText size={14} /> 集計データ（CSV）
                 </button>
               </div>
             )}
@@ -543,11 +544,11 @@ const MonthlyReport: React.FC = () => {
         <>
           {/* Summary cards */}
           <div style={pageStyles.summaryGrid}>
-            <SummaryCard label="応募数" value={summary.total} color="#3B82F6" icon="&#128203;" />
-            <SummaryCard label="面接調整数" value={summary.interview} color="#F59E0B" icon="&#128197;" />
-            <SummaryCard label="合格数" value={summary.passed} color="#06B6D4" icon="&#9989;" />
-            <SummaryCard label="内定数" value={summary.offered} color="#EC4899" icon="&#127942;" />
-            <SummaryCard label="不合格数" value={summary.rejected} color="#EF4444" icon="&#10060;" />
+            <SummaryCard label="応募数" value={summary.total} color="#3B82F6" icon={<ClipboardList size={20} color="#3B82F6" />} />
+            <SummaryCard label="面接調整数" value={summary.interview} color="#F59E0B" icon={<CalendarDays size={20} color="#F59E0B" />} />
+            <SummaryCard label="合格数" value={summary.passed} color="#06B6D4" icon={<CheckCircle2 size={20} color="#06B6D4" />} />
+            <SummaryCard label="内定数" value={summary.offered} color="#EC4899" icon={<Trophy size={20} color="#EC4899" />} />
+            <SummaryCard label="不合格数" value={summary.rejected} color="#EF4444" icon={<XCircle size={20} color="#EF4444" />} />
           </div>
 
           {/* Weekly bar chart */}

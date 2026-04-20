@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { useAuth } from '@/contexts/AuthContext';
 import { today } from '@/utils/date';
@@ -324,7 +325,7 @@ const ScheduleInterviewModal: React.FC<ScheduleInterviewModalProps> = ({
       >
         <div>
           <div style={{ padding: '1rem', backgroundColor: '#FEF3C7', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.875rem', color: '#92400E' }}>
-            <div style={{ fontWeight: 700, marginBottom: '0.375rem' }}>⚠ スロット間隔が異なります</div>
+            <div style={{ fontWeight: 700, marginBottom: '0.375rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}><AlertTriangle size={14} /> スロット間隔が異なります</div>
             <div>
               {applicant.base}拠点のスロット間隔は <strong>{baseSettings.slotInterval}分</strong> に設定されていますが、
               選択した時間（{startTime}〜{endTime}）はこの間隔と一致していません。

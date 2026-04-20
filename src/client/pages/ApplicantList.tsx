@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Check, CalendarDays, ClipboardList, FolderOpen } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import Pagination from '@/components/Pagination';
 import SearchableSelect from '@/components/SearchableSelect';
@@ -1003,7 +1004,7 @@ const ApplicantList: React.FC = () => {
                       {evt ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                           <div>
-                            <span style={{ fontSize: '0.6rem', color: '#15803D', fontWeight: 600 }}>✓ 面接確定</span>
+                            <span style={{ fontSize: '0.6rem', color: '#15803D', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}><Check size={10} strokeWidth={3} /> 面接確定</span>
                             <div style={{ fontSize: '0.75rem', color: '#15803D', fontWeight: 500 }}>
                               {evt.date} {evt.start}{evt.end ? `〜${evt.end}` : ''}
                             </div>
@@ -1011,7 +1012,7 @@ const ApplicantList: React.FC = () => {
                         </div>
                       ) : a.prefDates && a.prefDates.length > 0 ? (
                         <div>
-                          <span style={{ fontSize: '0.6rem', color: '#6b7280', fontWeight: 600 }}>📅 希望日程</span>
+                          <span style={{ fontSize: '0.6rem', color: '#6b7280', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}><CalendarDays size={10} /> 希望日程</span>
                           {a.prefDates.map((raw, i) => {
                             const d = normalizePrefDate(raw);
                             return (
@@ -1261,7 +1262,7 @@ const ApplicantList: React.FC = () => {
       <Modal
         isOpen={importModalOpen}
         onClose={() => { setImportModalOpen(false); setImportStep('upload'); }}
-        title="📤 応募者データを一括アップロード"
+        title="応募者データを一括アップロード"
         width="720px"
       >
         {importStep === 'upload' && (
@@ -1297,9 +1298,12 @@ const ApplicantList: React.FC = () => {
                     fontSize: '0.75rem',
                     fontWeight: 600,
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
                   }}
                 >
-                  📋 フォーマットDL
+                  <ClipboardList size={14} /> フォーマットDL
                 </button>
               </div>
               <p style={{ fontSize: '0.8125rem', color: '#374151', margin: '0 0 0.75rem' }}>
@@ -1345,7 +1349,7 @@ const ApplicantList: React.FC = () => {
                 }
               }}
             >
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}>📁</div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem', color: '#FB923C', opacity: 0.8 }}><FolderOpen size={36} /></div>
               <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0 0 0.75rem' }}>
                 CSVファイルをここへドロップ、またはクリックして選択
               </p>

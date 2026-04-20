@@ -197,6 +197,16 @@ button {
   background-color: #9ca3af;
 }
 
+/* アニメーション */
+@keyframes risotto-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: risotto-spin 1s linear infinite;
+}
+
 /* レスポンシブ */
 
 /* 900px以下: サイドバーをオーバーレイに */

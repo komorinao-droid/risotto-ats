@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BarChart3 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Applicant } from '@/types';
 
@@ -331,7 +332,7 @@ const Dashboard: React.FC = () => {
       <div style={{ ...pageStyles.section, padding: 0, overflow: 'hidden' }}>
         {/* 期間セレクター（共通ヘッダー） */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.875rem 1.25rem', borderBottom: '1px solid #F3F4F6', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151' }}>📊 分布集計期間</span>
+          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}><BarChart3 size={14} /> 分布集計期間</span>
           <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
             {DIST_PERIOD_OPTIONS.map((opt) => (
               <button

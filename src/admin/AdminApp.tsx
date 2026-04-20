@@ -1,4 +1,32 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  LayoutDashboard,
+  Users,
+  CreditCard,
+  ClipboardList,
+  ShieldCheck,
+  Link2,
+  LogOut,
+  Eye,
+  EyeOff,
+  Check,
+  X,
+  Building2,
+  Store,
+  AlertTriangle,
+  Siren,
+  RefreshCw,
+  Loader2,
+  UserCheck,
+  UserX,
+  PartyPopper,
+  User,
+  CalendarDays,
+  FileText,
+  Trophy,
+  Newspaper,
+  Settings,
+} from 'lucide-react';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
@@ -136,14 +164,20 @@ const PLAN_PRICES: Record<Client['plan'], number> = {
   enterprise: 200000,
 };
 
-const MEDIA_ICONS: Record<string, string> = {
-  indeed: '🔵',
-  doda: '🟠',
-  rikunabi: '🔴',
-  mynavi: '🟢',
-  hellowork: '🟡',
-  townwork: '🟣',
-  custom: '⚙️',
+const MEDIA_COLORS: Record<string, string> = {
+  indeed: '#2557A7',
+  doda: '#E67E22',
+  rikunabi: '#DC2626',
+  mynavi: '#16A34A',
+  hellowork: '#CA8A04',
+  townwork: '#9333EA',
+  custom: '#6B7280',
+};
+
+const MediaIcon: React.FC<{ type: string; size?: number }> = ({ type, size = 20 }) => {
+  const color = MEDIA_COLORS[type] || '#6B7280';
+  const Icon = type === 'custom' ? Settings : Newspaper;
+  return <Icon size={size} color={color} strokeWidth={2.2} />;
 };
 
 /* ============================================================
@@ -251,7 +285,7 @@ const AdminLogin: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
               onClick={() => setShowPassword(!showPassword)}
               style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '0.875rem', padding: '0.25rem' }}
             >
-              {showPassword ? '🙈' : '👁'}
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
         </div>
@@ -265,10 +299,10 @@ const AdminLogin: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
 /* ============================================================
    統計カード
    ============================================================ */
-const StatCard: React.FC<{ label: string; value: number | string; color: string; icon: string }> = ({ label, value, color, icon }) => (
+const StatCard: React.FC<{ label: string; value: number | string; color: string; icon: React.ReactNode }> = ({ label, value, color, icon }) => (
   <div style={{ ...cardStyle, padding: '1.25rem', flex: '1 1 200px', minWidth: '180px' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-      <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: color + '18', color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', flexShrink: 0 }}>{icon}</div>
+      <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: color + '18', color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{icon}</div>
       <div>
         <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.125rem' }}>{label}</div>
         <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', lineHeight: 1.2 }}>{value}</div>
@@ -348,10 +382,10 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
 
       {/* 統計カード */}
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-        <StatCard label="総クライアント数" value={clients.length} color="#3B82F6" icon="&#128101;" />
-        <StatCard label="有効クライアント" value={activeCount} color="#059669" icon="&#9989;" />
-        <StatCard label="無効クライアント" value={inactiveCount} color="#DC2626" icon="&#10060;" />
-        <StatCard label="今月の新規" value={newThisMonth} color="#8B5CF6" icon="&#127381;" />
+        <StatCard label="総クライアント数" value={clients.length} color="#3B82F6" icon={<Users size={22} />} />
+        <StatCard label="有効クライアント" value={activeCount} color="#059669" icon={<UserCheck size={22} />} />
+        <StatCard label="無効クライアント" value={inactiveCount} color="#DC2626" icon={<UserX size={22} />} />
+        <StatCard label="今月の新規" value={newThisMonth} color="#8B5CF6" icon={<PartyPopper size={22} />} />
       </div>
 
       {/* プラン別グラフ */}
@@ -706,7 +740,10 @@ const ClientDetail: React.FC<{
                 backgroundColor: client.permissions[k] ? '#DEF7EC' : '#FDE8E8',
                 color: client.permissions[k] ? '#059669' : '#DC2626',
               }}>
-                {client.permissions[k] ? '✓' : '✕'} {PERMISSION_LABELS[k]}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                  {client.permissions[k] ? <Check size={12} strokeWidth={3} /> : <X size={12} strokeWidth={3} />}
+                  {PERMISSION_LABELS[k]}
+                </span>
               </span>
             ))}
           </div>
@@ -720,7 +757,7 @@ const ClientDetail: React.FC<{
           <ClientDataView data={clientData} />
         ) : (
           <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>&#128203;</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem', opacity: 0.5 }}><ClipboardList size={32} /></div>
             <p style={{ margin: 0, fontSize: '0.875rem' }}>このクライアントはまだログインしていないか、データがありません。</p>
           </div>
         )}
@@ -873,10 +910,10 @@ const ClientDataView: React.FC<{ data: ClientData }> = ({ data }) => {
     <div>
       {/* 統計カード */}
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
-        <StatCard label="応募者数" value={totalApplicants} color="#3B82F6" icon="&#128100;" />
-        <StatCard label="今月応募" value={thisMonthApplicants} color="#8B5CF6" icon="&#128197;" />
-        <StatCard label="面接予定" value={interviewCount} color="#F59E0B" icon="&#128221;" />
-        <StatCard label="内定者" value={offeredCount} color="#059669" icon="&#127942;" />
+        <StatCard label="応募者数" value={totalApplicants} color="#3B82F6" icon={<User size={22} />} />
+        <StatCard label="今月応募" value={thisMonthApplicants} color="#8B5CF6" icon={<CalendarDays size={22} />} />
+        <StatCard label="面接予定" value={interviewCount} color="#F59E0B" icon={<FileText size={22} />} />
+        <StatCard label="内定者" value={offeredCount} color="#059669" icon={<Trophy size={22} />} />
       </div>
 
       {/* ステータス分布 */}
@@ -1060,7 +1097,9 @@ const ClientFormModal: React.FC<{
                   transition: 'all 0.15s',
                 }}
               >
-                <div style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{t === 'parent' ? '🏢' : '🏬'}</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.25rem', color: form.accountType === t ? '#3B82F6' : '#6b7280' }}>
+                  {t === 'parent' ? <Building2 size={22} /> : <Store size={22} />}
+                </div>
                 <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t === 'parent' ? '本部アカウント' : '子アカウント'}</div>
               </div>
             ))}
@@ -1390,7 +1429,7 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
       </div>
 
       {error && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', color: '#DC2626', borderRadius: '6px', fontSize: '0.875rem' }}>{error}</div>}
-      {result && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#F0FDF4', color: '#059669', borderRadius: '6px', fontSize: '0.875rem' }}>✓ {result}</div>}
+      {result && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#F0FDF4', color: '#059669', borderRadius: '6px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}><Check size={14} strokeWidth={3} /> {result}</div>}
 
       <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
         <button onClick={handleExecute} style={btnPrimary}>コピー実行</button>
@@ -1688,7 +1727,8 @@ const MediaIntegrationPage: React.FC<{
     const ok = m.connectionStatus === 'ok';
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: ok ? '#DEF7EC' : '#FEF2F2', color: ok ? '#059669' : '#DC2626' }}>
-        {ok ? '✓ 接続OK' : '✕ 切断中'}
+        {ok ? <Check size={11} strokeWidth={3} /> : <X size={11} strokeWidth={3} />}
+        {ok ? '接続OK' : '切断中'}
       </span>
     );
   };
@@ -1712,7 +1752,7 @@ const MediaIntegrationPage: React.FC<{
       {/* 接続エラーアラートバナー */}
       {!dismissedAlert && errorIntegrations.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.875rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px', marginBottom: '1.25rem' }}>
-          <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>🚨</span>
+          <span style={{ flexShrink: 0, color: '#DC2626', display: 'flex' }}><Siren size={20} /></span>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: '0.875rem', color: '#991B1B', marginBottom: '0.25rem' }}>
               接続エラーが検出されました（{errorIntegrations.length}件）
@@ -1723,8 +1763,8 @@ const MediaIntegrationPage: React.FC<{
           </div>
           <button
             onClick={() => setDismissedAlert(true)}
-            style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: '1rem', padding: '0', lineHeight: 1 }}
-          >✕</button>
+            style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', padding: '0', lineHeight: 1, display: 'flex' }}
+          ><X size={16} /></button>
         </div>
       )}
 
@@ -1739,7 +1779,11 @@ const MediaIntegrationPage: React.FC<{
             style={{ ...btnSecondary, display: 'flex', alignItems: 'center', gap: '0.375rem' }}
             disabled={checkingIds.size > 0}
           >
-            {checkingIds.size > 0 ? '⟳ チェック中...' : '🔄 全件チェック'}
+            {checkingIds.size > 0 ? (
+              <><Loader2 size={14} className="spin" /> チェック中...</>
+            ) : (
+              <><RefreshCw size={14} /> 全件チェック</>
+            )}
           </button>
           <button onClick={() => { setNewForm({ id: '', name: '', type: 'custom', status: 'inactive' }); setErrors({}); setAddModal(true); }} style={btnPrimary}>+ 媒体追加</button>
         </div>
@@ -1753,13 +1797,13 @@ const MediaIntegrationPage: React.FC<{
           return (
             <div key={m.id} style={{ ...cardStyle, padding: '1.25rem', borderTop: `3px solid ${borderColor}`, position: 'relative', backgroundColor: isError ? '#FFFAFA' : '#fff' }}>
               {isError && (
-                <div style={{ position: 'absolute', top: '-1px', right: '1rem', fontSize: '0.6875rem', fontWeight: 700, color: '#DC2626', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderTop: 'none', padding: '0.125rem 0.5rem', borderBottomLeftRadius: '4px', borderBottomRightRadius: '4px' }}>
-                  ⚠ 接続エラー
+                <div style={{ position: 'absolute', top: '-1px', right: '1rem', fontSize: '0.6875rem', fontWeight: 700, color: '#DC2626', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderTop: 'none', padding: '0.125rem 0.5rem', borderBottomLeftRadius: '4px', borderBottomRightRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <AlertTriangle size={12} /> 接続エラー
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '1.5rem' }}>{MEDIA_ICONS[m.type] || '⚙️'}</span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}><MediaIcon type={m.type} size={24} /></span>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.9375rem' }}>{m.name}</div>
                     <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>ID: {m.id}</div>
@@ -1988,13 +2032,13 @@ const AdminApp: React.FC = () => {
 
   const selectedClient = selectedClientId ? clients.find(c => c.id === selectedClientId) : null;
 
-  const sidebarItems = [
-    { key: 'dashboard', label: 'ダッシュボード', icon: '📊' },
-    { key: 'clients', label: 'クライアント管理', icon: '👥' },
-    { key: 'contracts', label: '契約・請求管理', icon: '💳' },
-    { key: 'initdata', label: '初期データ設定', icon: '📋' },
-    { key: 'adminaccounts', label: '管理者アカウント', icon: '🔐' },
-    { key: 'media', label: '媒体連携管理', icon: '🔗' },
+  const sidebarItems: { key: string; label: string; Icon: typeof LayoutDashboard }[] = [
+    { key: 'dashboard', label: 'ダッシュボード', Icon: LayoutDashboard },
+    { key: 'clients', label: 'クライアント管理', Icon: Users },
+    { key: 'contracts', label: '契約・請求管理', Icon: CreditCard },
+    { key: 'initdata', label: '初期データ設定', Icon: ClipboardList },
+    { key: 'adminaccounts', label: '管理者アカウント', Icon: ShieldCheck },
+    { key: 'media', label: '媒体連携管理', Icon: Link2 },
   ];
 
   return (
@@ -2007,6 +2051,7 @@ const AdminApp: React.FC = () => {
         <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {sidebarItems.map(item => {
             const isActive = currentView === item.key || (item.key === 'clients' && (currentView === 'detail' || currentView === 'add'));
+            const Icon = item.Icon;
             return (
               <button
                 key={item.key}
@@ -2028,7 +2073,7 @@ const AdminApp: React.FC = () => {
                   width: '100%',
                 }}
               >
-                <span>{item.icon}</span>
+                <Icon size={16} strokeWidth={2} />
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {item.key === 'media' && mediaErrorCount > 0 && (
                   <span style={{ minWidth: '18px', height: '18px', borderRadius: '9999px', backgroundColor: '#DC2626', color: '#fff', fontSize: '0.625rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>
@@ -2044,7 +2089,7 @@ const AdminApp: React.FC = () => {
           onClick={() => setIsLoggedIn(false)}
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', padding: '0.625rem', border: '1px solid rgba(255,255,255,0.35)', borderRadius: '6px', backgroundColor: 'transparent', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: '0.8125rem', width: '100%' }}
         >
-          🚪 ログアウト
+          <LogOut size={14} /> ログアウト
         </button>
       </aside>
 

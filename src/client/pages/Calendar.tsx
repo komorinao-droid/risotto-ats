@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { ChevronDown, Pencil } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatDate, dayOfWeekJP, timeToMinutes, minutesToTime } from '@/utils/date';
 import type { InterviewEvent, Base, SlotSetting, Applicant } from '@/types';
@@ -121,7 +122,7 @@ const BaseSettingsBar: React.FC<{
         }}
         title={customInterval ? 'プリセットに戻す' : 'カスタム入力'}
       >
-        {customInterval ? '▼' : '✎'}
+        {customInterval ? <ChevronDown size={12} /> : <Pencil size={12} />}
       </button>
     </label>
     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8125rem', fontWeight: 500 }}>

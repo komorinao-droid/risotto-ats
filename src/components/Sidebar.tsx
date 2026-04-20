@@ -1,5 +1,20 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Users,
+  KanbanSquare,
+  Calendar,
+  Tags,
+  Megaphone,
+  Building2,
+  Briefcase,
+  Settings,
+  ChevronUp,
+  ChevronDown,
+  Menu,
+  type LucideIcon,
+} from 'lucide-react';
 import type { Client } from '@/types';
 
 interface SidebarProps {
@@ -10,31 +25,31 @@ interface SidebarProps {
 interface NavItem {
   path: string;
   label: string;
-  icon: string;
+  icon: LucideIcon | null;
   permission?: keyof Client['permissions'];
   children?: NavItem[];
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { path: '/', label: 'ダッシュボード', icon: '\u2302' },
-  { path: '/applicants', label: '応募者管理', icon: '\u{1D5E0}' },
-  { path: '/progress', label: '進捗ボード', icon: '\u{1F4CA}' },
-  { path: '/calendar', label: '面接カレンダー', icon: '\u{1F4C5}' },
-  { path: '/statuses', label: 'ステータス管理', icon: '\u2699', permission: 'status' },
-  { path: '/sources', label: '応募媒体管理', icon: '\u{1F4E2}', permission: 'source' },
-  { path: '/bases', label: '拠点管理', icon: '\u{1F3E2}', permission: 'base' },
-  { path: '/jobs', label: '職種管理', icon: '\u{1F4BC}', permission: 'job' },
+  { path: '/', label: 'ダッシュボード', icon: LayoutDashboard },
+  { path: '/applicants', label: '応募者管理', icon: Users },
+  { path: '/progress', label: '進捗ボード', icon: KanbanSquare },
+  { path: '/calendar', label: '面接カレンダー', icon: Calendar },
+  { path: '/statuses', label: 'ステータス管理', icon: Tags, permission: 'status' },
+  { path: '/sources', label: '応募媒体管理', icon: Megaphone, permission: 'source' },
+  { path: '/bases', label: '拠点管理', icon: Building2, permission: 'base' },
+  { path: '/jobs', label: '職種管理', icon: Briefcase, permission: 'job' },
   {
     path: '/settings',
     label: '設定',
-    icon: '\u2699',
+    icon: Settings,
     children: [
-      { path: '/settings/hearing', label: 'ヒアリング', icon: '', permission: 'hearing' },
-      { path: '/settings/filter', label: 'フィルタ条件', icon: '', permission: 'filtercond' },
-      { path: '/settings/exclusion', label: '除外リスト', icon: '', permission: 'exclusion' },
-      { path: '/settings/email-templates', label: 'メールテンプレート', icon: '', permission: 'mailtemplate' },
-      { path: '/settings/chatbot', label: 'チャットボット', icon: '', permission: 'chatbot' },
-      { path: '/settings/account', label: 'アカウント', icon: '' },
+      { path: '/settings/hearing', label: 'ヒアリング', icon: null, permission: 'hearing' },
+      { path: '/settings/filter', label: 'フィルタ条件', icon: null, permission: 'filtercond' },
+      { path: '/settings/exclusion', label: '除外リスト', icon: null, permission: 'exclusion' },
+      { path: '/settings/email-templates', label: 'メールテンプレート', icon: null, permission: 'mailtemplate' },
+      { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
+      { path: '/settings/account', label: 'アカウント', icon: null },
     ],
   },
 ];
@@ -67,6 +82,8 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
   const renderNavItem = (item: NavItem) => {
     if (!hasPermission(client, item.permission)) return null;
 
+    const Icon = item.icon;
+
     if (item.children) {
       const visibleChildren = item.children.filter((child) =>
         hasPermission(client, child.permission)
@@ -91,11 +108,11 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
               color: '#374151',
             }}
           >
-            <span>
-              <span style={{ marginRight: '0.5rem' }}>{item.icon}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {Icon && <Icon size={16} strokeWidth={2} />}
               {item.label}
             </span>
-            <span style={{ fontSize: '0.65rem' }}>{settingsOpen ? '\u25B2' : '\u25BC'}</span>
+            {settingsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
           {settingsOpen && (
             <div style={{ paddingLeft: '1.25rem' }}>
@@ -123,7 +140,7 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
         onClick={() => setMobileOpen(false)}
         style={({ isActive }) => linkStyle(isActive)}
       >
-        <span>{item.icon}</span>
+        {Icon && <Icon size={16} strokeWidth={2} />}
         <span>{item.label}</span>
       </NavLink>
     );
@@ -218,13 +235,12 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
           borderRadius: '6px',
           backgroundColor: '#fff',
           cursor: 'pointer',
-          fontSize: '1.25rem',
           alignItems: 'center',
           justifyContent: 'center',
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         }}
       >
-        &#9776;
+        <Menu size={20} />
       </button>
 
       {/* モバイルオーバーレイ */}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { AlertTriangle, Check } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
@@ -894,7 +895,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
               <div style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 {memoSaved && memoText && (
                   <>
-                    <span style={{ color: '#22C55E' }}>&#10003;</span>
+                    <span style={{ color: '#22C55E', display: 'inline-flex' }}><Check size={12} strokeWidth={3} /></span>
                     <span style={{ color: '#22C55E' }}>保存済み</span>
                   </>
                 )}
@@ -1191,7 +1192,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
             padding: '0.875rem 1rem', backgroundColor: '#FEF2F2',
             borderRadius: '8px', border: '1px solid #FECACA', marginBottom: '1rem',
           }}>
-            <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>⚠️</span>
+            <span style={{ color: '#DC2626', display: 'flex', lineHeight: 1 }}><AlertTriangle size={20} /></span>
             <div>
               <div style={{ fontWeight: 600, color: '#991B1B', fontSize: '0.875rem', marginBottom: '0.375rem' }}>
                 未来日の面接が{futureEvents.length}件あります
