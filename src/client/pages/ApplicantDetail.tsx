@@ -354,7 +354,7 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
               ),
             },
             { key: 'email', label: 'メール', content: <EmailTab /> },
-            { key: 'files', label: 'ファイル', content: <FilesTab applicant={applicant} /> },
+            { key: 'files', label: 'ファイル', content: <FilesTab applicant={applicant} updateApplicant={updateApplicant} /> },
             { key: 'webinterview', label: 'WEB面接', content: <WebInterviewTab /> },
             {
               key: 'jobinfo',
@@ -1598,8 +1598,22 @@ const EmailTab: React.FC = () => (
 /* =======================================
    Tab 3: Files
    ======================================= */
-const FilesTab: React.FC<{ applicant: Applicant }> = ({ applicant }) => {
+interface FilesTabProps {
+  applicant: Applicant;
+  updateApplicant: (updater: (a: Applicant) => Applicant) => void;
+}
+
+// 1ファイルあたりの上限（base64でlocalStorageに格納するため控えめに）
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'csv', 'zip'];
+
+const FilesTab: React.FC<FilesTabProps> = ({ applicant, updateApplicant }) => {
+  const { logAction } = useAuth();
   const files = applicant.files || [];
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function getExtIcon(name: string): string {
     const ext = name.split('.').pop()?.toLowerCase() || '';
@@ -1623,53 +1637,190 @@ const FilesTab: React.FC<{ applicant: Applicant }> = ({ applicant }) => {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
-  if (files.length === 0) {
-    return (
-      <div style={{ padding: '1.5rem', textAlign: 'center' }}>
-        <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.3 }}>{'\u{1F4C1}'}</div>
-        <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem', fontWeight: 600, color: '#374151' }}>ファイルなし</h3>
-        <p style={{ color: '#9CA3AF', fontSize: '0.875rem', margin: 0 }}>
-          アップロードされたファイルはありません。
-        </p>
-      </div>
-    );
+  function readFileAsDataURL(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
   }
 
+  async function handleFiles(fileList: FileList | File[]) {
+    setError('');
+    const fileArray = Array.from(fileList);
+    if (fileArray.length === 0) return;
+
+    // バリデーション
+    for (const f of fileArray) {
+      const ext = f.name.split('.').pop()?.toLowerCase() || '';
+      if (!ALLOWED_EXT.includes(ext)) {
+        setError(`「${f.name}」: 対応していない拡張子です（許可: ${ALLOWED_EXT.join(', ')}）`);
+        return;
+      }
+      if (f.size > MAX_FILE_SIZE) {
+        setError(`「${f.name}」: ファイルサイズが上限（5MB）を超えています`);
+        return;
+      }
+    }
+
+    setUploading(true);
+    try {
+      const newAttachments: { name: string; size: number; url: string }[] = [];
+      for (const f of fileArray) {
+        const dataUrl = await readFileAsDataURL(f);
+        newAttachments.push({ name: f.name, size: f.size, url: dataUrl });
+      }
+      updateApplicant((a) => ({ ...a, files: [...(a.files || []), ...newAttachments] }));
+      logAction('applicant', 'ファイル添付', applicant.name || String(applicant.id), `${newAttachments.length}件`);
+    } catch (e: any) {
+      // localStorage QuotaExceededError 等
+      const msg = e?.message || 'アップロードに失敗しました';
+      if (msg.toLowerCase().includes('quota')) {
+        setError('ストレージ容量の上限に達しました。不要なファイルを削除してから再度お試しください。');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function deleteFile(index: number) {
+    const target = files[index];
+    if (!target) return;
+    if (!window.confirm(`「${target.name}」を削除しますか？`)) return;
+    updateApplicant((a) => ({
+      ...a,
+      files: (a.files || []).filter((_, i) => i !== index),
+    }));
+    logAction('applicant', 'ファイル削除', applicant.name || String(applicant.id), target.name);
+  }
+
+  function downloadFile(f: { name: string; url: string }) {
+    // data: URL でも http URL でも同じく a タグの click() で動作
+    const a = document.createElement('a');
+    a.href = f.url;
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  // 合計サイズ表示
+  const totalBytes = files.reduce((sum, f) => sum + (f.size || 0), 0);
+
   return (
-    <div style={{ padding: '0.5rem 0' }}>
-      {files.map((f, i) => (
-        <div
-          key={i}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0.625rem 0.75rem',
-            borderBottom: '1px solid #F3F4F6',
+    <div style={{ padding: '1rem 1.5rem', maxWidth: '900px' }}>
+      {/* アップロードゾーン */}
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+        }}
+        style={{
+          border: `2px dashed ${dragOver ? '#F97316' : '#FDBA74'}`,
+          borderRadius: '12px',
+          padding: '1.5rem 1rem',
+          textAlign: 'center',
+          backgroundColor: dragOver ? '#FFF7ED' : '#FFFBF5',
+          cursor: uploading ? 'wait' : 'pointer',
+          marginBottom: '1rem',
+          transition: 'all 0.15s',
+          opacity: uploading ? 0.6 : 1,
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files) handleFiles(e.target.files);
+            e.target.value = ''; // 同じファイルの再アップロード許可
           }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.25rem' }}>{getExtIcon(f.name)}</span>
-            <div>
-              <div style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{f.name}</div>
-              <div style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>{formatSize(f.size)}</div>
-            </div>
-          </div>
-          <a
-            href={f.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              ...btnSecondary,
-              textDecoration: 'none',
-              fontSize: '0.75rem',
-              padding: '0.25rem 0.625rem',
-            }}
-          >
-            ダウンロード
-          </a>
+        />
+        <div style={{ fontSize: '1.5rem', marginBottom: '0.375rem', opacity: 0.6 }}>{'\u{1F4C1}'}</div>
+        <div style={{ fontSize: '0.875rem', color: '#374151', marginBottom: '0.25rem', fontWeight: 500 }}>
+          {uploading ? 'アップロード中...' : 'ファイルをドラッグ＆ドロップ または クリックして選択'}
         </div>
-      ))}
+        <div style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
+          対応: PDF / Word / Excel / 画像 / TXT / CSV / ZIP（1ファイル最大5MB）
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', fontSize: '0.875rem', color: '#991B1B', marginBottom: '1rem' }}>
+          {error}
+        </div>
+      )}
+
+      {files.length === 0 ? (
+        <div style={{ padding: '1.5rem', textAlign: 'center', color: '#9CA3AF', fontSize: '0.875rem' }}>
+          まだファイルが登録されていません。
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#6B7280' }}>
+            <span>{files.length}件のファイル（合計 {formatSize(totalBytes)}）</span>
+          </div>
+          <div style={{ border: '1px solid #E5E7EB', borderRadius: '8px', overflow: 'hidden' }}>
+            {files.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.625rem 0.875rem',
+                  borderBottom: i < files.length - 1 ? '1px solid #F3F4F6' : 'none',
+                  backgroundColor: '#fff',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: '1.25rem' }}>{getExtIcon(f.name)}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                    <div style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>{formatSize(f.size)}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.375rem' }}>
+                  <button
+                    onClick={() => downloadFile(f)}
+                    style={{
+                      ...btnSecondary,
+                      fontSize: '0.75rem',
+                      padding: '0.25rem 0.625rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    DL
+                  </button>
+                  <button
+                    onClick={() => deleteFile(i)}
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      border: '1px solid #FCA5A5',
+                      borderRadius: '6px',
+                      backgroundColor: '#FEF2F2',
+                      color: '#DC2626',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                    }}
+                  >
+                    削除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 };
