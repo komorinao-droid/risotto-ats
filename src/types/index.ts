@@ -331,4 +331,8 @@ export interface ClientData {
   chatScenarios: ChatScenario[];
   chatQuestionGroups: ChatQuestionGroup[];
   chatLeadSettings?: ChatLeadSetting[];
+  // 拠点別オーバーライド（継承モデル：未設定なら全社共通を使用）
+  jobsByBase?: { [baseName: string]: Job[] };
+  sourcesByBase?: { [baseName: string]: Source[] };
+  emailTemplatesByBase?: { [baseName: string]: EmailTemplate[] };
 }

@@ -160,7 +160,7 @@ const IMPORT_FIELDS = [
 // ─── Main component ───
 const ApplicantList: React.FC = () => {
   const navigate = useNavigate();
-  const { clientData, updateClientData, logAction } = useAuth();
+  const { clientData, updateClientData, logAction, client } = useAuth();
 
   // ─── State ───
   const [page, setPage] = useState(1);
@@ -194,7 +194,11 @@ const ApplicantList: React.FC = () => {
 
   if (!clientData) return null;
 
-  const { applicants, events, statuses, sources, bases } = clientData;
+  const { applicants, events, statuses, bases } = clientData;
+  // 子アカウントは自拠点のオーバーライド（あれば）を反映
+  const sources = client?.accountType === 'child' && client.baseName && clientData.sourcesByBase?.[client.baseName]
+    ? clientData.sourcesByBase[client.baseName]
+    : clientData.sources;
 
   // ─── Duplicate detection ───
   const duplicateMap = useMemo(() => detectDuplicates(applicants), [applicants]);

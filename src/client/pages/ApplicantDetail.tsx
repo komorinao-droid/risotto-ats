@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AlertTriangle, Check } from 'lucide-react';
+import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
@@ -469,12 +470,14 @@ const InfoTab: React.FC<InfoTabProps> = ({
   updateApplicant,
   updateClientData,
 }) => {
-  const { logAction } = useAuth();
+  const { logAction, client } = useAuth();
+  const isChild = client?.accountType === 'child';
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Applicant>>({});
   const [birthDateInput, setBirthDateInput] = useState('');
   const [baseChangeWarning, setBaseChangeWarning] = useState('');
   const [baseBlockModal, setBaseBlockModal] = useState(false);
+  const [pendingBaseChange, setPendingBaseChange] = useState<string | null>(null);
 
   // 未来日の面接イベント
   const futureEvents = events.filter((e) => e.date >= today());
@@ -559,8 +562,21 @@ const InfoTab: React.FC<InfoTabProps> = ({
       setBaseBlockModal(true);
       return;
     }
+    // 子アカウントが拠点を変更しようとした場合、閲覧不可になる旨を確認
+    if (val !== applicant.base && isChild) {
+      setPendingBaseChange(val);
+      return;
+    }
     setEditData((prev) => ({ ...prev, base: val }));
     setBaseChangeWarning('');
+  }
+
+  function confirmBaseChange() {
+    if (pendingBaseChange) {
+      setEditData((prev) => ({ ...prev, base: pendingBaseChange }));
+      setBaseChangeWarning('');
+    }
+    setPendingBaseChange(null);
   }
 
   function saveMemo(text: string) {
@@ -651,8 +667,12 @@ const InfoTab: React.FC<InfoTabProps> = ({
   const statusOptions = clientData.statuses.map((s) => ({ value: s.name, label: s.name }));
   const hasSubStatuses = currentStatus && currentStatus.subStatuses.length > 0;
 
+  // 応募者の拠点スコープで sources / jobs を解決（拠点別オーバーライド対応）
+  const scopedSources = resolveSources(clientData, applicant.base);
+  const scopedJobs = resolveJobs(clientData, applicant.base);
+
   // Source badge color
-  const sourceObj = clientData.sources.find((s) => s.name === applicant.src);
+  const sourceObj = scopedSources.find((s) => s.name === applicant.src);
   const sourceColor = sourceObj?.color || '#6B7280';
 
   // Confirmed event
@@ -799,7 +819,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
                 <div style={tableRowStyle}>
                   <span style={tableLabelStyle}>応募媒体</span>
                   <SearchableSelect
-                    options={clientData.sources.map((s) => ({ value: s.name, label: s.name }))}
+                    options={scopedSources.map((s) => ({ value: s.name, label: s.name }))}
                     value={editData.src || ''}
                     onChange={(v) => setEditData((p) => ({ ...p, src: v }))}
                     placeholder="媒体を選択"
@@ -831,7 +851,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
                 <div style={tableRowStyle}>
                   <span style={tableLabelStyle}>職種</span>
                   <SearchableSelect
-                    options={clientData.jobs.map((j) => ({ value: j.name, label: j.name }))}
+                    options={scopedJobs.map((j) => ({ value: j.name, label: j.name }))}
                     value={editData.job || ''}
                     onChange={(v) => setEditData((p) => ({ ...p, job: v }))}
                     placeholder="職種を選択"
@@ -1223,6 +1243,37 @@ const InfoTab: React.FC<InfoTabProps> = ({
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button onClick={() => setBaseBlockModal(false)} style={btnOrange}>閉じる</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Base change confirm (子アカウント) */}
+      <Modal
+        isOpen={!!pendingBaseChange}
+        onClose={() => setPendingBaseChange(null)}
+        title="拠点を変更しますか？"
+        width="440px"
+      >
+        <div>
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+            padding: '0.875rem 1rem', backgroundColor: '#FFFBEB',
+            borderRadius: '8px', border: '1px solid #FDE68A', marginBottom: '1rem',
+          }}>
+            <span style={{ color: '#B45309', display: 'flex', lineHeight: 1 }}><AlertTriangle size={20} /></span>
+            <div>
+              <div style={{ fontWeight: 600, color: '#92400E', fontSize: '0.875rem', marginBottom: '0.375rem' }}>
+                {applicant.base} → {pendingBaseChange}
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: '#78350F' }}>
+                他拠点に変更すると、この応募者は<strong>あなたから閲覧できなくなります</strong>。
+                変更後は本部または変更先拠点のアカウントから操作してください。
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <button onClick={() => setPendingBaseChange(null)} style={btnSecondary}>キャンセル</button>
+            <button onClick={confirmBaseChange} style={btnOrange}>変更する</button>
           </div>
         </div>
       </Modal>

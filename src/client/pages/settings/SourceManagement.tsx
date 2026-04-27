@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Source } from '@/types';
+import type { Source, ClientData } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
@@ -25,6 +25,8 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   fontWeight: 500,
 });
 
+const SHARED = '__shared__';
+
 const SourceManagement: React.FC = () => {
   const { clientData, updateClientData, client } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
@@ -39,10 +41,34 @@ const SourceManagement: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editRow, setEditRow] = useState<Source | null>(null);
   const [showPw, setShowPw] = useState<{ [id: number]: boolean }>({});
+  const isChild = client?.accountType === 'child';
+  const [scope, setScope] = useState<string>(isChild ? (client?.baseName || SHARED) : SHARED);
 
-  const sources = clientData?.sources || [];
+  useEffect(() => {
+    if (isChild && client?.baseName) setScope(client.baseName);
+  }, [isChild, client?.baseName]);
+
+  const isBaseScope = scope !== SHARED;
+  const overrideExists = isBaseScope && !!clientData?.sourcesByBase?.[scope];
+  const sources: Source[] = useMemo(() => {
+    if (!clientData) return [];
+    if (isBaseScope && overrideExists) return clientData.sourcesByBase![scope] || [];
+    return clientData.sources || [];
+  }, [clientData, scope, isBaseScope, overrideExists]);
 
   const canEdit = !client || client.accountType === 'parent' || client.permissions.source;
+  const editingScope = scope;
+
+  const writeSources = (mutator: (list: Source[]) => Source[]) => {
+    updateClientData((data) => {
+      if (editingScope === SHARED) return { ...data, sources: mutator(data.sources) };
+      const current = data.sourcesByBase?.[editingScope] ?? data.sources;
+      return {
+        ...data,
+        sourcesByBase: { ...(data.sourcesByBase || {}), [editingScope]: mutator(current) },
+      };
+    });
+  };
 
   const openAddModal = () => {
     setForm({ name: '', color: COLORS[0].main, monthlyCost: 0, loginId: '', password: '', url: '' });
@@ -51,12 +77,9 @@ const SourceManagement: React.FC = () => {
 
   const addSource = () => {
     if (!form.name.trim()) return;
-    updateClientData((data) => {
-      const maxId = data.sources.reduce((m, s) => Math.max(m, s.id), 0);
-      return {
-        ...data,
-        sources: [...data.sources, { id: maxId + 1, ...form, name: form.name.trim() }],
-      };
+    writeSources((list) => {
+      const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
+      return [...list, { id: maxId + 1, ...form, name: form.name.trim() }];
     });
     setModalOpen(false);
   };
@@ -68,10 +91,7 @@ const SourceManagement: React.FC = () => {
 
   const saveEdit = () => {
     if (!editRow || !editRow.name.trim()) return;
-    updateClientData((data) => ({
-      ...data,
-      sources: data.sources.map((s) => (s.id === editRow.id ? { ...editRow, name: editRow.name.trim() } : s)),
-    }));
+    writeSources((list) => list.map((s) => (s.id === editRow.id ? { ...editRow, name: editRow.name.trim() } : s)));
     setEditingId(null);
     setEditRow(null);
   };
@@ -85,13 +105,27 @@ const SourceManagement: React.FC = () => {
     const source = sources.find((s) => s.id === id);
     if (!source) return;
     if (!window.confirm(`"${source.name}" を削除しますか？該当媒体の応募者からも参照がクリアされます。`)) return;
-    updateClientData((data) => ({
-      ...data,
-      sources: data.sources.filter((s) => s.id !== id),
-      applicants: data.applicants.map((a) =>
-        a.src === source.name ? { ...a, src: '' } : a
-      ),
-    }));
+    updateClientData((data) => {
+      const next: ClientData = { ...data };
+      if (editingScope === SHARED) {
+        next.sources = data.sources.filter((s) => s.id !== id);
+      } else {
+        const current = data.sourcesByBase?.[editingScope] ?? data.sources;
+        next.sourcesByBase = { ...(data.sourcesByBase || {}), [editingScope]: current.filter((s) => s.id !== id) };
+      }
+      next.applicants = data.applicants.map((a) => (a.src === source.name ? { ...a, src: '' } : a));
+      return next;
+    });
+  };
+
+  const removeOverride = () => {
+    if (!isBaseScope) return;
+    if (!window.confirm(`「${scope}」の拠点別媒体設定を削除し、全社共通に戻しますか？`)) return;
+    updateClientData((data) => {
+      const next = { ...(data.sourcesByBase || {}) };
+      delete next[scope];
+      return { ...data, sourcesByBase: next };
+    });
   };
 
   const togglePw = (id: number) => setShowPw((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -108,6 +142,35 @@ const SourceManagement: React.FC = () => {
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>応募媒体管理</h2>
         <button onClick={openAddModal} style={btnStyle('#fff', '#3B82F6')}>+ 新規追加</button>
       </div>
+
+      {/* スコープ切替（親アカのみ） */}
+      {!isChild && (clientData?.bases?.length || 0) > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8125rem', color: '#6B7280', fontWeight: 500 }}>編集スコープ:</span>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} style={{ ...inputStyle, width: 'auto', minWidth: '200px' }}>
+            <option value={SHARED}>全社共通</option>
+            {clientData?.bases.map((b) => (
+              <option key={b.id} value={b.name}>
+                拠点別: {b.name}{clientData?.sourcesByBase?.[b.name] ? '（カスタム済）' : ''}
+              </option>
+            ))}
+          </select>
+          {isBaseScope && overrideExists && (
+            <button onClick={removeOverride} style={btnStyle('#DC2626', '#FEF2F2')}>拠点別設定を削除</button>
+          )}
+        </div>
+      )}
+
+      {isBaseScope && !overrideExists && (
+        <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.8125rem', color: '#92400E', marginBottom: '0.75rem' }}>
+          現在「{scope}」の拠点別媒体設定はありません。下に表示しているのは全社共通の内容です。<strong>追加・編集すると拠点別設定が新規作成されます。</strong>
+        </div>
+      )}
+      {isChild && (
+        <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#F3F4F6', borderRadius: '6px', fontSize: '0.8125rem', color: '#4B5563', marginBottom: '0.75rem' }}>
+          {overrideExists ? '自拠点用にカスタム済の媒体設定です。' : '全社共通の媒体設定を表示中です。編集すると自拠点用の設定が作成されます。'}
+        </div>
+      )}
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { EmailTemplate } from '@/types';
+import type { EmailTemplate, ClientData } from '@/types';
 import Modal from '@/components/Modal';
 
 const inputStyle: React.CSSProperties = {
@@ -25,6 +25,8 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 
 const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{{拠点住所}}', '{{確定面接日}}', '{{応募媒体}}'];
 
+const SHARED = '__shared__';
+
 const EmailTemplateManagement: React.FC = () => {
   const { clientData, updateClientData, client } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -36,9 +38,36 @@ const EmailTemplateManagement: React.FC = () => {
   const [newName, setNewName] = useState('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const isChild = client?.accountType === 'child';
+  const [scope, setScope] = useState<string>(isChild ? (client?.baseName || SHARED) : SHARED);
 
-  const templates = clientData?.emailTemplates || [];
+  useEffect(() => {
+    if (isChild && client?.baseName) setScope(client.baseName);
+  }, [isChild, client?.baseName]);
+
+  const isBaseScope = scope !== SHARED;
+  const overrideExists = isBaseScope && !!clientData?.emailTemplatesByBase?.[scope];
+  const templates: EmailTemplate[] = useMemo(() => {
+    if (!clientData) return [];
+    if (isBaseScope && overrideExists) return clientData.emailTemplatesByBase![scope] || [];
+    return clientData.emailTemplates || [];
+  }, [clientData, scope, isBaseScope, overrideExists]);
   const canEdit = !client || client.accountType === 'parent' || client.permissions.mailtemplate;
+  const editingScope = scope;
+
+  const writeTemplates = useCallback((mutator: (list: EmailTemplate[]) => EmailTemplate[]) => {
+    updateClientData((data) => {
+      if (editingScope === SHARED) return { ...data, emailTemplates: mutator(data.emailTemplates) };
+      const current = data.emailTemplatesByBase?.[editingScope] ?? data.emailTemplates;
+      return {
+        ...data,
+        emailTemplatesByBase: { ...(data.emailTemplatesByBase || {}), [editingScope]: mutator(current) },
+      };
+    });
+  }, [editingScope, updateClientData]);
+
+  // スコープ切替時に選択をリセット
+  useEffect(() => { setSelectedId(null); }, [scope]);
 
   // Load template on select
   useEffect(() => {
@@ -63,14 +92,9 @@ const EmailTemplateManagement: React.FC = () => {
   const doSave = useCallback(() => {
     if (selectedId === null) return;
     setSaveState('saving');
-    updateClientData((data) => ({
-      ...data,
-      emailTemplates: data.emailTemplates.map((t) =>
-        t.id === selectedId ? { ...t, name, subject, body } : t
-      ),
-    }));
+    writeTemplates((list) => list.map((t) => (t.id === selectedId ? { ...t, name, subject, body } : t)));
     setTimeout(() => setSaveState('saved'), 300);
-  }, [selectedId, name, subject, body, updateClientData]);
+  }, [selectedId, name, subject, body, writeTemplates]);
 
   const scheduleAutoSave = () => {
     setSaveState('idle');
@@ -95,24 +119,29 @@ const EmailTemplateManagement: React.FC = () => {
 
   const addTemplate = () => {
     if (!newName.trim()) return;
-    updateClientData((data) => {
-      const maxId = data.emailTemplates.reduce((m, t) => Math.max(m, t.id), 0);
-      const newT: EmailTemplate = { id: maxId + 1, name: newName.trim(), subject: '', body: '' };
-      return { ...data, emailTemplates: [...data.emailTemplates, newT] };
+    writeTemplates((list) => {
+      const maxId = list.reduce((m, t) => Math.max(m, t.id), 0);
+      return [...list, { id: maxId + 1, name: newName.trim(), subject: '', body: '' }];
     });
     setNewName('');
     setModalOpen(false);
-    // Will auto-select via effect if needed
   };
 
   const deleteTemplate = (id: number) => {
     const t = templates.find((t) => t.id === id);
     if (!t || !window.confirm(`"${t.name}" を削除しますか？`)) return;
-    updateClientData((data) => ({
-      ...data,
-      emailTemplates: data.emailTemplates.filter((t) => t.id !== id),
-    }));
+    writeTemplates((list) => list.filter((t) => t.id !== id));
     if (selectedId === id) setSelectedId(null);
+  };
+
+  const removeOverride = () => {
+    if (!isBaseScope) return;
+    if (!window.confirm(`「${scope}」の拠点別メールテンプレ設定を削除し、全社共通に戻しますか？`)) return;
+    updateClientData((data) => {
+      const next = { ...(data.emailTemplatesByBase || {}) };
+      delete next[scope];
+      return { ...data, emailTemplatesByBase: next };
+    });
   };
 
   if (!canEdit) {
@@ -129,6 +158,35 @@ const EmailTemplateManagement: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* スコープ切替 */}
+      {!isChild && (clientData?.bases?.length || 0) > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8125rem', color: '#6B7280', fontWeight: 500 }}>編集スコープ:</span>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} style={{ ...inputStyle, width: 'auto', minWidth: '200px' }}>
+            <option value={SHARED}>全社共通</option>
+            {clientData?.bases.map((b) => (
+              <option key={b.id} value={b.name}>
+                拠点別: {b.name}{clientData?.emailTemplatesByBase?.[b.name] ? '（カスタム済）' : ''}
+              </option>
+            ))}
+          </select>
+          {isBaseScope && overrideExists && (
+            <button onClick={removeOverride} style={btnStyle('#DC2626', '#FEF2F2')}>拠点別設定を削除</button>
+          )}
+        </div>
+      )}
+
+      {isBaseScope && !overrideExists && (
+        <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.8125rem', color: '#92400E', marginBottom: '0.75rem' }}>
+          現在「{scope}」の拠点別テンプレ設定はありません。下に表示しているのは全社共通の内容です。<strong>追加・編集すると拠点別設定が新規作成されます。</strong>
+        </div>
+      )}
+      {isChild && (
+        <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#F3F4F6', borderRadius: '6px', fontSize: '0.8125rem', color: '#4B5563', marginBottom: '0.75rem' }}>
+          {overrideExists ? '自拠点用にカスタム済のメールテンプレ設定です。' : '全社共通のテンプレ設定を表示中です。編集すると自拠点用の設定が作成されます。'}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '1rem', minHeight: '500px' }}>
         {/* Left panel: template list */}

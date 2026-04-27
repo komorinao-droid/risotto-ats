@@ -61,14 +61,16 @@ const DetailRow: React.FC<{ label: string; value: string }> = ({ label, value })
 );
 
 // ── 詳細ページ ──
-const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) => void; onDelete: (id: number) => void; onNavigate: (path: string) => void }> = ({ base, onBack, onEdit, onDelete, onNavigate }) => (
+const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) => void; onDelete: (id: number) => void; onNavigate: (path: string) => void; canMutate: boolean }> = ({ base, onBack, onEdit, onDelete, onNavigate, canMutate }) => (
   <div style={{ padding: '1.5rem' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
       <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>拠点詳細</h2>
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <button onClick={() => onEdit(base)} style={{ ...btnStyle('#fff', '#3B82F6'), padding: '0.5rem 1.25rem', fontSize: '0.875rem' }}>編集</button>
-        <button onClick={() => onDelete(base.id)} style={{ ...btnStyle('#DC2626', '#FEF2F2'), padding: '0.5rem 1.25rem', fontSize: '0.875rem', border: '1px solid #fca5a5' }}>削除</button>
-      </div>
+      {canMutate && (
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => onEdit(base)} style={{ ...btnStyle('#fff', '#3B82F6'), padding: '0.5rem 1.25rem', fontSize: '0.875rem' }}>編集</button>
+          <button onClick={() => onDelete(base.id)} style={{ ...btnStyle('#DC2626', '#FEF2F2'), padding: '0.5rem 1.25rem', fontSize: '0.875rem', border: '1px solid #fca5a5' }}>削除</button>
+        </div>
+      )}
     </div>
     <div onClick={onBack} style={{ cursor: 'pointer', color: '#6b7280', fontSize: '0.8125rem', marginBottom: '1rem' }}>
       &lt; 拠点一覧に戻る
@@ -132,8 +134,18 @@ const BaseManagement: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [selectedBaseId, setSelectedBaseId] = useState<number | null>(getBaseIdFromURL);
 
-  const bases = clientData?.bases || [];
+  const isChild = client?.accountType === 'child';
+  const allBases = clientData?.bases || [];
+  // 子アカウントは自拠点のみ閲覧可能
+  const bases = useMemo(() => {
+    if (isChild && client?.baseName) {
+      return allBases.filter((b) => b.name === client.baseName);
+    }
+    return allBases;
+  }, [allBases, isChild, client?.baseName]);
   const canEdit = !client || client.accountType === 'parent' || client.permissions.base;
+  // 子アカウントは編集・追加・削除を禁止（自拠点情報は親が管轄）
+  const canMutate = !isChild && canEdit;
 
   // popstate で戻る対応
   useEffect(() => {
@@ -225,10 +237,12 @@ const BaseManagement: React.FC = () => {
   if (selectedBase) {
     return (
       <>
-        <BaseDetail base={selectedBase} onBack={goList} onEdit={openEdit} onDelete={deleteBase} onNavigate={navigate} />
-        <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="拠点編集">
-          <EditForm form={form} setForm={setForm} editId={editId} save={save} close={() => setModalOpen(false)} />
-        </Modal>
+        <BaseDetail base={selectedBase} onBack={goList} onEdit={openEdit} onDelete={deleteBase} onNavigate={navigate} canMutate={canMutate} />
+        {canMutate && (
+          <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="拠点編集">
+            <EditForm form={form} setForm={setForm} editId={editId} save={save} close={() => setModalOpen(false)} />
+          </Modal>
+        )}
       </>
     );
   }
@@ -238,8 +252,15 @@ const BaseManagement: React.FC = () => {
     <div style={{ padding: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>拠点管理</h2>
-        <button onClick={openAdd} style={btnStyle('#fff', '#3B82F6')}>+ 新規追加</button>
+        {canMutate && (
+          <button onClick={openAdd} style={btnStyle('#fff', '#3B82F6')}>+ 新規追加</button>
+        )}
       </div>
+      {isChild && (
+        <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#F3F4F6', borderRadius: '6px', fontSize: '0.8125rem', color: '#4B5563', marginBottom: '0.75rem' }}>
+          子アカウントは自拠点のみ閲覧できます（編集は本部アカウントから）
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <input
@@ -289,9 +310,11 @@ const BaseManagement: React.FC = () => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="新規拠点追加">
-        <EditForm form={form} setForm={setForm} editId={editId} save={save} close={() => setModalOpen(false)} />
-      </Modal>
+      {canMutate && (
+        <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="新規拠点追加">
+          <EditForm form={form} setForm={setForm} editId={editId} save={save} close={() => setModalOpen(false)} />
+        </Modal>
+      )}
     </div>
   );
 };

@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { warekiToDate } from '@/utils/wareki';
 import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
+import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import type { Applicant, ClientData, PrefDateTime } from '@/types';
 
 interface AddApplicantModalProps {
@@ -45,7 +46,9 @@ const requiredMark: React.CSSProperties = {
 };
 
 const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }) => {
-  const { clientData, updateClientData, logAction } = useAuth();
+  const { clientData, updateClientData, logAction, client } = useAuth();
+  const isChild = client?.accountType === 'child';
+  const lockedBaseName = isChild ? (client?.baseName || '') : '';
 
   const [name, setName] = useState('');
   const [furigana, setFurigana] = useState('');
@@ -84,7 +87,7 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       setJob('');
       setSrc('');
       setStage(clientData?.statuses?.[0]?.name || '');
-      setBase('');
+      setBase(lockedBaseName);
       setNote('');
       setPrefDates([]);
       setPrefDateInput('');
@@ -116,9 +119,11 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
   }, [job, clientData]);
 
   const statuses = useMemo(() => clientData?.statuses || [], [clientData]);
-  const sources = useMemo(() => clientData?.sources || [], [clientData]);
+  // 子アカウントは自拠点のオーバーライド（あれば）を、なければ全社共通を使用
+  const scopeBaseName = isChild ? client?.baseName : (base || undefined);
+  const sources = useMemo(() => (clientData ? resolveSources(clientData, scopeBaseName) : []), [clientData, scopeBaseName]);
   const bases = useMemo(() => clientData?.bases || [], [clientData]);
-  const jobs = useMemo(() => clientData?.jobs || [], [clientData]);
+  const jobs = useMemo(() => (clientData ? resolveJobs(clientData, scopeBaseName) : []), [clientData, scopeBaseName]);
 
   const baseOptions = useMemo(
     () => bases.map((b) => ({ value: b.name, label: b.name })),
@@ -523,13 +528,22 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         </div>
         <div style={fieldStyle}>
           <label style={labelStyle}>拠点<span style={requiredMark}>*</span></label>
-          <SearchableSelect
-            options={baseOptions}
-            value={base}
-            onChange={setBase}
-            placeholder="拠点を選択"
-            style={{ border: errors.base ? '1px solid #EF4444' : undefined, borderRadius: '6px' }}
-          />
+          {isChild ? (
+            <input
+              type="text"
+              value={lockedBaseName}
+              disabled
+              style={{ ...inputStyle, backgroundColor: '#F3F4F6', color: '#6B7280', cursor: 'not-allowed' }}
+            />
+          ) : (
+            <SearchableSelect
+              options={baseOptions}
+              value={base}
+              onChange={setBase}
+              placeholder="拠点を選択"
+              style={{ border: errors.base ? '1px solid #EF4444' : undefined, borderRadius: '6px' }}
+            />
+          )}
           {errors.base && <div style={{ color: '#EF4444', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.base}</div>}
         </div>
       </div>
