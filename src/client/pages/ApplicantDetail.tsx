@@ -1515,7 +1515,7 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
         <div style={{ padding: '2rem', textAlign: 'center', backgroundColor: '#F9FAFB', borderRadius: '8px', border: '1px dashed #E5E7EB' }}>
           <p style={{ color: '#6B7280', fontSize: '0.875rem', margin: 0 }}>
             まだAI評価を実行していません。<br />
-            「AI評価実行」ボタンを押すとClaude AIが書類選考スコアを算出します。
+            「AI評価実行」ボタンを押すとRISOTTO AIが書類選考スコアを算出します。
           </p>
         </div>
       )}
@@ -1534,7 +1534,7 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
               </span>
               <span style={{ fontSize: '0.75rem', color: '#9CA3AF', marginLeft: 'auto' }}>
                 評価: {new Date(screening.evaluatedAt).toLocaleString('ja-JP')}<br />
-                Model: {screening.model}
+                by RISOTTO AI
               </span>
             </div>
 

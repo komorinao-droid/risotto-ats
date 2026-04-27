@@ -111,7 +111,7 @@ const ScreeningSettings: React.FC = () => {
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>AIスクリーニング設定</h2>
       </div>
       <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: 0, marginBottom: '1rem' }}>
-        応募者詳細の「AIスクリーニング」タブで「AI評価実行」を押すと、ここで設定した基準でClaude AIが書類選考スコアを算出します。
+        応募者詳細の「AIスクリーニング」タブで「AI評価実行」を押すと、ここで設定した基準でRISOTTO AIが書類選考スコアを算出します。
         職種ごとに評価軸が違う場合はスコープを切り替えて職種別に設定できます。
       </p>
 
