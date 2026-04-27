@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { EmailTemplate, ClientData } from '@/types';
+import type { EmailTemplate } from '@/types';
 import Modal from '@/components/Modal';
 
 const inputStyle: React.CSSProperties = {
