@@ -342,6 +342,17 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
                 />
               ),
             },
+            {
+              key: 'screening',
+              label: 'AIスクリーニング',
+              content: (
+                <ScreeningTab
+                  applicant={applicant}
+                  clientData={clientData}
+                  updateApplicant={updateApplicant}
+                />
+              ),
+            },
             { key: 'email', label: 'メール', content: <EmailTab /> },
             { key: 'files', label: 'ファイル', content: <FilesTab applicant={applicant} /> },
             { key: 'webinterview', label: 'WEB面接', content: <WebInterviewTab /> },
@@ -478,8 +489,6 @@ const InfoTab: React.FC<InfoTabProps> = ({
   const [baseChangeWarning, setBaseChangeWarning] = useState('');
   const [baseBlockModal, setBaseBlockModal] = useState(false);
   const [pendingBaseChange, setPendingBaseChange] = useState<string | null>(null);
-  const [screeningRunning, setScreeningRunning] = useState(false);
-  const [screeningError, setScreeningError] = useState('');
 
   // 未来日の面接イベント
   const futureEvents = events.filter((e) => e.date >= today());
@@ -581,55 +590,6 @@ const InfoTab: React.FC<InfoTabProps> = ({
     setPendingBaseChange(null);
   }
 
-  async function runScreening() {
-    const criteria = clientData.screeningCriteria;
-    if (!criteria || !criteria.enabled) {
-      setScreeningError('AIスクリーニング機能が有効化されていません（設定 → AIスクリーニング）');
-      return;
-    }
-    setScreeningRunning(true);
-    setScreeningError('');
-    try {
-      const resp = await fetch('/api/screen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          applicant: {
-            age: applicant.age,
-            gender: applicant.gender,
-            currentJob: applicant.currentJob,
-            job: applicant.job,
-            src: applicant.src,
-            base: applicant.base,
-            educationWorkHistory: applicant.educationWorkHistory,
-            desiredConditions: applicant.desiredConditions,
-            chatAnswers: applicant.chatAnswers,
-            note: applicant.note,
-          },
-          criteria,
-        }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
-      const result = {
-        score: Number(data.score) || 0,
-        recommendation: data.recommendation,
-        reasons: Array.isArray(data.reasons) ? data.reasons : [],
-        concerns: Array.isArray(data.concerns) ? data.concerns : [],
-        evaluatedAt: data.evaluatedAt || new Date().toISOString(),
-        model: data.model || 'claude-haiku-4-5',
-      };
-      updateApplicant((a) => ({ ...a, screening: result }));
-      logAction('applicant', 'AI評価実行', applicant.name || String(applicant.id), `スコア: ${result.score} / ${result.recommendation}`);
-    } catch (e: any) {
-      setScreeningError(e?.message || 'AI評価に失敗しました');
-    } finally {
-      setScreeningRunning(false);
-    }
-  }
 
   function saveMemo(text: string) {
     updateApplicant((a) => ({ ...a, note: text }));
@@ -730,96 +690,10 @@ const InfoTab: React.FC<InfoTabProps> = ({
   // Confirmed event
   const confirmedEvent = events.length > 0 ? events[0] : null;
 
-  const screening = applicant.screening;
-  const screeningEnabled = !!clientData.screeningCriteria?.enabled;
-  const recoStyle = (reco: string) => {
-    if (reco === 'pass') return { bg: '#DEF7EC', color: '#065F46', label: '合格推奨' };
-    if (reco === 'reject') return { bg: '#FEE2E2', color: '#991B1B', label: '不合格推奨' };
-    return { bg: '#FEF3C7', color: '#92400E', label: '要確認' };
-  };
-
   return (
     <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
       {/* LEFT COLUMN - 60% */}
       <div style={{ flex: '0 0 60%', maxWidth: '60%' }}>
-        {/* === AI Screening Card === */}
-        {screeningEnabled && (
-          <div style={{ ...cardStyle, marginBottom: '1rem', borderTop: '3px solid #9333EA' }}>
-            <div style={cardHeaderStyle}>
-              <h3 style={{ ...cardTitleStyle, display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                <Sparkles size={16} color="#9333EA" /> AIスクリーニング
-              </h3>
-              <button
-                onClick={runScreening}
-                disabled={screeningRunning}
-                style={{
-                  ...btnOrange,
-                  fontSize: '0.75rem',
-                  padding: '0.25rem 0.75rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.375rem',
-                  opacity: screeningRunning ? 0.6 : 1,
-                  cursor: screeningRunning ? 'wait' : 'pointer',
-                }}
-              >
-                {screeningRunning ? (
-                  <><Loader2 size={12} className="spin" /> 評価中...</>
-                ) : (
-                  <><Sparkles size={12} /> {screening ? '再評価' : 'AI評価実行'}</>
-                )}
-              </button>
-            </div>
-            <div style={cardBodyStyle}>
-              {screeningError && (
-                <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', fontSize: '0.8125rem', color: '#991B1B', marginBottom: '0.75rem' }}>
-                  {screeningError}
-                </div>
-              )}
-              {!screening && !screeningRunning && !screeningError && (
-                <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
-                  まだAI評価を実行していません。「AI評価実行」ボタンを押すとClaude AIが書類選考スコアを算出します。
-                </div>
-              )}
-              {screening && (() => {
-                const r = recoStyle(screening.recommendation);
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.375rem' }}>
-                        <span style={{ fontSize: '2rem', fontWeight: 700, color: '#9333EA', lineHeight: 1 }}>{screening.score}</span>
-                        <span style={{ fontSize: '0.875rem', color: '#9CA3AF' }}>/ 100</span>
-                      </div>
-                      <span style={{ padding: '0.25rem 0.75rem', borderRadius: '9999px', backgroundColor: r.bg, color: r.color, fontSize: '0.8125rem', fontWeight: 700 }}>
-                        {r.label}
-                      </span>
-                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginLeft: 'auto' }}>
-                        評価: {new Date(screening.evaluatedAt).toLocaleString('ja-JP')} / {screening.model}
-                      </span>
-                    </div>
-                    {screening.reasons.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065F46', marginBottom: '0.25rem' }}>+ 加点ポイント</div>
-                        <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
-                          {screening.reasons.map((r, i) => <li key={i}>{r}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {screening.concerns.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', marginBottom: '0.25rem' }}>− 懸念ポイント</div>
-                        <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
-                          {screening.concerns.map((c, i) => <li key={i}>{c}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
         {/* === Application Info Card === */}
         <div style={cardStyle}>
           <div style={cardHeaderStyle}>
@@ -1498,6 +1372,187 @@ const JobInfoEditRow: React.FC<{ label: string; value: string; onChange: (v: str
     />
   </div>
 );
+
+/* =======================================
+   Tab: AI Screening
+   ======================================= */
+interface ScreeningTabProps {
+  applicant: Applicant;
+  clientData: ClientData;
+  updateApplicant: (updater: (a: Applicant) => Applicant) => void;
+}
+
+const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, updateApplicant }) => {
+  const { logAction } = useAuth();
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+
+  const screening = applicant.screening;
+  const enabled = !!clientData.screeningCriteria?.enabled;
+
+  const recoStyle = (reco: string) => {
+    if (reco === 'pass') return { bg: '#DEF7EC', color: '#065F46', label: '合格推奨' };
+    if (reco === 'reject') return { bg: '#FEE2E2', color: '#991B1B', label: '不合格推奨' };
+    return { bg: '#FEF3C7', color: '#92400E', label: '要確認' };
+  };
+
+  async function run() {
+    const criteria = clientData.screeningCriteria;
+    if (!criteria || !criteria.enabled) {
+      setError('AIスクリーニング機能が有効化されていません（設定 → AIスクリーニング）');
+      return;
+    }
+    setRunning(true);
+    setError('');
+    try {
+      const resp = await fetch('/api/screen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicant: {
+            age: applicant.age,
+            gender: applicant.gender,
+            currentJob: applicant.currentJob,
+            job: applicant.job,
+            src: applicant.src,
+            base: applicant.base,
+            educationWorkHistory: applicant.educationWorkHistory,
+            desiredConditions: applicant.desiredConditions,
+            chatAnswers: applicant.chatAnswers,
+            note: applicant.note,
+          },
+          criteria,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      const result = {
+        score: Number(data.score) || 0,
+        recommendation: data.recommendation,
+        reasons: Array.isArray(data.reasons) ? data.reasons : [],
+        concerns: Array.isArray(data.concerns) ? data.concerns : [],
+        evaluatedAt: data.evaluatedAt || new Date().toISOString(),
+        model: data.model || 'claude-haiku-4-5',
+      };
+      updateApplicant((a) => ({ ...a, screening: result }));
+      logAction('applicant', 'AI評価実行', applicant.name || String(applicant.id), `スコア: ${result.score} / ${result.recommendation}`);
+    } catch (e: any) {
+      setError(e?.message || 'AI評価に失敗しました');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  if (!enabled) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.75rem', opacity: 0.4 }}>
+          <Sparkles size={36} color="#9333EA" />
+        </div>
+        <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem', fontWeight: 600, color: '#374151' }}>AIスクリーニングは無効化されています</h3>
+        <p style={{ color: '#6B7280', fontSize: '0.875rem', margin: 0 }}>
+          設定 → AIスクリーニング で「機能を有効化」をONにしてください。
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '1.5rem', maxWidth: '900px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Sparkles size={18} color="#9333EA" />
+          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#111827' }}>AIスクリーニング結果</h3>
+        </div>
+        <button
+          onClick={run}
+          disabled={running}
+          style={{
+            padding: '0.5rem 1rem',
+            border: 'none',
+            borderRadius: '6px',
+            backgroundColor: 'var(--color-primary, #F97316)',
+            color: '#fff',
+            fontSize: '0.8125rem',
+            fontWeight: 600,
+            cursor: running ? 'wait' : 'pointer',
+            opacity: running ? 0.6 : 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+          }}
+        >
+          {running ? (
+            <><Loader2 size={14} className="spin" /> 評価中...</>
+          ) : (
+            <><Sparkles size={14} /> {screening ? '再評価' : 'AI評価実行'}</>
+          )}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', fontSize: '0.875rem', color: '#991B1B', marginBottom: '1rem' }}>
+          {error}
+        </div>
+      )}
+
+      {!screening && !running && !error && (
+        <div style={{ padding: '2rem', textAlign: 'center', backgroundColor: '#F9FAFB', borderRadius: '8px', border: '1px dashed #E5E7EB' }}>
+          <p style={{ color: '#6B7280', fontSize: '0.875rem', margin: 0 }}>
+            まだAI評価を実行していません。<br />
+            「AI評価実行」ボタンを押すとClaude AIが書類選考スコアを算出します。
+          </p>
+        </div>
+      )}
+
+      {screening && (() => {
+        const r = recoStyle(screening.recommendation);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', padding: '1rem 1.25rem', backgroundColor: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.375rem' }}>
+                <span style={{ fontSize: '2.5rem', fontWeight: 700, color: '#9333EA', lineHeight: 1 }}>{screening.score}</span>
+                <span style={{ fontSize: '1rem', color: '#9CA3AF' }}>/ 100</span>
+              </div>
+              <span style={{ padding: '0.375rem 0.875rem', borderRadius: '9999px', backgroundColor: r.bg, color: r.color, fontSize: '0.875rem', fontWeight: 700 }}>
+                {r.label}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', marginLeft: 'auto' }}>
+                評価: {new Date(screening.evaluatedAt).toLocaleString('ja-JP')}<br />
+                Model: {screening.model}
+              </span>
+            </div>
+
+            {screening.reasons.length > 0 && (
+              <div style={{ padding: '1rem 1.25rem', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#065F46', marginBottom: '0.5rem' }}>+ 加点ポイント</div>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.8 }}>
+                  {screening.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {screening.concerns.length > 0 && (
+              <div style={{ padding: '1rem 1.25rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#991B1B', marginBottom: '0.5rem' }}>− 懸念ポイント</div>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.8 }}>
+                  {screening.concerns.map((concern, i) => <li key={i}>{concern}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.8125rem', color: '#92400E' }}>
+              <strong>運用メモ:</strong> AI評価は判断補助です。最終的な合否判断は人間が行ってください。
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+};
 
 /* =======================================
    Tab 2: Email
