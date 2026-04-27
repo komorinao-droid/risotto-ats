@@ -17,6 +17,7 @@ import FilterConditionSettings from '@/client/pages/settings/FilterConditionSett
 import ExclusionList from '@/client/pages/settings/ExclusionList';
 import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManagement';
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
+import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
 
 const AuthenticatedApp: React.FC = () => {
@@ -41,6 +42,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/settings/exclusion" element={<ExclusionList />} />
           <Route path="/settings/email-templates" element={<EmailTemplateManagement />} />
           <Route path="/settings/chatbot" element={<ChatbotManagement />} />
+          <Route path="/settings/screening" element={<ScreeningSettings />} />
           <Route path="/settings/account" element={<AccountSettings />} />
         </Routes>
       </main>

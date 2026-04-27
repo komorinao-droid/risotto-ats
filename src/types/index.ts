@@ -58,6 +58,16 @@ export interface Member {
   notifySms: boolean;
 }
 
+// AIスクリーニング結果
+export interface ScreeningResult {
+  score: number; // 0-100
+  recommendation: 'pass' | 'review' | 'reject';
+  reasons: string[];
+  concerns: string[];
+  evaluatedAt: string; // ISO timestamp
+  model: string;
+}
+
 // 応募者
 export interface Applicant {
   id: number;
@@ -91,6 +101,7 @@ export interface Applicant {
   desiredConditions?: DesiredConditions;
   chatAnswers: ChatAnswer[];
   cancelledInterviews?: CancelledInterview[];
+  screening?: ScreeningResult;
 }
 
 // キャンセルされた面接履歴
@@ -314,6 +325,16 @@ export interface ChatQuestionGroup {
   questions: ChatQuestion[];
 }
 
+// AIスクリーニング設定（全社共通）
+export interface ScreeningCriteria {
+  enabled: boolean;
+  evaluationPoints: string; // 評価観点（フリーテキスト）
+  requiredQualities: string; // 必須要件
+  ngQualities: string; // NG要件
+  passThreshold: number; // 推奨「合格」のスコア下限
+  rejectThreshold: number; // 推奨「不合格」のスコア上限
+}
+
 // ストレージに保存するデータ全体
 export interface ClientData {
   applicants: Applicant[];
@@ -335,4 +356,5 @@ export interface ClientData {
   jobsByBase?: { [baseName: string]: Job[] };
   sourcesByBase?: { [baseName: string]: Source[] };
   emailTemplatesByBase?: { [baseName: string]: EmailTemplate[] };
+  screeningCriteria?: ScreeningCriteria;
 }

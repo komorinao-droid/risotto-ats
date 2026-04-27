@@ -49,6 +49,7 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/exclusion', label: '除外リスト', icon: null, permission: 'exclusion' },
       { path: '/settings/email-templates', label: 'メールテンプレート', icon: null, permission: 'mailtemplate' },
       { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
+      { path: '/settings/screening', label: 'AIスクリーニング', icon: null },
       { path: '/settings/account', label: 'アカウント', icon: null },
     ],
   },

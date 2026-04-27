@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { AlertTriangle, Check } from 'lucide-react';
+import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
 import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
@@ -478,6 +478,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
   const [baseChangeWarning, setBaseChangeWarning] = useState('');
   const [baseBlockModal, setBaseBlockModal] = useState(false);
   const [pendingBaseChange, setPendingBaseChange] = useState<string | null>(null);
+  const [screeningRunning, setScreeningRunning] = useState(false);
+  const [screeningError, setScreeningError] = useState('');
 
   // 未来日の面接イベント
   const futureEvents = events.filter((e) => e.date >= today());
@@ -579,6 +581,56 @@ const InfoTab: React.FC<InfoTabProps> = ({
     setPendingBaseChange(null);
   }
 
+  async function runScreening() {
+    const criteria = clientData.screeningCriteria;
+    if (!criteria || !criteria.enabled) {
+      setScreeningError('AIスクリーニング機能が有効化されていません（設定 → AIスクリーニング）');
+      return;
+    }
+    setScreeningRunning(true);
+    setScreeningError('');
+    try {
+      const resp = await fetch('/api/screen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicant: {
+            age: applicant.age,
+            gender: applicant.gender,
+            currentJob: applicant.currentJob,
+            job: applicant.job,
+            src: applicant.src,
+            base: applicant.base,
+            educationWorkHistory: applicant.educationWorkHistory,
+            desiredConditions: applicant.desiredConditions,
+            chatAnswers: applicant.chatAnswers,
+            note: applicant.note,
+          },
+          criteria,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      const result = {
+        score: Number(data.score) || 0,
+        recommendation: data.recommendation,
+        reasons: Array.isArray(data.reasons) ? data.reasons : [],
+        concerns: Array.isArray(data.concerns) ? data.concerns : [],
+        evaluatedAt: data.evaluatedAt || new Date().toISOString(),
+        model: data.model || 'claude-haiku-4-5',
+      };
+      updateApplicant((a) => ({ ...a, screening: result }));
+      logAction('applicant', 'AI評価実行', applicant.name || String(applicant.id), `スコア: ${result.score} / ${result.recommendation}`);
+    } catch (e: any) {
+      setScreeningError(e?.message || 'AI評価に失敗しました');
+    } finally {
+      setScreeningRunning(false);
+    }
+  }
+
   function saveMemo(text: string) {
     updateApplicant((a) => ({ ...a, note: text }));
     setMemoSaved(true);
@@ -678,10 +730,96 @@ const InfoTab: React.FC<InfoTabProps> = ({
   // Confirmed event
   const confirmedEvent = events.length > 0 ? events[0] : null;
 
+  const screening = applicant.screening;
+  const screeningEnabled = !!clientData.screeningCriteria?.enabled;
+  const recoStyle = (reco: string) => {
+    if (reco === 'pass') return { bg: '#DEF7EC', color: '#065F46', label: '合格推奨' };
+    if (reco === 'reject') return { bg: '#FEE2E2', color: '#991B1B', label: '不合格推奨' };
+    return { bg: '#FEF3C7', color: '#92400E', label: '要確認' };
+  };
+
   return (
     <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
       {/* LEFT COLUMN - 60% */}
       <div style={{ flex: '0 0 60%', maxWidth: '60%' }}>
+        {/* === AI Screening Card === */}
+        {screeningEnabled && (
+          <div style={{ ...cardStyle, marginBottom: '1rem', borderTop: '3px solid #9333EA' }}>
+            <div style={cardHeaderStyle}>
+              <h3 style={{ ...cardTitleStyle, display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <Sparkles size={16} color="#9333EA" /> AIスクリーニング
+              </h3>
+              <button
+                onClick={runScreening}
+                disabled={screeningRunning}
+                style={{
+                  ...btnOrange,
+                  fontSize: '0.75rem',
+                  padding: '0.25rem 0.75rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.375rem',
+                  opacity: screeningRunning ? 0.6 : 1,
+                  cursor: screeningRunning ? 'wait' : 'pointer',
+                }}
+              >
+                {screeningRunning ? (
+                  <><Loader2 size={12} className="spin" /> 評価中...</>
+                ) : (
+                  <><Sparkles size={12} /> {screening ? '再評価' : 'AI評価実行'}</>
+                )}
+              </button>
+            </div>
+            <div style={cardBodyStyle}>
+              {screeningError && (
+                <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', fontSize: '0.8125rem', color: '#991B1B', marginBottom: '0.75rem' }}>
+                  {screeningError}
+                </div>
+              )}
+              {!screening && !screeningRunning && !screeningError && (
+                <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+                  まだAI評価を実行していません。「AI評価実行」ボタンを押すとClaude AIが書類選考スコアを算出します。
+                </div>
+              )}
+              {screening && (() => {
+                const r = recoStyle(screening.recommendation);
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.375rem' }}>
+                        <span style={{ fontSize: '2rem', fontWeight: 700, color: '#9333EA', lineHeight: 1 }}>{screening.score}</span>
+                        <span style={{ fontSize: '0.875rem', color: '#9CA3AF' }}>/ 100</span>
+                      </div>
+                      <span style={{ padding: '0.25rem 0.75rem', borderRadius: '9999px', backgroundColor: r.bg, color: r.color, fontSize: '0.8125rem', fontWeight: 700 }}>
+                        {r.label}
+                      </span>
+                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginLeft: 'auto' }}>
+                        評価: {new Date(screening.evaluatedAt).toLocaleString('ja-JP')} / {screening.model}
+                      </span>
+                    </div>
+                    {screening.reasons.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#065F46', marginBottom: '0.25rem' }}>+ 加点ポイント</div>
+                        <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
+                          {screening.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {screening.concerns.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991B1B', marginBottom: '0.25rem' }}>− 懸念ポイント</div>
+                        <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
+                          {screening.concerns.map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* === Application Info Card === */}
         <div style={cardStyle}>
           <div style={cardHeaderStyle}>
