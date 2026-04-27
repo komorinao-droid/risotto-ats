@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
-import { resolveJobs, resolveSources } from '@/utils/baseScope';
+import { resolveJobs, resolveSources, resolveScreeningCriteria, hasScreeningJobOverride } from '@/utils/baseScope';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
@@ -1396,9 +1396,12 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
     return { bg: '#FEF3C7', color: '#92400E', label: '要確認' };
   };
 
+  // 応募者の職種で評価基準を解決（職種別オーバーライドあれば優先）
+  const resolvedCriteria = resolveScreeningCriteria(clientData.screeningCriteria, applicant.job);
+  const usingJobOverride = !!applicant.job && hasScreeningJobOverride(clientData.screeningCriteria, applicant.job);
+
   async function run() {
-    const criteria = clientData.screeningCriteria;
-    if (!criteria || !criteria.enabled) {
+    if (!resolvedCriteria || !resolvedCriteria.enabled) {
       setError('AIスクリーニング機能が有効化されていません（設定 → AIスクリーニング）');
       return;
     }
@@ -1421,7 +1424,7 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
             chatAnswers: applicant.chatAnswers,
             note: applicant.note,
           },
-          criteria,
+          criteria: resolvedCriteria,
         }),
       });
       if (!resp.ok) {
@@ -1491,6 +1494,15 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
             <><Sparkles size={14} /> {screening ? '再評価' : 'AI評価実行'}</>
           )}
         </button>
+      </div>
+
+      <div style={{ padding: '0.5rem 0.875rem', backgroundColor: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: '6px', fontSize: '0.75rem', color: '#5B21B6', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+        <strong>使用基準:</strong>
+        {usingJobOverride ? (
+          <>職種別「<strong>{applicant.job}</strong>」用にカスタマイズされた評価基準</>
+        ) : (
+          <>全社デフォルト基準{applicant.job ? `（職種「${applicant.job}」専用設定なし）` : '（職種未設定）'}</>
+        )}
       </div>
 
       {error && (

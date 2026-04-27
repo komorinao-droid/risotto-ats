@@ -1,4 +1,4 @@
-import type { ClientData, Job, Source, EmailTemplate } from '@/types';
+import type { ClientData, Job, Source, EmailTemplate, ScreeningCriteria } from '@/types';
 
 /**
  * 拠点別オーバーライドの解決ヘルパー（継承モデル）
@@ -40,4 +40,30 @@ export function hasSourcesOverride(data: ClientData, baseName: string): boolean 
 }
 export function hasEmailTemplatesOverride(data: ClientData, baseName: string): boolean {
   return !!data.emailTemplatesByBase?.[baseName];
+}
+
+/**
+ * AIスクリーニング基準を職種スコープで解決
+ * - jobName が指定され、その職種のオーバーライドがあれば本文3項目を差し替え
+ * - enabled / passThreshold / rejectThreshold は常に全社共通
+ */
+export function resolveScreeningCriteria(
+  criteria: ScreeningCriteria | undefined,
+  jobName?: string
+): ScreeningCriteria | null {
+  if (!criteria) return null;
+  if (jobName && criteria.byJob?.[jobName]) {
+    const o = criteria.byJob[jobName];
+    return {
+      ...criteria,
+      evaluationPoints: o.evaluationPoints,
+      requiredQualities: o.requiredQualities,
+      ngQualities: o.ngQualities,
+    };
+  }
+  return criteria;
+}
+
+export function hasScreeningJobOverride(criteria: ScreeningCriteria | undefined, jobName: string): boolean {
+  return !!criteria?.byJob?.[jobName];
 }

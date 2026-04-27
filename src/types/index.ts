@@ -325,14 +325,20 @@ export interface ChatQuestionGroup {
   questions: ChatQuestion[];
 }
 
-// AIスクリーニング設定（全社共通）
-export interface ScreeningCriteria {
-  enabled: boolean;
+// AIスクリーニング設定 - 職種別オーバーライドの本体（しきい値・enabledは全社共通）
+export interface ScreeningCriteriaBody {
   evaluationPoints: string; // 評価観点（フリーテキスト）
   requiredQualities: string; // 必須要件
   ngQualities: string; // NG要件
+}
+
+// AIスクリーニング設定
+export interface ScreeningCriteria extends ScreeningCriteriaBody {
+  enabled: boolean;
   passThreshold: number; // 推奨「合格」のスコア下限
   rejectThreshold: number; // 推奨「不合格」のスコア上限
+  // 職種別オーバーライド（継承モデル：未設定なら全社デフォルトを使用）
+  byJob?: { [jobName: string]: ScreeningCriteriaBody };
 }
 
 // ストレージに保存するデータ全体
