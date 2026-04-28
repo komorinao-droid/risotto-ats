@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Sparkles, ChevronDown, ChevronRight, Plus, X, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import { Sparkles, ChevronDown, ChevronRight, Plus, X, ArrowUp, ArrowDown, Trash2, BarChart3, AlertTriangle, CheckCircle2, Star, Ban, MessageSquare, Target } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type {
   ScreeningCriteria,
@@ -236,8 +236,9 @@ const ScreeningSettings: React.FC = () => {
 
       {/* 評価軸セクション */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-        <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#111827' }}>
-          📊 評価軸（{visibleAxes.length}軸 / 合計 {totalWeight}%）
+        <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <BarChart3 size={16} />
+          評価軸（{visibleAxes.length}軸 / 合計 {totalWeight}%）
         </h3>
         {visibleAxes.length < MAX_AXES && (
           <button
@@ -250,8 +251,9 @@ const ScreeningSettings: React.FC = () => {
       </div>
 
       {totalWeight !== 100 && (
-        <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.75rem' }}>
-          ⚠️ ウェイト合計が {totalWeight}% です。保存時に100%に自動調整されます。
+        <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+          <AlertTriangle size={14} />
+          ウェイト合計が {totalWeight}% です。保存時に100%に自動調整されます。
         </div>
       )}
 
@@ -275,7 +277,10 @@ const ScreeningSettings: React.FC = () => {
       {/* しきい値（全社共通のみ） */}
       {!isJobScope && (
         <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1rem' }}>
-          <h3 style={{ margin: '0 0 0.625rem', fontSize: '0.9375rem', fontWeight: 700 }}>📊 しきい値（全社共通）</h3>
+          <h3 style={{ margin: '0 0 0.625rem', fontSize: '0.9375rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+            <Target size={16} />
+            しきい値（全社共通）
+          </h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={labelStyle}>合格推奨スコア</label>
@@ -404,7 +409,7 @@ const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, 
 
           {/* 必須要件 */}
           <ItemListEditor
-            title="✅ 必須要件"
+            title={<><CheckCircle2 size={14} color="#059669" /> 必須要件</>}
             items={axis.requirements}
             onChange={(items) => onUpdate((a) => ({ ...a, requirements: items }))}
             withImportance={false}
@@ -412,7 +417,7 @@ const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, 
 
           {/* 望ましい要件 */}
           <ItemListEditor
-            title="🌟 望ましい要件"
+            title={<><Star size={14} color="#F59E0B" /> 望ましい要件</>}
             items={axis.preferences}
             onChange={(items) => onUpdate((a) => ({ ...a, preferences: items }))}
             withImportance={true}
@@ -420,14 +425,17 @@ const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, 
 
           {/* 避けたい要件 */}
           <ItemListEditor
-            title="⚠️ 避けたい要件"
+            title={<><Ban size={14} color="#DC2626" /> 避けたい要件</>}
             items={axis.avoidances}
             onChange={(items) => onUpdate((a) => ({ ...a, avoidances: items }))}
             withImportance={true}
           />
 
           <div>
-            <label style={labelStyle}>📝 補足指示（AI向け）</label>
+            <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+              <MessageSquare size={14} />
+              補足指示（AI向け）
+            </label>
             <textarea
               value={axis.guidance || ''}
               onChange={(e) => onUpdate((a) => ({ ...a, guidance: e.target.value }))}
@@ -446,7 +454,7 @@ const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, 
    ItemListEditor
    ======================================= */
 interface ItemListEditorProps {
-  title: string;
+  title: React.ReactNode;
   items: CriteriaItem[];
   onChange: (items: CriteriaItem[]) => void;
   withImportance: boolean;
@@ -466,7 +474,7 @@ const ItemListEditor: React.FC<ItemListEditorProps> = ({ title, items, onChange,
 
   return (
     <div>
-      <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.375rem' }}>{title}</div>
+      <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.375rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>{title}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
         {items.map((it) => (
           <ItemRow
