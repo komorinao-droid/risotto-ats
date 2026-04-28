@@ -26,11 +26,20 @@ import {
   Trophy,
   Newspaper,
   Settings,
+  Sparkles,
+  MoreVertical,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUpDown,
+  Briefcase,
+  Megaphone,
+  KeyRound,
 } from 'lucide-react';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
 import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
+import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
 
 /* ============================================================
    定数 / ヘルパー
@@ -311,6 +320,17 @@ const StatCard: React.FC<{ label: string; value: number | string; color: string;
   </div>
 );
 
+const SummaryTile: React.FC<{ label: string; value: number | string; sub?: string; color: string; icon: React.ReactNode }> = ({ label, value, sub, color, icon }) => (
+  <div style={{ padding: '0.75rem 0.875rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+      <div style={{ width: '28px', height: '28px', borderRadius: '6px', backgroundColor: color + '15', color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>
+      <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{label}</div>
+    </div>
+    <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#111827', lineHeight: 1.2 }}>{value}</div>
+    {sub && <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>{sub}</div>}
+  </div>
+);
+
 /* ============================================================
    プランバッジ
    ============================================================ */
@@ -360,49 +380,101 @@ const BarChart: React.FC<{ data: { label: string; value: number; color: string }
 /* ============================================================
    ダッシュボード
    ============================================================ */
-const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: string) => void }> = ({ clients, onNavigate }) => {
+const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: string) => void; statsMap: { [id: string]: ClientStats } }> = ({ clients, onNavigate, statsMap }) => {
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   const activeCount = clients.filter(c => c.status === 'active').length;
   const inactiveCount = clients.filter(c => c.status === 'inactive').length;
   const newThisMonth = clients.filter(c => c.contractStart && c.contractStart.startsWith(thisMonth)).length;
+  const aggregates = useMemo(() => calcAdminAggregates(clients, statsMap), [clients, statsMap]);
 
   const planCounts = (['trial', 'standard', 'professional', 'enterprise'] as const).map(p => ({
     label: PLAN_LABELS[p],
-    value: clients.filter(c => c.plan === p).length,
+    value: clients.filter(c => c.plan === p && c.accountType === 'parent').length,
     color: PLAN_COLORS[p],
   }));
 
   const parents = clients.filter(c => c.accountType === 'parent');
 
+  // 応募者数ランキング（多い順 上位5社）
+  const topByApplicants = parents
+    .map((p) => ({ client: p, count: statsMap[p.id]?.applicantCount || 0 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
   return (
     <div style={{ padding: '1.5rem 2rem' }}>
       <h2 style={{ margin: '0 0 1.5rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>ダッシュボード</h2>
 
-      {/* 統計カード */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-        <StatCard label="総クライアント数" value={clients.length} color="#3B82F6" icon={<Users size={22} />} />
-        <StatCard label="有効クライアント" value={activeCount} color="#059669" icon={<UserCheck size={22} />} />
-        <StatCard label="無効クライアント" value={inactiveCount} color="#DC2626" icon={<UserX size={22} />} />
+      {/* 統計カード - クライアント系 */}
+      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>クライアント</div>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        <StatCard label="本部アカウント" value={aggregates.parentCount} color="#3B82F6" icon={<Users size={22} />} />
+        <StatCard label="子アカウント数" value={aggregates.totalChildAccounts} color="#0EA5E9" icon={<Store size={22} />} />
+        <StatCard label="有効" value={activeCount} color="#059669" icon={<UserCheck size={22} />} />
+        <StatCard label="無効" value={inactiveCount} color="#DC2626" icon={<UserX size={22} />} />
         <StatCard label="今月の新規" value={newThisMonth} color="#8B5CF6" icon={<PartyPopper size={22} />} />
       </div>
 
-      {/* プラン別グラフ */}
-      <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '2rem' }}>
-        <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>プラン別クライアント数</h3>
-        <BarChart data={planCounts} />
+      {/* 統計カード - 利用状況 */}
+      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>利用状況</div>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+        <StatCard label="総応募者数" value={aggregates.totalApplicants} color="#0891B2" icon={<User size={22} />} />
+        <StatCard label="今月の応募" value={aggregates.thisMonthApplicants} color="#06B6D4" icon={<CalendarDays size={22} />} />
+        <StatCard label="AI評価実行（累計）" value={aggregates.totalScreeningRuns} color="#9333EA" icon={<Sparkles size={22} />} />
+        <StatCard label="AI評価実行（今月）" value={aggregates.thisMonthScreeningRuns} color="#A855F7" icon={<Sparkles size={22} />} />
+        <StatCard label="AIスクリーニング有効" value={`${aggregates.enabledScreening} / ${aggregates.parentCount}`} color="#7C3AED" icon={<ShieldCheck size={22} />} />
       </div>
 
-      {/* クライアント概要一覧 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(360px, 1.4fr)', gap: '1rem', marginBottom: '2rem' }}>
+        {/* プラン別グラフ */}
+        <div style={{ ...cardStyle, padding: '1.25rem' }}>
+          <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>プラン別 本部アカウント数</h3>
+          <BarChart data={planCounts} />
+        </div>
+
+        {/* 応募者数ランキング */}
+        <div style={{ ...cardStyle, padding: '1.25rem' }}>
+          <h3 style={{ margin: '0 0 0.875rem', fontSize: '0.9375rem', fontWeight: 600 }}>応募者数ランキング</h3>
+          {topByApplicants.length === 0 || topByApplicants.every(t => t.count === 0) ? (
+            <p style={{ color: '#9ca3af', fontSize: '0.875rem', margin: 0 }}>応募者データがありません。</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {topByApplicants.map((t, idx) => {
+                const max = topByApplicants[0].count || 1;
+                const pct = (t.count / max) * 100;
+                return (
+                  <div
+                    key={t.client.id}
+                    onClick={() => onNavigate('detail', t.client.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', padding: '0.375rem 0.5rem', borderRadius: '6px' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F9FAFB')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                  >
+                    <span style={{ width: '20px', fontSize: '0.75rem', color: '#9CA3AF', fontWeight: 600 }}>{idx + 1}</span>
+                    <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.client.companyName}</span>
+                    <div style={{ flex: 1.5, height: '8px', backgroundColor: '#F3F4F6', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: PLAN_COLORS[t.client.plan] }} />
+                    </div>
+                    <span style={{ minWidth: '60px', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{t.count}名</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* クライアント概要カード（カード一覧） */}
       <div style={{ ...cardStyle, padding: '1.25rem' }}>
         <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>クライアント一覧（本部アカウント）</h3>
         {parents.length === 0 ? (
           <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>クライアントが登録されていません。</p>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.75rem' }}>
             {parents.map(c => {
-              const children = clients.filter(ch => ch.accountType === 'child' && ch.parentId === c.id);
+              const stats = statsMap[c.id];
               return (
                 <div
                   key={c.id}
@@ -415,11 +487,18 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
                     <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{c.companyName}</span>
                     <StatusBadge status={c.status} />
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.75rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
                     <PlanBadge plan={c.plan} />
                     <span style={{ color: '#6b7280' }}>ID: {c.id}</span>
-                    {children.length > 0 && <span style={{ color: '#6b7280' }}>拠点: {children.length}</span>}
                   </div>
+                  {stats && (
+                    <div style={{ display: 'flex', gap: '0.875rem', flexWrap: 'wrap', fontSize: '0.6875rem', color: '#6b7280' }}>
+                      <span>応募 {stats.applicantCount}名</span>
+                      <span>子アカ {stats.childCount}</span>
+                      {stats.screeningEnabled && <span style={{ color: '#9333EA', fontWeight: 600 }}>AI 有効</span>}
+                      <span style={{ marginLeft: 'auto' }}>{formatRelative(stats.lastActionAt)}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -433,28 +512,63 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
 /* ============================================================
    クライアント一覧 (ツリービュー)
    ============================================================ */
+type SortKey = 'company' | 'plan' | 'status' | 'applicants' | 'children' | 'lastAction' | 'contractEnd';
+type SortDir = 'asc' | 'desc';
+
 const ClientList: React.FC<{
   clients: Client[];
+  statsMap: { [id: string]: ClientStats };
   onNavigate: (view: string, id?: string) => void;
   onEdit: (client: Client) => void;
   onToggleStatus: (id: string) => void;
   onDelete: (id: string) => void;
   onAddChild: (parentId: string) => void;
-}> = ({ clients, onNavigate, onEdit, onToggleStatus, onDelete, onAddChild }) => {
+}> = ({ clients, statsMap, onNavigate, onEdit, onToggleStatus, onDelete, onAddChild }) => {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [planFilter, setPlanFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [showChildren, setShowChildren] = useState<boolean>(true);
+  const [sortKey, setSortKey] = useState<SortKey>('company');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const parents = useMemo(() => clients.filter(c => c.accountType === 'parent'), [clients]);
 
   const filteredParents = useMemo(() => {
-    if (!search.trim()) return parents;
-    const q = search.toLowerCase();
-    return parents.filter(p => {
-      if (p.companyName.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)) return true;
-      const children = clients.filter(c => c.accountType === 'child' && c.parentId === p.id);
-      return children.some(c => c.companyName.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || (c.baseName || '').toLowerCase().includes(q));
+    let result = parents;
+    if (planFilter) result = result.filter((p) => p.plan === planFilter);
+    if (statusFilter) result = result.filter((p) => p.status === statusFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(p => {
+        if (p.companyName.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)) return true;
+        const children = clients.filter(c => c.accountType === 'child' && c.parentId === p.id);
+        return children.some(c => c.companyName.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || (c.baseName || '').toLowerCase().includes(q));
+      });
+    }
+    // ソート
+    const sorted = [...result];
+    sorted.sort((a, b) => {
+      const sa = statsMap[a.id];
+      const sb = statsMap[b.id];
+      const dir = sortDir === 'asc' ? 1 : -1;
+      switch (sortKey) {
+        case 'company': return a.companyName.localeCompare(b.companyName) * dir;
+        case 'plan': return a.plan.localeCompare(b.plan) * dir;
+        case 'status': return a.status.localeCompare(b.status) * dir;
+        case 'applicants': return ((sa?.applicantCount || 0) - (sb?.applicantCount || 0)) * dir;
+        case 'children': return ((sa?.childCount || 0) - (sb?.childCount || 0)) * dir;
+        case 'lastAction': {
+          const ta = sa?.lastActionAt ? new Date(sa.lastActionAt).getTime() : 0;
+          const tb = sb?.lastActionAt ? new Date(sb.lastActionAt).getTime() : 0;
+          return (ta - tb) * dir;
+        }
+        case 'contractEnd': return ((a.contractEnd || '').localeCompare(b.contractEnd || '')) * dir;
+      }
     });
-  }, [parents, clients, search]);
+    return sorted;
+  }, [parents, clients, search, planFilter, statusFilter, sortKey, sortDir, statsMap]);
 
   const toggleExpand = (id: string) => {
     setExpanded(prev => {
@@ -464,106 +578,189 @@ const ClientList: React.FC<{
     });
   };
 
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortHeader: React.FC<{ k: SortKey; children: React.ReactNode; align?: 'left' | 'right' }> = ({ k, children, align = 'left' }) => {
+    const active = sortKey === k;
+    return (
+      <th
+        onClick={() => toggleSort(k)}
+        style={{
+          cursor: 'pointer',
+          userSelect: 'none',
+          textAlign: align,
+          fontWeight: 600,
+          color: active ? '#111827' : '#6B7280',
+          fontSize: '0.75rem',
+          padding: '0.625rem 0.5rem',
+          backgroundColor: '#F9FAFB',
+          borderBottom: '1px solid #E5E7EB',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+          {children}
+          {active ? (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : <ChevronsUpDown size={11} style={{ opacity: 0.4 }} />}
+        </span>
+      </th>
+    );
+  };
+
   return (
-    <div style={{ padding: '1.5rem 2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+    <div style={{ padding: '1.5rem 2rem' }} onClick={() => setOpenMenuId(null)}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>クライアント管理</h2>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <input
-            type="text"
-            placeholder="会社名・IDで検索..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ ...inputStyle, width: '220px' }}
-          />
-          <button onClick={() => onNavigate('add')} style={btnPrimary}>+ 新規追加</button>
-        </div>
+        <button onClick={() => onNavigate('add')} style={btnPrimary}>+ 新規追加</button>
       </div>
 
-      <div style={{ ...cardStyle, overflow: 'hidden' }}>
+      {/* フィルタバー */}
+      <div style={{ ...cardStyle, padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.625rem', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="会社名・IDで検索..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ ...inputStyle, width: '220px' }}
+        />
+        <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+          <option value="">プラン: 全て</option>
+          {(['trial', 'standard', 'professional', 'enterprise'] as const).map((p) => (
+            <option key={p} value={p}>{PLAN_LABELS[p]}</option>
+          ))}
+        </select>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+          <option value="">ステータス: 全て</option>
+          <option value="active">有効のみ</option>
+          <option value="inactive">無効のみ</option>
+        </select>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem', color: '#374151', cursor: 'pointer', marginLeft: 'auto' }}>
+          <input type="checkbox" checked={showChildren} onChange={(e) => setShowChildren(e.target.checked)} />
+          子アカウントを表示
+        </label>
+        {(planFilter || statusFilter || search) && (
+          <button onClick={() => { setPlanFilter(''); setStatusFilter(''); setSearch(''); }} style={{ ...btnSecondary, fontSize: '0.75rem', padding: '0.375rem 0.625rem' }}>クリア</button>
+        )}
+      </div>
+
+      <div style={{ ...cardStyle, overflow: 'visible' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
               <th style={{ width: '32px' }}></th>
-              <th>会社名</th>
-              <th>種別</th>
-              <th>プラン</th>
-              <th>ステータス</th>
-              <th>ID</th>
-              <th>契約期間</th>
-              <th>操作</th>
+              <SortHeader k="company">会社名 / 担当者</SortHeader>
+              <SortHeader k="plan">プラン</SortHeader>
+              <SortHeader k="status">状態</SortHeader>
+              <SortHeader k="applicants" align="right">応募者数</SortHeader>
+              <SortHeader k="children" align="right">子アカ</SortHeader>
+              <SortHeader k="lastAction">最終操作</SortHeader>
+              <SortHeader k="contractEnd">契約終了</SortHeader>
+              <th style={{ width: '60px', backgroundColor: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}></th>
             </tr>
           </thead>
           <tbody>
             {filteredParents.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#9ca3af', padding: '2rem' }}>クライアントが見つかりません</td></tr>
+              <tr><td colSpan={9} style={{ textAlign: 'center', color: '#9ca3af', padding: '2rem' }}>クライアントが見つかりません</td></tr>
             )}
             {filteredParents.map(p => {
               const children = clients.filter(c => c.accountType === 'child' && c.parentId === p.id);
               const isExpanded = expanded.has(p.id);
+              const stats = statsMap[p.id];
+              const aiOn = stats?.screeningEnabled;
               return (
                 <React.Fragment key={p.id}>
                   {/* 親行 */}
-                  <tr style={{ backgroundColor: '#FAFBFC' }}>
-                    <td style={{ textAlign: 'center', cursor: children.length ? 'pointer' : 'default' }} onClick={() => children.length && toggleExpand(p.id)}>
-                      {children.length > 0 && <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{isExpanded ? '▼' : '▶'}</span>}
+                  <tr style={{ backgroundColor: '#FAFBFC', borderTop: '1px solid #E5E7EB' }}>
+                    <td style={{ textAlign: 'center', cursor: children.length && showChildren ? 'pointer' : 'default', padding: '0.625rem 0.5rem' }} onClick={() => children.length && showChildren && toggleExpand(p.id)}>
+                      {children.length > 0 && showChildren && <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{isExpanded ? '▼' : '▶'}</span>}
                     </td>
-                    <td>
-                      <span style={{ fontWeight: 600 }}>{p.companyName}</span>
-                    </td>
-                    <td>
-                      <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#DBEAFE', color: '#1D4ED8' }}>本部</span>
-                    </td>
-                    <td><PlanBadge plan={p.plan} /></td>
-                    <td><StatusBadge status={p.status} /></td>
-                    <td style={{ fontSize: '0.75rem', color: '#6b7280', fontFamily: 'monospace' }}>{p.id}</td>
-                    <td style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                      {p.contractStart && p.contractEnd ? `${p.contractStart} 〜 ${p.contractEnd}` : p.contractStart || '-'}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                        <button onClick={() => onNavigate('detail', p.id)} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>詳細</button>
-                        <button onClick={() => onEdit(p)} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>編集</button>
-                        <button onClick={() => onToggleStatus(p.id)} style={{ ...(p.status === 'active' ? btnDanger : btnSuccess), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-                          {p.status === 'active' ? '無効化' : '有効化'}
-                        </button>
-                        <button onClick={() => onDelete(p.id)} style={{ ...btnDanger, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>削除</button>
-                        <button onClick={() => onAddChild(p.id)} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: '#7C3AED', borderColor: '#C4B5FD' }}>+子</button>
+                    <td style={{ padding: '0.625rem 0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.125rem' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{p.companyName}</span>
+                        <span style={{ padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#DBEAFE', color: '#1D4ED8' }}>本部</span>
+                        {aiOn && <span title="AIスクリーニング有効" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem', padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#F5F3FF', color: '#7C3AED' }}><Sparkles size={10} />AI</span>}
                       </div>
+                      <div style={{ fontSize: '0.6875rem', color: '#6B7280' }}>
+                        {p.contactName ? `担当: ${p.contactName}` : <span style={{ color: '#9CA3AF' }}>担当者未設定</span>}
+                        <span style={{ marginLeft: '0.5rem', fontFamily: 'monospace' }}>ID: {p.id}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '0.625rem 0.5rem' }}><PlanBadge plan={p.plan} /></td>
+                    <td style={{ padding: '0.625rem 0.5rem' }}><StatusBadge status={p.status} /></td>
+                    <td style={{ padding: '0.625rem 0.5rem', textAlign: 'right', fontSize: '0.8125rem', fontWeight: 600 }}>
+                      {stats?.applicantCount ?? 0}
+                      {stats && stats.thisMonthApplicants > 0 && <span style={{ marginLeft: '0.25rem', fontSize: '0.6875rem', color: '#059669', fontWeight: 500 }}>+{stats.thisMonthApplicants}</span>}
+                    </td>
+                    <td style={{ padding: '0.625rem 0.5rem', textAlign: 'right', fontSize: '0.8125rem', color: '#374151' }}>
+                      {stats?.childCount ?? 0}
+                    </td>
+                    <td style={{ padding: '0.625rem 0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                      {formatRelative(stats?.lastActionAt || null)}
+                    </td>
+                    <td style={{ padding: '0.625rem 0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                      {p.contractEnd || '-'}
+                    </td>
+                    <td style={{ padding: '0.625rem 0.5rem', textAlign: 'center', position: 'relative' }}>
+                      <RowActionMenu
+                        client={p}
+                        isOpen={openMenuId === p.id}
+                        onOpen={() => setOpenMenuId(openMenuId === p.id ? null : p.id)}
+                        onClose={() => setOpenMenuId(null)}
+                        onNavigate={onNavigate}
+                        onEdit={onEdit}
+                        onToggleStatus={onToggleStatus}
+                        onDelete={onDelete}
+                        onAddChild={onAddChild}
+                      />
                     </td>
                   </tr>
                   {/* 子行 */}
-                  {isExpanded && children.map(ch => (
-                    <tr key={ch.id} style={{ backgroundColor: '#F0F4FF' }}>
-                      <td></td>
-                      <td style={{ paddingLeft: '2rem' }}>
-                        <span style={{ color: '#9ca3af', marginRight: '0.375rem' }}>└</span>
-                        <span style={{ fontWeight: 500 }}>{ch.companyName}</span>
-                        {ch.baseName && (
-                          <span style={{ marginLeft: '0.5rem', padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.6875rem', backgroundColor: '#E0E7FF', color: '#4338CA' }}>{ch.baseName}</span>
-                        )}
-                      </td>
-                      <td>
-                        <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#FEF3C7', color: '#B45309' }}>子</span>
-                      </td>
-                      <td><PlanBadge plan={ch.plan} /></td>
-                      <td><StatusBadge status={ch.status} /></td>
-                      <td style={{ fontSize: '0.75rem', color: '#6b7280', fontFamily: 'monospace' }}>{ch.id}</td>
-                      <td style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                        {ALL_PERMISSIONS.filter(k => ch.permissions[k]).length} 権限
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                          <button onClick={() => onNavigate('detail', ch.id)} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>詳細</button>
-                          <button onClick={() => onEdit(ch)} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>編集</button>
-                          <button onClick={() => onToggleStatus(ch.id)} style={{ ...(ch.status === 'active' ? btnDanger : btnSuccess), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-                            {ch.status === 'active' ? '無効化' : '有効化'}
-                          </button>
-                          <button onClick={() => onDelete(ch.id)} style={{ ...btnDanger, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>削除</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {showChildren && isExpanded && children.map(ch => {
+                    const cStats = statsMap[ch.id];
+                    return (
+                      <tr key={ch.id} style={{ backgroundColor: '#F8FAFF' }}>
+                        <td></td>
+                        <td style={{ padding: '0.5rem 0.5rem 0.5rem 2rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                            <span style={{ color: '#9ca3af' }}>└</span>
+                            <span style={{ fontWeight: 500, fontSize: '0.8125rem' }}>{ch.companyName}</span>
+                            {ch.baseName && (
+                              <span style={{ padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', backgroundColor: '#E0E7FF', color: '#4338CA' }}>{ch.baseName}</span>
+                            )}
+                            <span style={{ padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#FEF3C7', color: '#B45309' }}>子</span>
+                          </div>
+                          <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginLeft: '1rem' }}>
+                            ID: <span style={{ fontFamily: 'monospace' }}>{ch.id}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '0.5rem' }}><PlanBadge plan={ch.plan} /></td>
+                        <td style={{ padding: '0.5rem' }}><StatusBadge status={ch.status} /></td>
+                        <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem', color: '#6B7280' }}>—</td>
+                        <td style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.75rem', color: '#6B7280' }}>—</td>
+                        <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>{formatRelative(cStats?.lastActionAt || null)}</td>
+                        <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                          {ALL_PERMISSIONS.filter(k => ch.permissions[k]).length} 権限
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center', position: 'relative' }}>
+                          <RowActionMenu
+                            client={ch}
+                            isOpen={openMenuId === ch.id}
+                            onOpen={() => setOpenMenuId(openMenuId === ch.id ? null : ch.id)}
+                            onClose={() => setOpenMenuId(null)}
+                            onNavigate={onNavigate}
+                            onEdit={onEdit}
+                            onToggleStatus={onToggleStatus}
+                            onDelete={onDelete}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </React.Fragment>
               );
             })}
@@ -575,6 +772,84 @@ const ClientList: React.FC<{
 };
 
 /* ============================================================
+   行ごとのアクションメニュー（︙ボタン）
+   ============================================================ */
+const RowActionMenu: React.FC<{
+  client: Client;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onNavigate: (view: string, id?: string) => void;
+  onEdit: (c: Client) => void;
+  onToggleStatus: (id: string) => void;
+  onDelete: (id: string) => void;
+  onAddChild?: (parentId: string) => void;
+}> = ({ client, isOpen, onOpen, onClose, onNavigate, onEdit, onToggleStatus, onDelete, onAddChild }) => {
+  return (
+    <div style={{ display: 'inline-block', position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={onOpen}
+        style={{ padding: '0.25rem', border: '1px solid #E5E7EB', borderRadius: '4px', backgroundColor: '#fff', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+        title="操作メニュー"
+      >
+        <MoreVertical size={14} />
+      </button>
+      {isOpen && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: '0.25rem',
+            backgroundColor: '#fff',
+            border: '1px solid #E5E7EB',
+            borderRadius: '6px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            minWidth: '140px',
+            zIndex: 50,
+            overflow: 'hidden',
+          }}
+        >
+          <MenuItem onClick={() => { onNavigate('detail', client.id); onClose(); }}>詳細を開く</MenuItem>
+          <MenuItem onClick={() => { onEdit(client); onClose(); }}>編集</MenuItem>
+          {client.accountType === 'parent' && onAddChild && (
+            <MenuItem onClick={() => { onAddChild(client.id); onClose(); }}>子アカウント追加</MenuItem>
+          )}
+          <MenuItem onClick={() => { onToggleStatus(client.id); onClose(); }} color={client.status === 'active' ? '#B45309' : '#059669'}>
+            {client.status === 'active' ? '無効化する' : '有効化する'}
+          </MenuItem>
+          <MenuItem onClick={() => { onDelete(client.id); onClose(); }} color="#DC2626" border>
+            削除
+          </MenuItem>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MenuItem: React.FC<{ onClick: () => void; children: React.ReactNode; color?: string; border?: boolean }> = ({ onClick, children, color, border }) => (
+  <button
+    onClick={onClick}
+    style={{
+      display: 'block',
+      width: '100%',
+      padding: '0.5rem 0.875rem',
+      border: 'none',
+      backgroundColor: 'transparent',
+      cursor: 'pointer',
+      fontSize: '0.8125rem',
+      textAlign: 'left',
+      color: color || '#374151',
+      borderTop: border ? '1px solid #F3F4F6' : 'none',
+    }}
+    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F9FAFB')}
+    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+  >
+    {children}
+  </button>
+);
+
+/* ============================================================
    クライアント詳細
    ============================================================ */
 const ClientDetail: React.FC<{
@@ -584,6 +859,7 @@ const ClientDetail: React.FC<{
   onEdit: (client: Client) => void;
   onUpdatePassword: (id: string, newPw: string) => void;
 }> = ({ client, clients, onBack, onEdit, onUpdatePassword }) => {
+  const [showPwSection, setShowPwSection] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [newPw, setNewPw] = useState('');
   const [pwError, setPwError] = useState('');
@@ -592,14 +868,38 @@ const ClientDetail: React.FC<{
   const children = clients.filter(c => c.accountType === 'child' && c.parentId === client.id);
   const parent = client.parentId ? clients.find(c => c.id === client.parentId) : null;
 
-  // クライアントデータの取得
+  // クライアントデータの取得（親IDで解決）
+  const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
   const clientData: ClientData | null = useMemo(() => {
     try {
-      const raw = localStorage.getItem(`hireflow:client:${client.id}:data`);
-      if (raw) return JSON.parse(raw) as ClientData;
-    } catch { /* ignore */ }
-    return null;
-  }, [client.id]);
+      return storage.getClientData(dataId);
+    } catch { return null; }
+  }, [dataId]);
+
+  // 統計
+  const stats = useMemo(() => {
+    const c = client;
+    const cd = clientData;
+    const logs = (() => { try { return getClientLogs(dataId); } catch { return []; } })();
+    const month = new Date();
+    const monthPrefix = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
+    return {
+      applicants: cd?.applicants?.length ?? 0,
+      thisMonthApplicants: cd?.applicants?.filter((a) => a.date && a.date.startsWith(monthPrefix)).length ?? 0,
+      bases: cd?.bases?.length ?? 0,
+      jobs: cd?.jobs?.length ?? 0,
+      sources: cd?.sources?.length ?? 0,
+      jobsByBase: Object.keys(cd?.jobsByBase || {}).length,
+      sourcesByBase: Object.keys(cd?.sourcesByBase || {}).length,
+      emailTemplates: cd?.emailTemplates?.length ?? 0,
+      emailTemplatesByBase: Object.keys(cd?.emailTemplatesByBase || {}).length,
+      lastLogin: logs.find((l) => l.category === 'auth' && l.action === 'ログイン')?.timestamp || null,
+      screening: cd?.screeningCriteria,
+      screeningRunsTotal: logs.filter((l) => l.action === 'AI評価実行').length,
+      screeningRunsThisMonth: logs.filter((l) => l.action === 'AI評価実行' && l.timestamp.startsWith(monthPrefix)).length,
+      _: c, // unused, kept to ensure deps are correct
+    };
+  }, [client, clientData, dataId]);
 
   const handlePasswordChange = () => {
     if (newPw.length < 6) {
@@ -650,25 +950,41 @@ const ClientDetail: React.FC<{
           <div style={infoRow}><span style={infoLabel}>担当者メール</span><span>{client.contactEmail || '-'}</span></div>
         </div>
 
-        {/* パスワード管理 */}
+        {/* パスワード管理（折りたたみ） & メモ */}
         <div style={{ ...cardStyle, padding: '1.25rem' }}>
-          <h3 style={sectionTitle}>パスワード管理</h3>
-          <div style={infoRow}>
-            <span style={infoLabel}>現パスワード</span>
-            <span style={{ fontFamily: 'monospace' }}>{showPw ? client.password : '••••••••'}</span>
-            <button onClick={() => setShowPw(!showPw)} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.75rem', padding: 0 }}>
-              {showPw ? '非表示' : '表示'}
-            </button>
-          </div>
-          <div style={{ marginTop: '1rem' }}>
-            <label style={labelStyle}>新しいパスワード（6文字以上）</label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="新しいパスワード" />
-              <button onClick={handlePasswordChange} style={btnPrimary}>変更</button>
-            </div>
-            {pwError && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwError}</div>}
-            {pwSuccess && <div style={{ color: '#059669', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwSuccess}</div>}
-          </div>
+          <button
+            onClick={() => setShowPwSection(!showPwSection)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', marginBottom: showPwSection ? '0.875rem' : 0 }}
+          >
+            <h3 style={{ ...sectionTitle, marginBottom: 0, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+              <KeyRound size={16} />
+              パスワード管理
+            </h3>
+            <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>{showPwSection ? '閉じる ▼' : '開く ▶'}</span>
+          </button>
+          {showPwSection && (
+            <>
+              <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.875rem' }}>
+                ⚠ パスワード情報は機密事項です。表示・変更はクライアントから依頼があった場合のみ行ってください。
+              </div>
+              <div style={infoRow}>
+                <span style={infoLabel}>現パスワード</span>
+                <span style={{ fontFamily: 'monospace' }}>{showPw ? client.password : '••••••••'}</span>
+                <button onClick={() => setShowPw(!showPw)} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.75rem', padding: 0 }}>
+                  {showPw ? '非表示' : '表示'}
+                </button>
+              </div>
+              <div style={{ marginTop: '1rem' }}>
+                <label style={labelStyle}>新しいパスワード（6文字以上）</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="新しいパスワード" />
+                  <button onClick={handlePasswordChange} style={btnPrimary}>変更</button>
+                </div>
+                {pwError && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwError}</div>}
+                {pwSuccess && <div style={{ color: '#059669', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwSuccess}</div>}
+              </div>
+            </>
+          )}
 
           {/* メモ */}
           {client.memo && (
@@ -677,8 +993,56 @@ const ClientDetail: React.FC<{
               <div style={{ backgroundColor: '#F9FAFB', borderRadius: '6px', padding: '0.75rem', fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>{client.memo}</div>
             </div>
           )}
+
+          {/* 最終ログイン */}
+          {stats.lastLogin && (
+            <div style={{ marginTop: showPwSection ? '1rem' : 0, fontSize: '0.75rem', color: '#6B7280' }}>
+              最終ログイン: {formatLogTimestamp(stats.lastLogin)}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* データサマリ（親アカウントのみ） */}
+      {client.accountType === 'parent' && (
+        <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
+          <h3 style={sectionTitle}>データ概要</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
+            <SummaryTile label="応募者" value={stats.applicants} sub={`今月 +${stats.thisMonthApplicants}`} icon={<User size={18} />} color="#0891B2" />
+            <SummaryTile label="拠点" value={stats.bases} icon={<Building2 size={18} />} color="#0284C7" />
+            <SummaryTile label="職種" value={stats.jobs} sub={stats.jobsByBase ? `拠点別 ${stats.jobsByBase}` : ''} icon={<Briefcase size={18} />} color="#7C3AED" />
+            <SummaryTile label="応募媒体" value={stats.sources} sub={stats.sourcesByBase ? `拠点別 ${stats.sourcesByBase}` : ''} icon={<Megaphone size={18} />} color="#DB2777" />
+            <SummaryTile label="メールテンプレ" value={stats.emailTemplates} sub={stats.emailTemplatesByBase ? `拠点別 ${stats.emailTemplatesByBase}` : ''} icon={<FileText size={18} />} color="#EA580C" />
+            <SummaryTile label="子アカウント" value={children.length} icon={<Store size={18} />} color="#0EA5E9" />
+          </div>
+        </div>
+      )}
+
+      {/* AIスクリーニング状況（親アカウントのみ） */}
+      {client.accountType === 'parent' && (
+        <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #9333EA' }}>
+          <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+            <Sparkles size={16} color="#9333EA" />
+            AIスクリーニング
+          </h3>
+          {!stats.screening ? (
+            <p style={{ color: '#9CA3AF', fontSize: '0.875rem', margin: 0 }}>未設定です。クライアント側で設定すると、ここに状況が表示されます。</p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+              <SummaryTile
+                label="機能"
+                value={stats.screening.enabled ? '有効' : '無効'}
+                color={stats.screening.enabled ? '#059669' : '#9CA3AF'}
+                icon={stats.screening.enabled ? <Check size={18} strokeWidth={3} /> : <X size={18} strokeWidth={3} />}
+              />
+              <SummaryTile label="評価軸" value={stats.screening.axes?.length || 0} sub="軸" color="#7C3AED" icon={<LayoutDashboard size={18} />} />
+              <SummaryTile label="職種別オーバーライド" value={Object.keys(stats.screening.byJob || {}).length} sub="職種" color="#A855F7" icon={<Briefcase size={18} />} />
+              <SummaryTile label="評価実行（累計）" value={stats.screeningRunsTotal} icon={<Sparkles size={18} />} color="#9333EA" />
+              <SummaryTile label="評価実行（今月）" value={stats.screeningRunsThisMonth} icon={<Sparkles size={18} />} color="#C026D3" />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 子アカウント（親の場合） */}
       {client.accountType === 'parent' && (
@@ -2032,6 +2396,8 @@ const AdminApp: React.FC = () => {
 
   const selectedClient = selectedClientId ? clients.find(c => c.id === selectedClientId) : null;
 
+  const statsMap = calcAllClientStats(clients);
+
   const sidebarItems: { key: string; label: string; Icon: typeof LayoutDashboard }[] = [
     { key: 'dashboard', label: 'ダッシュボード', Icon: LayoutDashboard },
     { key: 'clients', label: 'クライアント管理', Icon: Users },
@@ -2096,11 +2462,12 @@ const AdminApp: React.FC = () => {
       {/* メインコンテンツ */}
       <main style={{ flex: 1, backgroundColor: '#f8fafc', overflow: 'auto' }}>
         {currentView === 'dashboard' && (
-          <Dashboard clients={clients} onNavigate={navigate} />
+          <Dashboard clients={clients} onNavigate={navigate} statsMap={statsMap} />
         )}
         {(currentView === 'clients' || currentView === 'add') && (
           <ClientList
             clients={clients}
+            statsMap={statsMap}
             onNavigate={navigate}
             onEdit={handleEdit}
             onToggleStatus={handleToggleStatus}
