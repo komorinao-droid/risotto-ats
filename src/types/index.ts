@@ -206,6 +206,23 @@ export interface ClientPermissions {
   chatbot: boolean;
 }
 
+// クライアントオプション
+export type ClientOptionKey = 'aiScreening';
+
+export type ClientOptionStatus = 'active' | 'paused' | 'cancelled';
+
+export interface ClientOption {
+  key: ClientOptionKey;
+  status: ClientOptionStatus;
+  startedAt?: string;       // 契約開始日 YYYY-MM-DD
+  endedAt?: string;         // 解約日 YYYY-MM-DD（契約終了時のみ）
+  monthlyFee?: number;      // 月額（円）
+  monthlyLimit?: number | null;  // 月間使用上限（null/未設定 = 無制限）
+  // 当月の使用カウント（YYYY-MM がキー、AI評価実行回数）
+  usageByMonth?: { [yearMonth: string]: number };
+  memo?: string;
+}
+
 // クライアント
 export interface Client {
   id: string;
@@ -225,6 +242,8 @@ export interface Client {
   members: Member[];
   notificationEmail?: string;
   smsPhone?: string;
+  // オプション契約
+  options?: { [key in ClientOptionKey]?: ClientOption };
 }
 
 // メールテンプレート

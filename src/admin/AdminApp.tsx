@@ -40,6 +40,8 @@ import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
 import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
 import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
+import { OPTION_LABELS, OPTION_DEFAULTS, getOptionUsageThisMonth } from '@/utils/clientOptions';
+import type { ClientOption, ClientOptionKey, ClientOptionStatus } from '@/types';
 import {
   generateSalt,
   generateToken,
@@ -1014,7 +1016,9 @@ const ClientDetail: React.FC<{
   onBack: () => void;
   onEdit: (client: Client) => void;
   onUpdatePassword: (id: string, newPw: string) => void;
-}> = ({ client, clients, onBack, onEdit, onUpdatePassword }) => {
+  onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
+  onLogAdminAction?: (action: string, target: string, detail?: string) => void;
+}> = ({ client, clients, onBack, onEdit, onUpdatePassword, onUpdateClient, onLogAdminAction }) => {
   const [showPwSection, setShowPwSection] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [newPw, setNewPw] = useState('');
@@ -1174,15 +1178,24 @@ const ClientDetail: React.FC<{
         </div>
       )}
 
-      {/* AIスクリーニング状況（親アカウントのみ） */}
+      {/* オプション契約管理（親アカウントのみ） */}
       {client.accountType === 'parent' && (
+        <OptionsSection
+          client={client}
+          onUpdateClient={onUpdateClient}
+          onLog={onLogAdminAction}
+        />
+      )}
+
+      {/* AIスクリーニング状況（親アカウントのみ・オプション契約中のみ） */}
+      {client.accountType === 'parent' && client.options?.aiScreening?.status === 'active' && (
         <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #9333EA' }}>
           <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
             <Sparkles size={16} color="#9333EA" />
-            AIスクリーニング
+            AIスクリーニング 利用状況
           </h3>
           {!stats.screening ? (
-            <p style={{ color: '#9CA3AF', fontSize: '0.875rem', margin: 0 }}>未設定です。クライアント側で設定すると、ここに状況が表示されます。</p>
+            <p style={{ color: '#9CA3AF', fontSize: '0.875rem', margin: 0 }}>クライアント側でまだ設定されていません。</p>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
               <SummaryTile
@@ -1300,6 +1313,195 @@ const CATEGORY_LABELS: Record<ClientOperationLog['category'], { label: string; c
   email: { label: 'メール', color: '#9333EA', bg: '#F3E8FF' },
   auth: { label: '認証', color: '#15803D', bg: '#DCFCE7' },
   other: { label: 'その他', color: '#6B7280', bg: '#F3F4F6' },
+};
+
+/* =======================================
+   オプション管理セクション（運営側）
+   ======================================= */
+const OptionsSection: React.FC<{
+  client: Client;
+  onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ client, onUpdateClient, onLog }) => {
+  const [editKey, setEditKey] = useState<ClientOptionKey | null>(null);
+  const [form, setForm] = useState<{ status: ClientOptionStatus; monthlyFee: string; monthlyLimit: string; startedAt: string; memo: string }>({
+    status: 'active',
+    monthlyFee: '',
+    monthlyLimit: '',
+    startedAt: '',
+    memo: '',
+  });
+
+  const optionKeys: ClientOptionKey[] = ['aiScreening'];
+
+  const openEdit = (key: ClientOptionKey) => {
+    const existing = client.options?.[key];
+    const defaults = OPTION_DEFAULTS[key];
+    setForm({
+      status: existing?.status || 'active',
+      monthlyFee: String(existing?.monthlyFee ?? defaults.monthlyFee ?? 0),
+      monthlyLimit: existing?.monthlyLimit == null ? '' : String(existing.monthlyLimit),
+      startedAt: existing?.startedAt || new Date().toISOString().slice(0, 10),
+      memo: existing?.memo || '',
+    });
+    setEditKey(key);
+  };
+
+  const closeEdit = () => setEditKey(null);
+
+  const handleSave = () => {
+    if (!editKey) return;
+    const newOption: ClientOption = {
+      key: editKey,
+      status: form.status,
+      startedAt: form.startedAt || undefined,
+      monthlyFee: Number(form.monthlyFee) || 0,
+      monthlyLimit: form.monthlyLimit === '' ? null : Math.max(0, Number(form.monthlyLimit) || 0),
+      memo: form.memo || undefined,
+      usageByMonth: client.options?.[editKey]?.usageByMonth || {},
+      // 解約時は endedAt 記録
+      endedAt: form.status === 'cancelled' ? new Date().toISOString().slice(0, 10) : undefined,
+    };
+    const wasActive = client.options?.[editKey]?.status === 'active';
+    const willBeActive = newOption.status === 'active';
+
+    onUpdateClient(client.id, (c) => ({
+      ...c,
+      options: { ...(c.options || {}), [editKey]: newOption },
+    }));
+
+    if (onLog) {
+      let action = 'オプション更新';
+      if (!wasActive && willBeActive) action = 'オプション契約開始';
+      else if (wasActive && !willBeActive) action = newOption.status === 'cancelled' ? 'オプション解約' : 'オプション一時停止';
+      onLog(action, OPTION_LABELS[editKey], `クライアント: ${client.companyName}（${client.id}）/ 月額¥${newOption.monthlyFee?.toLocaleString()} / 上限${newOption.monthlyLimit ?? '無制限'}`);
+    }
+    closeEdit();
+  };
+
+  const handleRemove = (key: ClientOptionKey) => {
+    if (!window.confirm(`「${OPTION_LABELS[key]}」のオプション情報を完全に削除しますか？\n（契約履歴も消えます）`)) return;
+    onUpdateClient(client.id, (c) => {
+      const next = { ...(c.options || {}) };
+      delete next[key];
+      return { ...c, options: next };
+    });
+    onLog?.('オプション情報削除', OPTION_LABELS[key], `クライアント: ${client.companyName}（${client.id}）`);
+  };
+
+  const statusColor = (status: ClientOptionStatus): { bg: string; color: string; label: string } => {
+    switch (status) {
+      case 'active': return { bg: '#DEF7EC', color: '#059669', label: '契約中' };
+      case 'paused': return { bg: '#FEF3C7', color: '#B45309', label: '一時停止' };
+      case 'cancelled': return { bg: '#F3F4F6', color: '#6B7280', label: '解約済' };
+    }
+  };
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
+      <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 600, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+        <Sparkles size={16} color="#F59E0B" />
+        オプション契約
+      </h3>
+      <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: '0 0 1rem' }}>
+        プラン本体に加えて契約するオプション機能です。契約中のオプションだけがクライアント側で表示・利用できます。
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+        {optionKeys.map((key) => {
+          const opt = client.options?.[key];
+          const usage = getOptionUsageThisMonth(opt);
+          const limit = opt?.monthlyLimit;
+          const sc = opt ? statusColor(opt.status) : null;
+          return (
+            <div key={key} style={{ border: '1px solid #E5E7EB', borderRadius: '8px', padding: '0.875rem 1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', flexWrap: 'wrap', marginBottom: opt ? '0.5rem' : 0 }}>
+                <Sparkles size={14} color="#9333EA" />
+                <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{OPTION_LABELS[key]}</span>
+                {opt && sc && (
+                  <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: sc.bg, color: sc.color }}>
+                    {sc.label}
+                  </span>
+                )}
+                {!opt && <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>未契約</span>}
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.375rem' }}>
+                  <button onClick={() => openEdit(key)} style={{ ...btnPrimary, padding: '0.375rem 0.875rem', fontSize: '0.8125rem' }}>
+                    {opt ? '編集' : '+ 契約追加'}
+                  </button>
+                  {opt && (
+                    <button onClick={() => handleRemove(key)} style={{ ...btnDanger, padding: '0.375rem 0.875rem', fontSize: '0.8125rem' }}>
+                      情報削除
+                    </button>
+                  )}
+                </div>
+              </div>
+              {opt && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', fontSize: '0.75rem', color: '#374151' }}>
+                  <div><span style={{ color: '#6B7280' }}>月額:</span> <strong>¥{opt.monthlyFee?.toLocaleString() || 0}</strong></div>
+                  <div><span style={{ color: '#6B7280' }}>上限:</span> <strong>{limit == null ? '無制限' : `${limit}件/月`}</strong></div>
+                  <div><span style={{ color: '#6B7280' }}>当月使用:</span> <strong style={{ color: limit && usage >= limit ? '#DC2626' : '#374151' }}>{usage}件</strong></div>
+                  <div><span style={{ color: '#6B7280' }}>開始:</span> {opt.startedAt || '-'}</div>
+                  {opt.endedAt && <div><span style={{ color: '#6B7280' }}>終了:</span> {opt.endedAt}</div>}
+                </div>
+              )}
+              {opt?.memo && (
+                <div style={{ marginTop: '0.5rem', padding: '0.375rem 0.625rem', backgroundColor: '#F9FAFB', borderRadius: '4px', fontSize: '0.75rem', color: '#374151' }}>
+                  {opt.memo}
+                </div>
+              )}
+              {/* 進捗バー（上限あり時） */}
+              {opt && opt.status === 'active' && limit != null && limit > 0 && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ height: '4px', backgroundColor: '#F3F4F6', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, (usage / limit) * 100)}%`, height: '100%', backgroundColor: usage >= limit ? '#DC2626' : usage >= limit * 0.8 ? '#F59E0B' : '#10B981' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 編集モーダル */}
+      <Modal isOpen={!!editKey} onClose={closeEdit} title={editKey ? `${OPTION_LABELS[editKey]} 契約設定` : ''} width="500px">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div>
+            <label style={labelStyle}>契約ステータス</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {([['active', '契約中'], ['paused', '一時停止'], ['cancelled', '解約']] as const).map(([val, lbl]) => (
+                <label key={val} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', cursor: 'pointer', fontSize: '0.875rem', padding: '0.375rem 0.625rem', borderRadius: '6px', border: form.status === val ? '2px solid #F97316' : '1px solid #E5E7EB' }}>
+                  <input type="radio" checked={form.status === val} onChange={() => setForm({ ...form, status: val })} />
+                  {lbl}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={labelStyle}>月額（円）</label>
+              <input type="number" value={form.monthlyFee} onChange={(e) => setForm({ ...form, monthlyFee: e.target.value })} style={inputStyle} placeholder="10000" />
+            </div>
+            <div>
+              <label style={labelStyle}>月間使用上限（件）</label>
+              <input type="number" value={form.monthlyLimit} onChange={(e) => setForm({ ...form, monthlyLimit: e.target.value })} style={inputStyle} placeholder="100（空欄で無制限）" />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>契約開始日</label>
+            <input type="date" value={form.startedAt} onChange={(e) => setForm({ ...form, startedAt: e.target.value })} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>メモ（任意）</label>
+            <textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} rows={2} style={{ ...inputStyle, resize: 'vertical' }} placeholder="契約条件や運用メモなど" />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.625rem' }}>
+            <button onClick={closeEdit} style={btnSecondary}>キャンセル</button>
+            <button onClick={handleSave} style={btnPrimary}>保存</button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
 };
 
 const ClientLogTable: React.FC<{ logs: ClientOperationLog[]; totalCount?: number }> = ({ logs, totalCount }) => {
@@ -2923,6 +3125,11 @@ const AdminApp: React.FC = () => {
             onBack={() => setCurrentView('clients')}
             onEdit={handleEdit}
             onUpdatePassword={handleUpdatePassword}
+            onUpdateClient={(id, mutator) => {
+              const updated = clients.map((cl) => (cl.id === id ? mutator(cl) : cl));
+              saveAndReload(updated);
+            }}
+            onLogAdminAction={logAdminAction}
           />
         )}
         {currentView === 'contracts' && (

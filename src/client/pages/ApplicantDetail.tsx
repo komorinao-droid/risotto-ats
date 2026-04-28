@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
 import { resolveJobs, resolveSources, resolveScreeningCriteria, hasScreeningJobOverride } from '@/utils/baseScope';
+import { hasActiveOption, incrementOptionUsage, isOptionLimitReached, getOptionRemaining, getOptionUsageThisMonth } from '@/utils/clientOptions';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
@@ -137,7 +138,7 @@ interface ApplicantDetailProps {
 }
 
 const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, onBack }) => {
-  const { clientData, updateClientData, logAction } = useAuth();
+  const { clientData, updateClientData, logAction, client } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(propId ?? getApplicantIdFromURL());
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -342,7 +343,7 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
                 />
               ),
             },
-            {
+            ...(hasActiveOption(client, 'aiScreening') ? [{
               key: 'screening',
               label: 'AIスクリーニング',
               content: (
@@ -352,7 +353,7 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
                   updateApplicant={updateApplicant}
                 />
               ),
-            },
+            }] : []),
             { key: 'email', label: 'メール', content: <EmailTab /> },
             { key: 'files', label: 'ファイル', content: <FilesTab applicant={applicant} updateApplicant={updateApplicant} /> },
             { key: 'webinterview', label: 'WEB面接', content: <WebInterviewTab /> },
@@ -1427,12 +1428,17 @@ const AxisScoreRow: React.FC<{ axis: { axisId: string; axisName: string; score: 
 };
 
 const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, updateApplicant }) => {
-  const { logAction } = useAuth();
+  const { logAction, client } = useAuth();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
 
   const screening = applicant.screening;
   const enabled = !!clientData.screeningCriteria?.enabled;
+
+  // オプション情報（親側のオプションを参照）
+  const aiOption = client?.options?.aiScreening;
+  const usage = getOptionUsageThisMonth(aiOption);
+  const remaining = getOptionRemaining(aiOption);
 
   const recoStyle = (reco: string) => {
     if (reco === 'pass') return { bg: '#DEF7EC', color: '#065F46', label: '合格推奨' };
@@ -1447,6 +1453,11 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
   async function run() {
     if (!resolvedCriteria || !resolvedCriteria.enabled) {
       setError('AIスクリーニング機能が有効化されていません（設定 → AIスクリーニング）');
+      return;
+    }
+    // 上限チェック
+    if (aiOption && isOptionLimitReached(aiOption)) {
+      setError(`今月のAIスクリーニング使用上限（${aiOption.monthlyLimit}件）に達しました。来月までお待ちいただくか、運営にプラン変更をご相談ください。`);
       return;
     }
     setRunning(true);
@@ -1487,6 +1498,10 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
       };
       updateApplicant((a) => ({ ...a, screening: result }));
       logAction('applicant', 'AI評価実行', applicant.name || String(applicant.id), `スコア: ${result.score} / ${result.recommendation}`);
+      // 使用カウントをインクリメント（オプション契約中の場合のみ）
+      if (client && aiOption) {
+        try { await incrementOptionUsage(client, 'aiScreening'); } catch { /* ignore */ }
+      }
     } catch (e: any) {
       setError(e?.message || 'AI評価に失敗しました');
     } finally {
@@ -1510,10 +1525,15 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '900px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Sparkles size={18} color="#9333EA" />
           <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#111827' }}>AIスクリーニング結果</h3>
+          {aiOption && (
+            <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>
+              （今月 {usage} 件 {remaining != null ? `/ 残り ${remaining} 件` : '/ 無制限'}）
+            </span>
+          )}
         </div>
         <button
           onClick={run}

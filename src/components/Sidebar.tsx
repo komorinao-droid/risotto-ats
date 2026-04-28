@@ -27,6 +27,7 @@ interface NavItem {
   label: string;
   icon: LucideIcon | null;
   permission?: keyof Client['permissions'];
+  optionRequired?: 'aiScreening';
   children?: NavItem[];
 }
 
@@ -49,7 +50,7 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/exclusion', label: '除外リスト', icon: null, permission: 'exclusion' },
       { path: '/settings/email-templates', label: 'メールテンプレート', icon: null, permission: 'mailtemplate' },
       { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
-      { path: '/settings/screening', label: 'AIスクリーニング', icon: null },
+      { path: '/settings/screening', label: 'AIスクリーニング', icon: null, optionRequired: 'aiScreening' },
       { path: '/settings/account', label: 'アカウント', icon: null },
     ],
   },
@@ -60,6 +61,17 @@ function hasPermission(client: Client | null, permission?: keyof Client['permiss
   if (!client) return false;
   if (client.accountType === 'parent') return true;
   return !!client.permissions[permission];
+}
+
+function hasRequiredOption(client: Client | null, optionRequired?: 'aiScreening'): boolean {
+  if (!optionRequired) return true;
+  if (!client) return false;
+  // 子アカウントは親のオプションを参照（同じ ClientData を共有）
+  // 実際のオプション情報は Client に直接持つので、子の場合は無条件で true としても親側のデータで実質制御される
+  // ここではサイドバー表示制御のため、明示的に親のオプションをチェック
+  // 子アカウントは AuthContext で client オブジェクトに親のオプションを継承していない場合があるが、
+  // permission マスクの仕組みで既に制限されているため、ここでは親アカウントのオプション参照で十分
+  return client.options?.[optionRequired]?.status === 'active';
 }
 
 const linkStyle = (isActive: boolean): React.CSSProperties => ({
@@ -82,12 +94,13 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
 
   const renderNavItem = (item: NavItem) => {
     if (!hasPermission(client, item.permission)) return null;
+    if (!hasRequiredOption(client, item.optionRequired)) return null;
 
     const Icon = item.icon;
 
     if (item.children) {
       const visibleChildren = item.children.filter((child) =>
-        hasPermission(client, child.permission)
+        hasPermission(client, child.permission) && hasRequiredOption(client, child.optionRequired)
       );
       if (visibleChildren.length === 0) return null;
 
