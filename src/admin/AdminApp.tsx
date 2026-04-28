@@ -40,6 +40,21 @@ import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
 import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
 import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
+import {
+  generateSalt,
+  generateToken,
+  hashPassword,
+  saveSession,
+  loadSession,
+  clearSession,
+  makeExpiresAt,
+  isLocked,
+  shouldLock,
+  makeLockUntil,
+  pushAdminLog,
+  getAdminLogs,
+  type AdminOperationLogEntry,
+} from './adminAuth';
 
 /* ============================================================
    定数 / ヘルパー
@@ -108,9 +123,19 @@ interface AdminAccount {
   name: string;
   email: string;
   role: 'super' | 'operator';
-  password: string;
+  // v1: password (平文) - マイグレーション元として残す
+  password?: string;
+  // v2: ハッシュ + ソルト
+  passwordHash?: string;
+  passwordSalt?: string;
+  active: boolean;
+  lastLoginAt?: string;
+  // ログイン失敗カウント（5回失敗で30分ロック）
+  failedAttempts?: number;
+  lockedUntil?: string;
   createdAt: string;
 }
+
 
 interface MediaIntegration {
   id: string;
@@ -134,16 +159,50 @@ const ADMIN_MEDIA_KEY = 'risotto:admin:media';
 function getAdminAccounts(): AdminAccount[] {
   try {
     const raw = localStorage.getItem(ADMIN_ACCOUNTS_KEY);
-    if (raw) { const arr = JSON.parse(raw); if (arr.length) return arr; }
+    if (raw) {
+      const arr = JSON.parse(raw) as AdminAccount[];
+      if (arr.length) {
+        // 旧データの後方互換：active/createdAt 等の必須フィールドを補完
+        return arr.map((a) => ({
+          ...a,
+          active: a.active !== false,
+          // emailが無い既存データは admin@local とする（再ログイン時に変更可）
+          email: a.email || (a.id === 'admin' ? 'admin@local' : `${a.id}@local`),
+        }));
+      }
+    }
   } catch { /* ignore */ }
+  // 初期データ：平文パスワード保持（初回ログイン時にハッシュ化）
   const defaults: AdminAccount[] = [
-    { id: 'admin', name: 'システム管理者', email: '', role: 'super', password: ADMIN_PASSWORD, createdAt: '2024-01-01' },
+    {
+      id: 'admin',
+      name: 'システム管理者',
+      email: 'admin@local',
+      role: 'super',
+      password: ADMIN_PASSWORD,
+      active: true,
+      createdAt: '2024-01-01',
+    },
   ];
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(defaults));
   return defaults;
 }
 function saveAdminAccounts(accounts: AdminAccount[]) {
   localStorage.setItem(ADMIN_ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+
+/** メールでアカウントを引く */
+function findAccountByEmail(email: string): AdminAccount | null {
+  const list = getAdminAccounts();
+  const target = email.trim().toLowerCase();
+  return list.find((a) => (a.email || '').toLowerCase() === target) || null;
+}
+
+/** アカウント1件を更新 */
+function updateAccount(id: string, mutator: (a: AdminAccount) => AdminAccount): void {
+  const list = getAdminAccounts();
+  const next = list.map((a) => (a.id === id ? mutator(a) : a));
+  saveAdminAccounts(next);
 }
 
 function getMediaIntegrations(): MediaIntegration[] {
@@ -252,34 +311,120 @@ const labelStyle: React.CSSProperties = {
 /* ============================================================
    管理者ログイン
    ============================================================ */
-const AdminLogin: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
+const AdminLogin: React.FC<{ onLogin: (account: AdminAccount, remember: boolean) => void }> = ({ onLogin }) => {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
-      onLogin();
-    } else {
-      setError('パスワードが正しくありません。');
+    setError('');
+    if (!email.trim() || !password) {
+      setError('メールアドレスとパスワードを入力してください。');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const account = findAccountByEmail(email);
+      if (!account) {
+        setError('メールアドレスまたはパスワードが正しくありません。');
+        return;
+      }
+      if (!account.active) {
+        setError('このアカウントは無効化されています。管理者にお問い合わせください。');
+        return;
+      }
+      if (isLocked(account)) {
+        const until = new Date(account.lockedUntil!).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        setError(`連続ログイン失敗によりアカウントがロックされています（${until} まで）。`);
+        return;
+      }
+
+      // 認証チェック
+      let authed = false;
+      if (account.passwordHash && account.passwordSalt) {
+        const hash = await hashPassword(password, account.passwordSalt);
+        authed = hash === account.passwordHash;
+      } else if (account.password) {
+        // 旧データ：平文と突合 → 成功時にハッシュ化して保存
+        if (password === account.password) {
+          authed = true;
+          const salt = generateSalt();
+          const hash = await hashPassword(password, salt);
+          updateAccount(account.id, (a) => ({
+            ...a,
+            password: undefined,
+            passwordHash: hash,
+            passwordSalt: salt,
+          }));
+        }
+      }
+
+      if (!authed) {
+        // 失敗カウント+1
+        updateAccount(account.id, (a) => {
+          const fa = (a.failedAttempts || 0) + 1;
+          return {
+            ...a,
+            failedAttempts: fa,
+            lockedUntil: shouldLock(fa) ? makeLockUntil() : a.lockedUntil,
+          };
+        });
+        const remaining = Math.max(0, 5 - ((account.failedAttempts || 0) + 1));
+        if (remaining === 0) {
+          setError('連続ログイン失敗によりアカウントが30分間ロックされました。');
+        } else {
+          setError(`メールアドレスまたはパスワードが正しくありません（残り ${remaining} 回でロック）。`);
+        }
+        return;
+      }
+
+      // 成功：失敗カウントとロック解除
+      updateAccount(account.id, (a) => ({
+        ...a,
+        failedAttempts: 0,
+        lockedUntil: undefined,
+        lastLoginAt: new Date().toISOString(),
+      }));
+
+      // 最新版を取得（ハッシュ化や last_login が反映済み）
+      const fresh = findAccountByEmail(email)!;
+      onLogin(fresh, remember);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#C2570C' }}>
-      <form onSubmit={handleSubmit} style={{ backgroundColor: '#fff', padding: '2.5rem 2rem', borderRadius: '12px', boxShadow: '0 4px 24px rgba(0,0,0,0.2)', width: '380px', maxWidth: '90vw' }}>
+      <form onSubmit={handleSubmit} style={{ backgroundColor: '#fff', padding: '2.5rem 2rem', borderRadius: '12px', boxShadow: '0 4px 24px rgba(0,0,0,0.2)', width: '420px', maxWidth: '90vw' }}>
         <h1 style={{ textAlign: 'center', margin: '0 0 0.25rem', fontSize: '1.5rem', fontWeight: 700, color: '#C2570C' }}>RISOTTO</h1>
-        <p style={{ textAlign: 'center', margin: '0 0 2rem', fontSize: '0.8125rem', color: '#6b7280' }}>運営管理画面ログイン</p>
+        <p style={{ textAlign: 'center', margin: '0 0 1.75rem', fontSize: '0.8125rem', color: '#6b7280' }}>運営管理画面ログイン</p>
 
         {error && (
           <div style={{ padding: '0.625rem 0.75rem', backgroundColor: '#FEF2F2', color: '#DC2626', borderRadius: '6px', fontSize: '0.8125rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>&#9888;</span> {error}
+            <AlertTriangle size={14} /> {error}
           </div>
         )}
 
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={labelStyle}>管理者パスワード</label>
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={labelStyle}>メールアドレス</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setError(''); }}
+            style={inputStyle}
+            placeholder="admin@example.com"
+            autoFocus
+            autoComplete="email"
+          />
+        </div>
+
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={labelStyle}>パスワード</label>
           <div style={{ position: 'relative' }}>
             <input
               type={showPassword ? 'text' : 'password'}
@@ -287,7 +432,7 @@ const AdminLogin: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(e); }}
               style={{ ...inputStyle, paddingRight: '2.5rem' }}
-              autoFocus
+              autoComplete="current-password"
             />
             <button
               type="button"
@@ -299,7 +444,18 @@ const AdminLogin: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
           </div>
         </div>
 
-        <button type="submit" style={{ ...btnPrimary, width: '100%', padding: '0.75rem', fontSize: '0.9375rem' }}>ログイン</button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8125rem', color: '#374151', marginBottom: '1.25rem' }}>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          ログイン状態を保持する（30日間）
+        </label>
+
+        <button type="submit" disabled={submitting} style={{ ...btnPrimary, width: '100%', padding: '0.75rem', fontSize: '0.9375rem', opacity: submitting ? 0.6 : 1 }}>
+          {submitting ? '認証中...' : 'ログイン'}
+        </button>
+
+        <div style={{ marginTop: '1.25rem', padding: '0.625rem 0.75rem', backgroundColor: '#F9FAFB', borderRadius: '6px', fontSize: '0.6875rem', color: '#6b7280', textAlign: 'center' }}>
+          初期管理者: admin@local / admin123（初回ログイン後に必ず変更してください）
+        </div>
       </form>
     </div>
   );
@@ -1805,26 +1961,47 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
 /* ============================================================
    管理者アカウント管理
    ============================================================ */
-const AdminAccountsPage: React.FC = () => {
+interface AdminFormState {
+  id: string;
+  name: string;
+  email: string;
+  role: 'super' | 'operator';
+  password: string;
+  active: boolean;
+}
+
+const AdminAccountsPage: React.FC<{
+  currentAccount: AdminAccount;
+  onLog: (action: string, target: string, detail?: string) => void;
+}> = ({ currentAccount, onLog }) => {
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminAccount | null>(null);
-  const [form, setForm] = useState<AdminAccount>({ id: '', name: '', email: '', role: 'operator', password: '', createdAt: '' });
+  const [form, setForm] = useState<AdminFormState>({ id: '', name: '', email: '', role: 'operator', password: '', active: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [showPw, setShowPw] = useState<Record<string, boolean>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => { setAccounts(getAdminAccounts()); }, []);
 
+  const reload = () => setAccounts(getAdminAccounts());
+
   const openAdd = () => {
     setEditing(null);
-    setForm({ id: '', name: '', email: '', role: 'operator', password: '', createdAt: new Date().toISOString().slice(0,10) });
+    setForm({ id: '', name: '', email: '', role: 'operator', password: '', active: true });
     setErrors({});
     setModalOpen(true);
   };
 
   const openEdit = (acc: AdminAccount) => {
     setEditing(acc);
-    setForm({ ...acc });
+    setForm({
+      id: acc.id,
+      name: acc.name,
+      email: acc.email || '',
+      role: acc.role,
+      password: '', // 既存パスワードは表示しない（変更時のみ入力）
+      active: acc.active !== false,
+    });
     setErrors({});
     setModalOpen(true);
   };
@@ -1834,107 +2011,198 @@ const AdminAccountsPage: React.FC = () => {
     if (!form.name.trim()) e.name = '名前は必須です';
     if (!form.id.trim()) e.id = 'IDは必須です';
     else if (!editing && accounts.some(a => a.id === form.id)) e.id = 'このIDは既に使用されています';
-    if (!form.password.trim()) e.password = 'パスワードは必須です';
-    else if (form.password.length < 6) e.password = '6文字以上で入力してください';
+    if (!form.email.trim()) e.email = 'メールアドレスは必須です';
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) e.email = 'メール形式が不正です';
+    else if (accounts.some(a => a.email?.toLowerCase() === form.email.toLowerCase() && a.id !== editing?.id)) e.email = 'このメールは他のアカウントで使われています';
+    if (!editing && !form.password) e.password = 'パスワードは必須です';
+    if (form.password && form.password.length < 8) e.password = 'パスワードは8文字以上で入力してください';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return;
-    let updated: AdminAccount[];
-    if (editing) {
-      updated = accounts.map(a => a.id === editing.id ? form : a);
-    } else {
-      updated = [...accounts, form];
+    setSubmitting(true);
+    try {
+      let updated: AdminAccount[];
+      if (editing) {
+        // 編集: パスワード入力があった場合のみ再ハッシュ
+        const target = accounts.find((a) => a.id === editing.id);
+        if (!target) return;
+        let next: AdminAccount = {
+          ...target,
+          name: form.name,
+          email: form.email,
+          role: form.role,
+          active: form.active,
+        };
+        if (form.password) {
+          const salt = generateSalt();
+          const hash = await hashPassword(form.password, salt);
+          next = { ...next, passwordHash: hash, passwordSalt: salt, password: undefined, failedAttempts: 0, lockedUntil: undefined };
+        }
+        updated = accounts.map(a => a.id === editing.id ? next : a);
+        onLog('管理者アカウント編集', target.name, `ID: ${target.id}${form.password ? ' / パスワード変更' : ''}`);
+      } else {
+        // 新規追加
+        const salt = generateSalt();
+        const hash = await hashPassword(form.password, salt);
+        const newAcc: AdminAccount = {
+          id: form.id.trim(),
+          name: form.name.trim(),
+          email: form.email.trim(),
+          role: form.role,
+          active: true,
+          passwordHash: hash,
+          passwordSalt: salt,
+          createdAt: new Date().toISOString().slice(0, 10),
+        };
+        updated = [...accounts, newAcc];
+        onLog('管理者アカウント作成', newAcc.name, `ID: ${newAcc.id} / ロール: ${newAcc.role}`);
+      }
+      saveAdminAccounts(updated);
+      reload();
+      setModalOpen(false);
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  const handleToggleActive = (acc: AdminAccount) => {
+    if (acc.id === currentAccount.id && acc.active) {
+      window.alert('自分自身を無効化することはできません。');
+      return;
+    }
+    if (acc.role === 'super' && acc.active && accounts.filter(a => a.role === 'super' && a.active !== false).length <= 1) {
+      window.alert('有効なスーパー管理者を1人以上残す必要があります');
+      return;
+    }
+    const updated = accounts.map(a => a.id === acc.id ? { ...a, active: !(a.active !== false) } : a);
     saveAdminAccounts(updated);
-    setAccounts(updated);
-    setModalOpen(false);
+    reload();
+    onLog((acc.active !== false) ? '管理者アカウント無効化' : '管理者アカウント有効化', acc.name, `ID: ${acc.id}`);
   };
 
   const handleDelete = (acc: AdminAccount) => {
-    if (acc.role === 'super' && accounts.filter(a => a.role === 'super').length <= 1) {
-      alert('スーパー管理者を1人以上残す必要があります');
+    if (acc.id === currentAccount.id) {
+      window.alert('自分自身を削除することはできません。');
       return;
     }
-    if (!window.confirm(`${acc.name} を削除しますか？`)) return;
+    if (acc.role === 'super' && accounts.filter(a => a.role === 'super').length <= 1) {
+      window.alert('スーパー管理者を1人以上残す必要があります');
+      return;
+    }
+    if (!window.confirm(`${acc.name} を削除しますか？この操作は取り消せません。`)) return;
     const updated = accounts.filter(a => a.id !== acc.id);
     saveAdminAccounts(updated);
-    setAccounts(updated);
+    reload();
+    onLog('管理者アカウント削除', acc.name, `ID: ${acc.id}`);
   };
 
-  const f = (key: keyof AdminAccount, val: string) => {
-    setForm(prev => ({ ...prev, [key]: val }));
-    if (errors[key]) setErrors(prev => { const n={...prev}; delete n[key]; return n; });
+  const handleUnlock = (acc: AdminAccount) => {
+    const updated = accounts.map(a => a.id === acc.id ? { ...a, failedAttempts: 0, lockedUntil: undefined } : a);
+    saveAdminAccounts(updated);
+    reload();
+    onLog('管理者アカウントロック解除', acc.name, `ID: ${acc.id}`);
   };
 
   return (
     <div style={{ padding: '1.5rem 2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>管理者アカウント管理</h2>
         <button onClick={openAdd} style={btnPrimary}>+ 追加</button>
       </div>
+      <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: '0 0 1rem' }}>
+        運営側のログインアカウントを管理します。スーパー管理者は全機能、オペレーターは閲覧と一部編集が可能です。
+      </p>
 
       <div style={{ ...cardStyle, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              {['名前', 'ID', 'メール', 'ロール', 'パスワード', '作成日', '操作'].map(h => (
+              {['名前', 'メールアドレス', 'ロール', '状態', '最終ログイン', 'ロック', '操作'].map(h => (
                 <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {accounts.map(acc => (
-              <tr key={acc.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>{acc.name}</td>
-                <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', fontSize: '0.8125rem', color: '#6b7280' }}>{acc.id}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem' }}>{acc.email || '-'}</td>
-                <td style={{ padding: '0.75rem 1rem' }}>
-                  <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: acc.role === 'super' ? '#FEF3C7' : '#E0E7FF', color: acc.role === 'super' ? '#B45309' : '#4338CA' }}>
-                    {acc.role === 'super' ? 'スーパー' : 'オペレーター'}
-                  </span>
-                </td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', fontFamily: 'monospace' }}>
-                  <span style={{ marginRight: '0.375rem' }}>{showPw[acc.id] ? acc.password : '••••••'}</span>
-                  <button onClick={() => setShowPw(p => ({...p, [acc.id]: !p[acc.id]}))} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.75rem', padding: 0 }}>
-                    {showPw[acc.id] ? '隠す' : '表示'}
-                  </button>
-                </td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>{acc.createdAt || '-'}</td>
-                <td style={{ padding: '0.75rem 1rem' }}>
-                  <div style={{ display: 'flex', gap: '0.375rem' }}>
-                    <button onClick={() => openEdit(acc)} style={{ ...btnSecondary, padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}>編集</button>
-                    <button onClick={() => handleDelete(acc)} style={{ ...btnDanger, padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}>削除</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {accounts.map(acc => {
+              const locked = isLocked(acc);
+              const isMe = acc.id === currentAccount.id;
+              return (
+                <tr key={acc.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <div style={{ fontWeight: 500 }}>{acc.name}{isMe && <span style={{ marginLeft: '0.375rem', padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.6875rem', backgroundColor: '#DBEAFE', color: '#1D4ED8' }}>自分</span>}</div>
+                    <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', fontFamily: 'monospace' }}>ID: {acc.id}</div>
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem' }}>{acc.email || '-'}</td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: acc.role === 'super' ? '#FEF3C7' : '#E0E7FF', color: acc.role === 'super' ? '#B45309' : '#4338CA' }}>
+                      {acc.role === 'super' ? 'スーパー' : 'オペレーター'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: acc.active !== false ? '#DEF7EC' : '#FDE8E8', color: acc.active !== false ? '#059669' : '#DC2626' }}>
+                      {acc.active !== false ? '有効' : '無効'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', color: '#6b7280' }}>{formatRelative(acc.lastLoginAt || null)}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.75rem' }}>
+                    {locked ? (
+                      <span style={{ color: '#DC2626' }}>
+                        ロック中（〜{new Date(acc.lockedUntil!).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}）
+                      </span>
+                    ) : (acc.failedAttempts && acc.failedAttempts > 0) ? (
+                      <span style={{ color: '#B45309' }}>失敗 {acc.failedAttempts} 回</span>
+                    ) : (
+                      <span style={{ color: '#9CA3AF' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                      <button onClick={() => openEdit(acc)} style={{ ...btnSecondary, padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}>編集</button>
+                      {locked && <button onClick={() => handleUnlock(acc)} style={{ ...btnSuccess, padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}>解除</button>}
+                      <button onClick={() => handleToggleActive(acc)} style={{ ...(acc.active !== false ? btnDanger : btnSuccess), padding: '0.25rem 0.625rem', fontSize: '0.75rem', opacity: isMe && acc.active !== false ? 0.5 : 1 }} disabled={isMe && acc.active !== false}>
+                        {acc.active !== false ? '無効化' : '有効化'}
+                      </button>
+                      <button onClick={() => handleDelete(acc)} style={{ ...btnDanger, padding: '0.25rem 0.625rem', fontSize: '0.75rem', opacity: isMe ? 0.5 : 1 }} disabled={isMe}>削除</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editing ? '管理者アカウント編集' : '管理者アカウント追加'} width="480px">
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editing ? '管理者アカウント編集' : '管理者アカウント追加'} width="500px">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          {[
-            { key: 'name' as const, label: '名前', type: 'text', required: true },
-            { key: 'id' as const, label: 'ログインID', type: 'text', required: true, disabled: !!editing },
-            { key: 'email' as const, label: 'メール', type: 'email', required: false },
-            { key: 'password' as const, label: 'パスワード（6文字以上）', type: 'text', required: true },
-          ].map(field => (
-            <div key={field.key}>
-              <label style={labelStyle}>{field.label}{field.required && <span style={{ color: '#DC2626' }}> *</span>}</label>
-              <input type={field.type} value={form[field.key]} onChange={e => f(field.key, e.target.value)} style={{ ...inputStyle, backgroundColor: field.disabled ? '#F3F4F6' : '#fff' }} disabled={field.disabled} />
-              {errors[field.key] && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors[field.key]}</div>}
-            </div>
-          ))}
+          <div>
+            <label style={labelStyle}>名前 <span style={{ color: '#DC2626' }}>*</span></label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+            {errors.name && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.name}</div>}
+          </div>
+          <div>
+            <label style={labelStyle}>ログインID <span style={{ color: '#DC2626' }}>*</span></label>
+            <input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} style={{ ...inputStyle, backgroundColor: editing ? '#F3F4F6' : '#fff' }} disabled={!!editing} />
+            {errors.id && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.id}</div>}
+          </div>
+          <div>
+            <label style={labelStyle}>メールアドレス <span style={{ color: '#DC2626' }}>*</span></label>
+            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={inputStyle} placeholder="例: yamada@example.com" />
+            {errors.email && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.email}</div>}
+          </div>
+          <div>
+            <label style={labelStyle}>{editing ? 'パスワード変更（変更しない場合は空欄）' : 'パスワード（8文字以上）'} {!editing && <span style={{ color: '#DC2626' }}>*</span>}</label>
+            <input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={inputStyle} placeholder={editing ? '空欄=変更しない' : ''} />
+            {errors.password && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.password}</div>}
+          </div>
           <div>
             <label style={labelStyle}>ロール</label>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               {([['super', 'スーパー管理者'], ['operator', 'オペレーター']] as const).map(([val, lbl]) => (
                 <label key={val} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', cursor: 'pointer', fontSize: '0.875rem' }}>
-                  <input type="radio" checked={form.role === val} onChange={() => f('role', val)} />
+                  <input type="radio" checked={form.role === val} onChange={() => setForm({ ...form, role: val })} />
                   {lbl}
                 </label>
               ))}
@@ -1942,10 +2210,95 @@ const AdminAccountsPage: React.FC = () => {
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
             <button onClick={() => setModalOpen(false)} style={btnSecondary}>キャンセル</button>
-            <button onClick={handleSave} style={btnPrimary}>{editing ? '更新' : '追加'}</button>
+            <button onClick={handleSave} disabled={submitting} style={{ ...btnPrimary, opacity: submitting ? 0.6 : 1 }}>
+              {submitting ? '保存中...' : (editing ? '更新' : '追加')}
+            </button>
           </div>
         </div>
       </Modal>
+    </div>
+  );
+};
+
+/* ============================================================
+   監査ログ（運営側）
+   ============================================================ */
+const AuditLogPage: React.FC = () => {
+  const [logs, setLogs] = useState<AdminOperationLogEntry[]>([]);
+  const [search, setSearch] = useState('');
+  const [actionFilter, setActionFilter] = useState('');
+
+  useEffect(() => { setLogs(getAdminLogs()); }, []);
+
+  const filtered = useMemo(() => {
+    let result = logs;
+    if (actionFilter) result = result.filter((l) => l.action.includes(actionFilter));
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((l) =>
+        l.operatorName.toLowerCase().includes(q) ||
+        l.target.toLowerCase().includes(q) ||
+        (l.detail || '').toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [logs, search, actionFilter]);
+
+  const uniqueActions = useMemo(() => Array.from(new Set(logs.map((l) => l.action))), [logs]);
+
+  return (
+    <div style={{ padding: '1.5rem 2rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>監査ログ</h2>
+        <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{logs.length} 件（最大1000件保持）</div>
+      </div>
+      <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: '0 0 1rem' }}>
+        運営側で行われた操作（クライアント作成・編集・削除、管理者操作、ログイン等）の履歴です。
+      </p>
+
+      <div style={{ ...cardStyle, padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.625rem' }}>
+        <input type="text" placeholder="操作者・対象・詳細で検索..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...inputStyle, width: '260px' }} />
+        <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+          <option value="">操作: 全て</option>
+          {uniqueActions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        {(search || actionFilter) && <button onClick={() => { setSearch(''); setActionFilter(''); }} style={{ ...btnSecondary, padding: '0.375rem 0.75rem', fontSize: '0.75rem' }}>クリア</button>}
+      </div>
+
+      <div style={{ ...cardStyle, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#F9FAFB' }}>
+              {['日時', '操作者', '操作', '対象', '詳細'].map(h => (
+                <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#9CA3AF', fontSize: '0.875rem' }}>該当するログがありません</td></tr>
+            )}
+            {filtered.slice(0, 200).map(log => (
+              <tr key={log.id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                <td style={{ padding: '0.5rem 1rem', fontSize: '0.75rem', color: '#6B7280', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  {new Date(log.timestamp).toLocaleString('ja-JP', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </td>
+                <td style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem', fontWeight: 500 }}>{log.operatorName}</td>
+                <td style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}>
+                  <span style={{ padding: '0.125rem 0.5rem', borderRadius: '4px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#F3F4F6', color: '#374151' }}>{log.action}</span>
+                </td>
+                <td style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}>{log.target}</td>
+                <td style={{ padding: '0.5rem 1rem', fontSize: '0.75rem', color: '#6B7280' }}>{log.detail || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length > 200 && (
+          <div style={{ padding: '0.625rem', textAlign: 'center', fontSize: '0.75rem', color: '#9CA3AF', backgroundColor: '#F9FAFB' }}>
+            最新 200件を表示中（全 {filtered.length} 件）
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -2262,10 +2615,12 @@ const MediaIntegrationPage: React.FC<{
    メインの AdminApp
    ============================================================ */
 const AdminApp: React.FC = () => {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'clients' | 'detail' | 'add' | 'contracts' | 'initdata' | 'adminaccounts' | 'media'>('dashboard');
+  const [currentAccount, setCurrentAccount] = useState<AdminAccount | null>(null);
+  const isLoggedIn = !!currentAccount;
+  const [currentView, setCurrentView] = useState<'dashboard' | 'clients' | 'detail' | 'add' | 'contracts' | 'initdata' | 'adminaccounts' | 'media' | 'auditlog'>('dashboard');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [, setAccountMenuOpen] = useState(false);
 
   // モーダル
   const [modalOpen, setModalOpen] = useState(false);
@@ -2280,6 +2635,53 @@ const AdminApp: React.FC = () => {
     const integrations = getMediaIntegrations();
     return integrations.filter(m => m.status === 'active' && m.connectionStatus === 'error').length;
   });
+
+  // セッション復元
+  useEffect(() => {
+    const session = loadSession();
+    if (!session) return;
+    const accounts = getAdminAccounts();
+    const acc = accounts.find((a) => a.id === session.accountId);
+    if (acc && acc.active) {
+      setCurrentAccount(acc);
+    } else {
+      clearSession();
+    }
+  }, []);
+
+  // ログイン処理
+  const handleLogin = useCallback((account: AdminAccount, remember: boolean) => {
+    saveSession({
+      token: generateToken(),
+      accountId: account.id,
+      expiresAt: makeExpiresAt(remember),
+      remember,
+    });
+    setCurrentAccount(account);
+    pushAdminLog({
+      operatorId: account.id,
+      operatorName: account.name,
+      action: 'ログイン',
+      target: account.email,
+    });
+  }, []);
+
+  // ログアウト
+  const handleLogout = useCallback(() => {
+    if (currentAccount) {
+      pushAdminLog({
+        operatorId: currentAccount.id,
+        operatorName: currentAccount.name,
+        action: 'ログアウト',
+        target: currentAccount.email,
+      });
+    }
+    clearSession();
+    setCurrentAccount(null);
+    setAccountMenuOpen(false);
+  }, [currentAccount]);
+
+  const isSuper = currentAccount?.role === 'super';
 
   // クライアント読み込み
   const loadClients = useCallback(() => {
@@ -2316,13 +2718,28 @@ const AdminApp: React.FC = () => {
       setCurrentView('adminaccounts');
     } else if (view === 'media') {
       setCurrentView('media');
+    } else if (view === 'auditlog') {
+      setCurrentView('auditlog');
     }
   };
+
+  // 操作ログ記録ヘルパー
+  const logAdminAction = useCallback((action: string, target: string, detail?: string) => {
+    if (!currentAccount) return;
+    pushAdminLog({
+      operatorId: currentAccount.id,
+      operatorName: currentAccount.name,
+      action,
+      target,
+      detail,
+    });
+  }, [currentAccount]);
 
   // 保存
   const handleSave = (client: Client) => {
     let updated: Client[];
     const existing = clients.findIndex(c => c.id === client.id);
+    const isNew = existing < 0;
     if (existing >= 0) {
       updated = [...clients];
       updated[existing] = client;
@@ -2333,6 +2750,7 @@ const AdminApp: React.FC = () => {
     setModalOpen(false);
     setEditingClient(null);
     setDefaultParentId(undefined);
+    logAdminAction(isNew ? 'クライアント作成' : 'クライアント編集', client.companyName, `ID: ${client.id}`);
   };
 
   // 編集
@@ -2360,12 +2778,17 @@ const AdminApp: React.FC = () => {
         const updated = clients.map(cl => cl.id === id ? { ...cl, status: newStatus as 'active' | 'inactive' } : cl);
         saveAndReload(updated);
         setConfirmDialog(null);
+        logAdminAction(newStatus === 'active' ? 'クライアント有効化' : 'クライアント無効化', c.companyName, `ID: ${c.id}`);
       },
     });
   };
 
-  // 削除
+  // 削除（super のみ）
   const handleDelete = (id: string) => {
+    if (!isSuper) {
+      window.alert('削除はsuper権限のみ可能です。管理者にお問い合わせください。');
+      return;
+    }
     const c = clients.find(cl => cl.id === id);
     if (!c) return;
     const children = clients.filter(cl => cl.parentId === id);
@@ -2380,32 +2803,36 @@ const AdminApp: React.FC = () => {
           setCurrentView('clients');
           setSelectedClientId(null);
         }
+        logAdminAction('クライアント削除', c.companyName, `ID: ${c.id}${children.length ? ` / 子アカ${children.length}件含む` : ''}`);
       },
     });
   };
 
   // パスワード更新
   const handleUpdatePassword = (id: string, newPw: string) => {
+    const c = clients.find(cl => cl.id === id);
     const updated = clients.map(cl => cl.id === id ? { ...cl, password: newPw } : cl);
     saveAndReload(updated);
+    if (c) logAdminAction('クライアントパスワード変更', c.companyName, `ID: ${c.id}`);
   };
 
-  if (!isLoggedIn) {
-    return <AdminLogin onLogin={() => setIsLoggedIn(true)} />;
+  if (!isLoggedIn || !currentAccount) {
+    return <AdminLogin onLogin={handleLogin} />;
   }
 
   const selectedClient = selectedClientId ? clients.find(c => c.id === selectedClientId) : null;
 
   const statsMap = calcAllClientStats(clients);
 
-  const sidebarItems: { key: string; label: string; Icon: typeof LayoutDashboard }[] = [
+  const sidebarItems: { key: string; label: string; Icon: typeof LayoutDashboard; superOnly?: boolean }[] = [
     { key: 'dashboard', label: 'ダッシュボード', Icon: LayoutDashboard },
     { key: 'clients', label: 'クライアント管理', Icon: Users },
     { key: 'contracts', label: '契約・請求管理', Icon: CreditCard },
     { key: 'initdata', label: '初期データ設定', Icon: ClipboardList },
-    { key: 'adminaccounts', label: '管理者アカウント', Icon: ShieldCheck },
+    { key: 'adminaccounts', label: '管理者アカウント', Icon: ShieldCheck, superOnly: true },
+    { key: 'auditlog', label: '監査ログ', Icon: FileText, superOnly: true },
     { key: 'media', label: '媒体連携管理', Icon: Link2 },
-  ];
+  ].filter((it) => !it.superOnly || isSuper);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -2451,12 +2878,26 @@ const AdminApp: React.FC = () => {
           })}
         </nav>
 
-        <button
-          onClick={() => setIsLoggedIn(false)}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', padding: '0.625rem', border: '1px solid rgba(255,255,255,0.35)', borderRadius: '6px', backgroundColor: 'transparent', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', fontSize: '0.8125rem', width: '100%' }}
-        >
-          <LogOut size={14} /> ログアウト
-        </button>
+        {/* アカウント情報 + ログアウト */}
+        <div style={{ marginTop: '0.5rem', padding: '0.625rem', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+              {currentAccount.name.slice(0, 1)}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentAccount.name}</div>
+              <div style={{ fontSize: '0.625rem', color: 'rgba(255,255,255,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentAccount.role === 'super' ? 'スーパー管理者' : 'オペレータ'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', justifyContent: 'center', padding: '0.375rem', border: '1px solid rgba(255,255,255,0.35)', borderRadius: '4px', backgroundColor: 'transparent', color: 'rgba(255,255,255,0.85)', cursor: 'pointer', fontSize: '0.75rem', width: '100%' }}
+          >
+            <LogOut size={12} /> ログアウト
+          </button>
+        </div>
       </aside>
 
       {/* メインコンテンツ */}
@@ -2490,8 +2931,11 @@ const AdminApp: React.FC = () => {
         {currentView === 'initdata' && (
           <InitDataPage clients={clients} />
         )}
-        {currentView === 'adminaccounts' && (
-          <AdminAccountsPage />
+        {currentView === 'adminaccounts' && isSuper && (
+          <AdminAccountsPage currentAccount={currentAccount} onLog={logAdminAction} />
+        )}
+        {currentView === 'auditlog' && isSuper && (
+          <AuditLogPage />
         )}
         {currentView === 'media' && (
           <MediaIntegrationPage onConnectionError={setMediaErrorCount} />
