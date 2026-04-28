@@ -529,12 +529,18 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         <div style={fieldStyle}>
           <label style={labelStyle}>拠点<span style={requiredMark}>*</span></label>
           {isChild ? (
-            <input
-              type="text"
-              value={lockedBaseName}
-              disabled
-              style={{ ...inputStyle, backgroundColor: '#F3F4F6', color: '#6B7280', cursor: 'not-allowed' }}
-            />
+            <>
+              <input
+                type="text"
+                value={lockedBaseName || '未設定'}
+                disabled
+                readOnly
+                style={{ ...inputStyle, backgroundColor: '#F3F4F6', color: '#6B7280', cursor: 'not-allowed' }}
+              />
+              <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.25rem' }}>
+                {lockedBaseName ? '子アカウントは自拠点が自動で設定されます' : '⚠ 自拠点が未設定です。本部アカウントで設定してください'}
+              </div>
+            </>
           ) : (
             <SearchableSelect
               options={baseOptions}

@@ -16,6 +16,8 @@ interface AuthContextValue extends AuthState {
   logout: () => void;
   updateClientData: (updater: (data: ClientData) => ClientData) => void;
   reloadClientData: () => void;
+  /** storage から最新の Client を読み直して state に反映（オプション情報の同期等に使用） */
+  refreshClient: () => void;
   logAction: (category: LogCategory, action: string, target: string, detail?: string) => void;
 }
 
@@ -146,6 +148,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [client, loadClientData]);
 
+  /**
+   * storage から最新の Client を取得し、子アカウントなら親オプションも継承しなおす
+   * - incrementOptionUsage 後の使用回数同期
+   * - 親アカウント側で options が変わった時の同期
+   */
+  const refreshClient = useCallback(() => {
+    if (!client) return;
+    const all = storage.getClients();
+    const fresh = all.find((c) => c.id === client.id);
+    if (!fresh) return;
+    let effective: Client = fresh;
+    if (fresh.accountType === 'child' && fresh.parentId) {
+      const parent = all.find((c) => c.id === fresh.parentId);
+      if (parent?.options) {
+        effective = { ...fresh, options: parent.options };
+      }
+    }
+    setClient(effective);
+  }, [client]);
+
   // 初期化: デモ用にデフォルトクライアントが無い場合は作成
   useEffect(() => {
     const clients = storage.getClients();
@@ -196,6 +218,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     updateClientData,
     reloadClientData,
+    refreshClient,
     logAction,
   };
 

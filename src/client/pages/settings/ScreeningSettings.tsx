@@ -36,7 +36,7 @@ const helpStyle: React.CSSProperties = {
 
 const SHARED = '__shared__';
 const MAX_AXES = 8;
-const MIN_AXES = 3;
+const MIN_AXES = 1;
 
 const defaultCriteria = (): ScreeningCriteria => ({
   enabled: false,
@@ -60,7 +60,8 @@ const ScreeningSettings: React.FC = () => {
   useEffect(() => {
     if (clientData?.screeningCriteria) {
       const c = clientData.screeningCriteria;
-      const migratedAxes = ensureAxisImportance(migrateToAxes(c));
+      // migrateToAxes 内で ensureAxisImportance も実行されるので二重呼び出し不要
+      const migratedAxes = migrateToAxes(c);
       const merged: ScreeningCriteria = {
         ...defaultCriteria(),
         ...c,
@@ -74,6 +75,17 @@ const ScreeningSettings: React.FC = () => {
       }
     }
   }, [clientData]);
+
+  // スコープ切替時に展開状態を該当スコープの最初の軸にリセット
+  useEffect(() => {
+    const target = scope === SHARED ? form.axes : form.byJob?.[scope]?.axes;
+    if (target && target.length > 0) {
+      setExpanded(new Set([target[0].id]));
+    } else {
+      setExpanded(new Set());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const isChild = client?.accountType === 'child';
   const jobs = useMemo(() => clientData?.jobs || [], [clientData]);

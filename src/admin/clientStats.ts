@@ -89,10 +89,14 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
   };
 }
 
-/** 全クライアントの統計を一気に計算 */
+/** 全クライアントの統計を一気に計算
+ *  - 子アカウントは親と同じ ClientData を参照するためスキップ（無駄な計算回避）
+ *  - 子アカの統計が必要な箇所では calcClientStats(child, allClients) を直接呼ぶこと
+ */
 export function calcAllClientStats(clients: Client[]): { [clientId: string]: ClientStats } {
   const result: { [id: string]: ClientStats } = {};
   clients.forEach((c) => {
+    if (c.accountType === 'child') return;
     result[c.id] = calcClientStats(c, clients);
   });
   return result;

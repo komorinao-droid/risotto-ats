@@ -397,7 +397,16 @@ class StorageService {
   }
 
   saveClientData(clientId: string, data: ClientData): void {
-    localStorage.setItem(clientDataKey(clientId), JSON.stringify(data));
+    try {
+      localStorage.setItem(clientDataKey(clientId), JSON.stringify(data));
+    } catch (e: any) {
+      const msg = e?.name === 'QuotaExceededError' || (e?.message || '').toLowerCase().includes('quota')
+        ? 'ストレージ容量の上限に達しました。古い添付ファイル等を削除してから再度お試しください。'
+        : `データ保存に失敗しました: ${e?.message || e}`;
+      // ユーザーに通知
+      try { window.alert(msg); } catch { /* ignore */ }
+      throw e;
+    }
   }
 
   getClients(): Client[] {
@@ -413,7 +422,15 @@ class StorageService {
   }
 
   saveClients(clients: Client[]): void {
-    localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
+    try {
+      localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
+    } catch (e: any) {
+      const msg = e?.name === 'QuotaExceededError' || (e?.message || '').toLowerCase().includes('quota')
+        ? 'ストレージ容量の上限に達しました。'
+        : `クライアント情報の保存に失敗しました: ${e?.message || e}`;
+      try { window.alert(msg); } catch { /* ignore */ }
+      throw e;
+    }
   }
 }
 

@@ -189,6 +189,11 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
         {client && (
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
             {client.companyName}
+            {client.accountType === 'child' && (
+              <div style={{ fontSize: '0.6875rem', color: client.baseName ? '#9ca3af' : '#DC2626', marginTop: '0.125rem' }}>
+                {client.baseName ? `担当拠点: ${client.baseName}` : '⚠ 自拠点が未設定です'}
+              </div>
+            )}
           </div>
         )}
       </div>

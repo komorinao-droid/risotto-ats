@@ -69,7 +69,10 @@ export function defaultAxes(): ScoringAxis[] {
  * - クライアントが「軸を分割」する前のソフトランディング
  */
 export function migrateToAxes(body: ScreeningCriteriaBody): ScoringAxis[] {
-  if (body.axes && body.axes.length > 0) return body.axes;
+  if (body.axes && body.axes.length > 0) {
+    // 既存軸でも importance が未設定の場合は ★3 で補完
+    return ensureAxisImportance(body.axes);
+  }
 
   // フリーテキストがある場合は1軸にまとめて移行
   const hasV1Content = body.evaluationPoints || body.requiredQualities || body.ngQualities;

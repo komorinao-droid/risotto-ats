@@ -59,6 +59,8 @@ export function resolveScreeningCriteria(
       evaluationPoints: o.evaluationPoints,
       requiredQualities: o.requiredQualities,
       ngQualities: o.ngQualities,
+      // 職種別オーバーライドに axes が無い場合は親の axes を継承（v2形式の保証）
+      axes: o.axes && o.axes.length > 0 ? o.axes : criteria.axes,
     };
   }
   return criteria;

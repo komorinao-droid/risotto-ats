@@ -1428,7 +1428,7 @@ const AxisScoreRow: React.FC<{ axis: { axisId: string; axisName: string; score: 
 };
 
 const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, updateApplicant }) => {
-  const { logAction, client } = useAuth();
+  const { logAction, client, refreshClient } = useAuth();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
 
@@ -1500,7 +1500,11 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
       logAction('applicant', 'AI評価実行', applicant.name || String(applicant.id), `スコア: ${result.score} / ${result.recommendation}`);
       // 使用カウントをインクリメント（オプション契約中の場合のみ）
       if (client && aiOption) {
-        try { await incrementOptionUsage(client, 'aiScreening'); } catch { /* ignore */ }
+        try {
+          await incrementOptionUsage(client, 'aiScreening');
+          // state を最新の options 情報に同期（残り件数表示・上限チェックの正確性確保）
+          refreshClient();
+        } catch { /* ignore */ }
       }
     } catch (e: any) {
       setError(e?.message || 'AI評価に失敗しました');

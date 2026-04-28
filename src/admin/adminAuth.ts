@@ -65,6 +65,15 @@ export function loadSession(): AdminSessionStored | null {
   if (!raw) return null;
   try {
     const s = JSON.parse(raw) as AdminSessionStored;
+    // 必須フィールドの検証（改ざん検知）
+    if (!s.token || typeof s.token !== 'string' || s.token.length < 32) {
+      clearSession();
+      return null;
+    }
+    if (!s.accountId || !s.expiresAt) {
+      clearSession();
+      return null;
+    }
     if (new Date(s.expiresAt).getTime() < Date.now()) {
       clearSession();
       return null;

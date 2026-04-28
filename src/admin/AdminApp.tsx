@@ -879,7 +879,8 @@ const ClientList: React.FC<{
                   </tr>
                   {/* 子行 */}
                   {showChildren && isExpanded && children.map(ch => {
-                    const cStats = statsMap[ch.id];
+                    // 子アカの統計は親と同じデータなので親の statsMap から参照
+                    const cStats = statsMap[p.id];
                     return (
                       <tr key={ch.id} style={{ backgroundColor: '#F8FAFF' }}>
                         <td></td>
