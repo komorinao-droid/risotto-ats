@@ -24,18 +24,18 @@ async function screeningHandler(req, res) {
     const passThreshold = Number(criteria.passThreshold) || 75;
     const rejectThreshold = Number(criteria.rejectThreshold) || 30;
 
-    const prompt = buildScreeningPrompt({
-      applicant,
-      criteria: {
-        evaluationPoints: String(criteria.evaluationPoints || ''),
-        requiredQualities: String(criteria.requiredQualities || ''),
-        ngQualities: String(criteria.ngQualities || ''),
-        passThreshold,
-        rejectThreshold,
-      },
-    });
+    // v1/v2 両対応で渡す
+    const normalizedCriteria = {
+      evaluationPoints: String(criteria.evaluationPoints || ''),
+      requiredQualities: String(criteria.requiredQualities || ''),
+      ngQualities: String(criteria.ngQualities || ''),
+      passThreshold,
+      rejectThreshold,
+      axes: Array.isArray(criteria.axes) ? criteria.axes : undefined,
+    };
 
-    const result = await runScreening(prompt);
+    const prompt = buildScreeningPrompt({ applicant, criteria: normalizedCriteria });
+    const result = await runScreening(prompt, normalizedCriteria);
 
     return res.json({
       ...result,

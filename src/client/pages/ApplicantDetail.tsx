@@ -1382,6 +1382,50 @@ interface ScreeningTabProps {
   updateApplicant: (updater: (a: Applicant) => Applicant) => void;
 }
 
+const AxisScoreRow: React.FC<{ axis: { axisId: string; axisName: string; score: number; weight: number; reasons: string[]; concerns: string[] } }> = ({ axis }) => {
+  const [open, setOpen] = useState(false);
+  const barColor = axis.score >= 75 ? '#22C55E' : axis.score >= 50 ? '#F59E0B' : '#EF4444';
+  return (
+    <div style={{ borderBottom: '1px solid #F3F4F6', paddingBottom: '0.5rem' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', cursor: 'pointer' }}
+      >
+        <span style={{ fontSize: '0.75rem', color: '#6B7280', width: '14px' }}>{open ? '▼' : '▶'}</span>
+        <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', flex: 1, minWidth: '120px' }}>{axis.axisName}</span>
+        <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>({axis.weight}%)</span>
+        <div style={{ flex: 2, height: '8px', backgroundColor: '#F3F4F6', borderRadius: '4px', overflow: 'hidden', maxWidth: '180px' }}>
+          <div style={{ width: `${axis.score}%`, height: '100%', backgroundColor: barColor, transition: 'width 0.3s' }} />
+        </div>
+        <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#111827', minWidth: '36px', textAlign: 'right' }}>{axis.score}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: '0.5rem', marginLeft: '24px', display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+          {axis.reasons.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.6875rem', color: '#065F46', fontWeight: 600, marginBottom: '0.125rem' }}>+ 加点</div>
+              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.75rem', color: '#374151', lineHeight: 1.6 }}>
+                {axis.reasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {axis.concerns.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.6875rem', color: '#991B1B', fontWeight: 600, marginBottom: '0.125rem' }}>− 懸念</div>
+              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.75rem', color: '#374151', lineHeight: 1.6 }}>
+                {axis.concerns.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {axis.reasons.length === 0 && axis.concerns.length === 0 && (
+            <div style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>詳細なし</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, updateApplicant }) => {
   const { logAction } = useAuth();
   const [running, setRunning] = useState(false);
@@ -1437,6 +1481,7 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
         recommendation: data.recommendation,
         reasons: Array.isArray(data.reasons) ? data.reasons : [],
         concerns: Array.isArray(data.concerns) ? data.concerns : [],
+        axisScores: Array.isArray(data.axisScores) ? data.axisScores : undefined,
         evaluatedAt: data.evaluatedAt || new Date().toISOString(),
         model: data.model || 'claude-haiku-4-5',
       };
@@ -1538,9 +1583,21 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
               </span>
             </div>
 
+            {/* 多軸スコア（v2の場合） */}
+            {screening.axisScores && screening.axisScores.length > 0 && (
+              <div style={{ padding: '1rem 1.25rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#111827', marginBottom: '0.75rem' }}>📊 評価軸別スコア</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                  {screening.axisScores.map((ax) => (
+                    <AxisScoreRow key={ax.axisId} axis={ax} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {screening.reasons.length > 0 && (
               <div style={{ padding: '1rem 1.25rem', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#065F46', marginBottom: '0.5rem' }}>+ 加点ポイント</div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#065F46', marginBottom: '0.5rem' }}>+ 総合の加点ポイント</div>
                 <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.8 }}>
                   {screening.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
                 </ul>
@@ -1549,7 +1606,7 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
 
             {screening.concerns.length > 0 && (
               <div style={{ padding: '1rem 1.25rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#991B1B', marginBottom: '0.5rem' }}>− 懸念ポイント</div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#991B1B', marginBottom: '0.5rem' }}>− 総合の懸念ポイント</div>
                 <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.8 }}>
                   {screening.concerns.map((concern, i) => <li key={i}>{concern}</li>)}
                 </ul>

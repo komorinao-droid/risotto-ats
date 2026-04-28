@@ -58,12 +58,23 @@ export interface Member {
   notifySms: boolean;
 }
 
-// AIスクリーニング結果
-export interface ScreeningResult {
-  score: number; // 0-100
-  recommendation: 'pass' | 'review' | 'reject';
+// 軸別スコア
+export interface AxisScore {
+  axisId: string;
+  axisName: string;
+  score: number;          // 0-100
+  weight: number;         // 評価時のウェイト
   reasons: string[];
   concerns: string[];
+}
+
+// AIスクリーニング結果
+export interface ScreeningResult {
+  score: number; // 0-100 総合
+  recommendation: 'pass' | 'review' | 'reject';
+  reasons: string[];      // 総合の加点ポイント
+  concerns: string[];     // 総合の懸念ポイント
+  axisScores?: AxisScore[]; // 多軸評価時のみ
   evaluatedAt: string; // ISO timestamp
   model: string;
 }
@@ -325,11 +336,47 @@ export interface ChatQuestionGroup {
   questions: ChatQuestion[];
 }
 
+// 評価軸の重要度（★1〜★3）
+export type CriteriaImportance = 1 | 2 | 3;
+
+// チェック項目のタイプ
+export type CriteriaItemType = 'check' | 'number' | 'text';
+
+// チェック項目
+export interface CriteriaItem {
+  id: string;
+  label: string;                       // 例: 法人営業経験
+  type: CriteriaItemType;
+  importance?: CriteriaImportance;     // 必須要件では未使用、望ましい/避けたいで使用
+  // type=number 用
+  numberValue?: number;
+  numberOperator?: 'gte' | 'lte' | 'eq';
+  numberUnit?: string;                 // 例: 年
+  // type=text 用
+  textValue?: string;
+}
+
+// 評価軸
+export interface ScoringAxis {
+  id: string;
+  name: string;                        // 例: 経験・スキル
+  description?: string;                // 軸の説明（UI用）
+  weight: number;                      // 0-100（軸全体で合計100%）
+  guidance?: string;                   // AIへの追加指示（フリーテキスト）
+
+  requirements: CriteriaItem[];        // 必須要件（importance不使用）
+  preferences: CriteriaItem[];         // 望ましい要件（旧:加点）
+  avoidances: CriteriaItem[];          // 避けたい要件（旧:減点）
+}
+
 // AIスクリーニング設定 - 職種別オーバーライドの本体（しきい値・enabledは全社共通）
 export interface ScreeningCriteriaBody {
-  evaluationPoints: string; // 評価観点（フリーテキスト）
-  requiredQualities: string; // 必須要件
-  ngQualities: string; // NG要件
+  // v1 互換用（旧形式・マイグレーション元）
+  evaluationPoints: string;
+  requiredQualities: string;
+  ngQualities: string;
+  // v2 多軸形式（推奨）
+  axes?: ScoringAxis[];
 }
 
 // AIスクリーニング設定
