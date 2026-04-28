@@ -2095,14 +2095,30 @@ interface HistoryTabProps {
 }
 
 const HistoryTab: React.FC<HistoryTabProps> = ({ applicant, clientData, onNavigate }) => {
+  // 同一人物かどうかの判定を強化:
+  // - 電話番号が一致 → 同一人物（最も信頼）
+  // - メールが一致 → 同一人物
+  // - 氏名+生年月日が一致 → 同一人物
+  // - 氏名のみ一致 → 同名別人の可能性があるため除外
+  const normalizePhone = (p?: string) => (p || '').replace(/[-\s]/g, '');
+  const myPhone = normalizePhone(applicant.phone);
+  const myEmail = (applicant.email || '').toLowerCase();
   const duplicates = useMemo(
     () =>
-      clientData.applicants.filter(
-        (a) =>
-          a.id !== applicant.id &&
-          (a.name === applicant.name || (applicant.phone && a.phone === applicant.phone))
-      ),
-    [clientData.applicants, applicant]
+      clientData.applicants.filter((a) => {
+        if (a.id === applicant.id) return false;
+        const aPhone = normalizePhone(a.phone);
+        const aEmail = (a.email || '').toLowerCase();
+        if (myPhone && aPhone && myPhone === aPhone) return true;
+        if (myEmail && aEmail && myEmail === aEmail) return true;
+        if (
+          a.name === applicant.name &&
+          applicant.birthDate &&
+          a.birthDate === applicant.birthDate
+        ) return true;
+        return false;
+      }),
+    [clientData.applicants, applicant, myPhone, myEmail]
   );
 
   if (duplicates.length === 0) {

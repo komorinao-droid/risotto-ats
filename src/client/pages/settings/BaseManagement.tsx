@@ -222,12 +222,40 @@ const BaseManagement: React.FC = () => {
   const deleteBase = (id: number) => {
     const base = bases.find((b) => b.id === id);
     if (!base) return;
-    if (!window.confirm(`"${base.name}" を削除しますか？`)) return;
-    updateClientData((data) => ({
-      ...data,
-      bases: data.bases.filter((b) => b.id !== id),
-    }));
-    logAction('setting', '拠点削除', base.name);
+    // 関連データの件数を確認
+    const relatedApplicants = clientData?.applicants.filter((a) => a.base === base.name).length || 0;
+    const relatedEvents = clientData?.events.filter((e) => e.base === base.name).length || 0;
+    const warning = relatedApplicants || relatedEvents
+      ? `\n\n⚠ 関連データもクリアされます:\n・応募者の拠点指定: ${relatedApplicants}件\n・面接予定: ${relatedEvents}件\n（応募者・面接イベント自体は削除されず、拠点情報のみクリアされます）`
+      : '';
+    if (!window.confirm(`"${base.name}" を削除しますか？${warning}`)) return;
+    updateClientData((data) => {
+      // slotSettings から該当拠点を除去
+      const nextSlots = { ...(data.slotSettings || {}) };
+      delete nextSlots[base.name];
+      // 拠点別オーバーライドからも除去
+      const nextJobsByBase = { ...(data.jobsByBase || {}) };
+      delete nextJobsByBase[base.name];
+      const nextSourcesByBase = { ...(data.sourcesByBase || {}) };
+      delete nextSourcesByBase[base.name];
+      const nextEmailTplByBase = { ...(data.emailTemplatesByBase || {}) };
+      delete nextEmailTplByBase[base.name];
+      const nextFilterConditions = { ...(data.filterConditions || {}) };
+      delete nextFilterConditions[base.name];
+      return {
+        ...data,
+        bases: data.bases.filter((b) => b.id !== id),
+        // 応募者・面接イベントは残すが、拠点情報はクリア（履歴として残す）
+        applicants: data.applicants.map((a) => (a.base === base.name ? { ...a, base: '' } : a)),
+        events: data.events.filter((e) => e.base !== base.name), // 未来の面接は削除
+        slotSettings: nextSlots,
+        jobsByBase: nextJobsByBase,
+        sourcesByBase: nextSourcesByBase,
+        emailTemplatesByBase: nextEmailTplByBase,
+        filterConditions: nextFilterConditions,
+      };
+    });
+    logAction('setting', '拠点削除', base.name, `応募者${relatedApplicants}件・面接${relatedEvents}件もクリア`);
     if (selectedBaseId === id) goList();
   };
 

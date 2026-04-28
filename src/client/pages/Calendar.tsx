@@ -445,6 +445,11 @@ const BookingModal: React.FC<{
 
   const handleBook = () => {
     if (!title.trim()) return;
+    // 重複予約の二重ガード（UIのdisabledが効かない場合の防御）
+    if (overlapping.length > 0 && !forceBook) {
+      window.alert('この時間帯には既に予約があります。「重複しても予約する」にチェックを入れてください。');
+      return;
+    }
     onBook({
       applicantId,
       date: dateStr,
@@ -818,9 +823,9 @@ const Calendar: React.FC = () => {
   };
 
   // ナビゲーション
-  const goToday = () => setWeekStart(getMondayOfWeek(new Date()));
-  const goPrev = () => setWeekStart(addDays(weekStart, -7));
-  const goNext = () => setWeekStart(addDays(weekStart, 7));
+  const goToday = () => { setCapacityEdit(null); setWeekStart(getMondayOfWeek(new Date())); };
+  const goPrev = () => { setCapacityEdit(null); setWeekStart(addDays(weekStart, -7)); };
+  const goNext = () => { setCapacityEdit(null); setWeekStart(addDays(weekStart, 7)); };
 
   const todayStr = formatDate(new Date());
 

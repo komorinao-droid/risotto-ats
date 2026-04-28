@@ -32,10 +32,13 @@ export function useAuth(): AuthContextValue {
 }
 
 function filterDataByBase(data: ClientData, baseName: string): ClientData {
+  // slotSettings は拠点別キーマップなので自拠点のみに絞る
+  const ownSlot = data.slotSettings?.[baseName];
   return {
     ...data,
     applicants: data.applicants.filter((a) => a.base === baseName),
     events: data.events.filter((e) => e.base === baseName),
+    slotSettings: ownSlot ? { [baseName]: ownSlot } : {},
   };
 }
 

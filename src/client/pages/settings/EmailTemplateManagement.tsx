@@ -212,7 +212,15 @@ const EmailTemplateManagement: React.FC = () => {
                   backgroundColor: selectedId === t.id ? '#EFF6FF' : 'transparent',
                   border: selectedId === t.id ? '1px solid #BFDBFE' : '1px solid transparent',
                 }}
-                onClick={() => setSelectedId(t.id)}
+                onClick={() => {
+                  // 切替前に未保存の自動保存タイマーをフラッシュ
+                  if (saveTimerRef.current) {
+                    clearTimeout(saveTimerRef.current);
+                    saveTimerRef.current = null;
+                    doSave();
+                  }
+                  setSelectedId(t.id);
+                }}
               >
                 <span style={{ fontSize: '0.875rem', fontWeight: selectedId === t.id ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {t.name}

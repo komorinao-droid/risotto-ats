@@ -437,7 +437,11 @@ const ApplicantList: React.FC = () => {
         email: a.email || '',
         phone: (a.phone || '').replace(/[-\s]/g, ''),
         gender: a.gender || '',
-        age: a.age ? (parseInt(a.age, 10) || a.age) : '',
+        age: (() => {
+          if (!a.age) return '';
+          const n = parseInt(a.age, 10);
+          return Number.isNaN(n) ? '' : n;
+        })(),
         birthDate: a.birthDate || '',
         currentJob: a.currentJob || '',
         date: a.date || new Date().toISOString().slice(0, 10),

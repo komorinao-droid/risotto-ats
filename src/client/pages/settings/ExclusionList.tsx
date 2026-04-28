@@ -96,6 +96,20 @@ const ExclusionList: React.FC = () => {
       entry = { type: 'name_birth', name: formName.trim(), birthDate: formBirthDate };
     }
 
+    // 重複チェック（同じ条件のエントリが既にあれば登録しない）
+    const existingList = clientData?.exclusionList || [];
+    const duplicate = existingList.find((e) => {
+      if (e.type !== entry.type) return false;
+      if (entry.type === 'email') return e.email?.toLowerCase() === entry.email?.toLowerCase();
+      if (entry.type === 'phone') return (e.phone || '').replace(/[-\s]/g, '') === (entry.phone || '').replace(/[-\s]/g, '');
+      if (entry.type === 'name_birth') return e.name === entry.name && e.birthDate === entry.birthDate;
+      return false;
+    });
+    if (duplicate) {
+      setAddResult('既に同じ条件が登録されています。');
+      return;
+    }
+
     let matchCount = 0;
 
     updateClientData((data) => {
