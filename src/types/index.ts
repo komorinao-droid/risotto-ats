@@ -356,12 +356,16 @@ export interface CriteriaItem {
   textValue?: string;
 }
 
+// 軸の重要度（1-5、シンボルモード用）
+export type AxisImportance = 1 | 2 | 3 | 4 | 5;
+
 // 評価軸
 export interface ScoringAxis {
   id: string;
   name: string;                        // 例: 経験・スキル
   description?: string;                // 軸の説明（UI用）
   weight: number;                      // 0-100（軸全体で合計100%）
+  importance?: AxisImportance;         // ★1-★5。シンボルモード時はこれから weight を自動計算
   guidance?: string;                   // AIへの追加指示（フリーテキスト）
 
   requirements: CriteriaItem[];        // 必須要件（importance不使用）

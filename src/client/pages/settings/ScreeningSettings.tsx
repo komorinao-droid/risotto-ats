@@ -6,8 +6,9 @@ import type {
   ScoringAxis,
   CriteriaItem,
   CriteriaImportance,
+  AxisImportance,
 } from '@/types';
-import { defaultAxes, migrateToAxes, normalizeWeights, genId } from '@/utils/screeningDefaults';
+import { defaultAxes, migrateToAxes, normalizeWeights, recalcWeightsFromImportance, ensureAxisImportance, genId } from '@/utils/screeningDefaults';
 
 const inputStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -54,14 +55,16 @@ const ScreeningSettings: React.FC = () => {
   const [scope, setScope] = useState<string>(SHARED);
   const [saved, setSaved] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [weightMode, setWeightMode] = useState<'symbol' | 'precise'>('symbol');
 
   useEffect(() => {
     if (clientData?.screeningCriteria) {
       const c = clientData.screeningCriteria;
+      const migratedAxes = ensureAxisImportance(migrateToAxes(c));
       const merged: ScreeningCriteria = {
         ...defaultCriteria(),
         ...c,
-        axes: migrateToAxes(c),
+        axes: migratedAxes,
         byJob: c.byJob || {},
       };
       setForm(merged);
@@ -124,13 +127,16 @@ const ScreeningSettings: React.FC = () => {
       id: genId('ax_'),
       name: '新規軸',
       description: '',
-      weight: 10,
+      weight: 0,
+      importance: 3,
       guidance: '',
       requirements: [],
       preferences: [],
       avoidances: [],
     };
-    const next = normalizeWeights([...visibleAxes, newAxis]);
+    // シンボルモードならimportanceから再計算、精密モードなら均等割
+    const merged = [...visibleAxes, newAxis];
+    const next = weightMode === 'symbol' ? recalcWeightsFromImportance(merged) : normalizeWeights(merged);
     setVisibleAxes(next);
     setExpanded((s) => new Set([...s, newAxis.id]));
   };
@@ -141,7 +147,14 @@ const ScreeningSettings: React.FC = () => {
       return;
     }
     if (!window.confirm('この軸を削除しますか？')) return;
-    setVisibleAxes(normalizeWeights(visibleAxes.filter((a) => a.id !== axisId)));
+    const filtered = visibleAxes.filter((a) => a.id !== axisId);
+    const next = weightMode === 'symbol' ? recalcWeightsFromImportance(filtered) : normalizeWeights(filtered);
+    setVisibleAxes(next);
+  };
+
+  const updateAxisImportance = (axisId: string, importance: AxisImportance) => {
+    const updated = visibleAxes.map((a) => (a.id === axisId ? { ...a, importance } : a));
+    setVisibleAxes(recalcWeightsFromImportance(updated));
   };
 
   const moveAxis = (axisId: string, direction: -1 | 1) => {
@@ -235,19 +248,41 @@ const ScreeningSettings: React.FC = () => {
       )}
 
       {/* 評価軸セクション */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
           <BarChart3 size={16} />
           評価軸（{visibleAxes.length}軸 / 合計 {totalWeight}%）
         </h3>
-        {visibleAxes.length < MAX_AXES && (
-          <button
-            onClick={addAxis}
-            style={{ padding: '0.375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, color: '#374151', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-          >
-            <Plus size={14} /> 評価軸を追加
-          </button>
-        )}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          {/* モード切替トグル */}
+          <div style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
+            <button
+              onClick={() => {
+                if (weightMode === 'symbol') return;
+                // 精密→シンボル: importance未設定の軸は★3として補完
+                setVisibleAxes(recalcWeightsFromImportance(ensureAxisImportance(visibleAxes)));
+                setWeightMode('symbol');
+              }}
+              style={{ padding: '0.375rem 0.75rem', border: 'none', backgroundColor: weightMode === 'symbol' ? '#F97316' : '#fff', color: weightMode === 'symbol' ? '#fff' : '#374151', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+            >
+              ★ シンボル
+            </button>
+            <button
+              onClick={() => setWeightMode('precise')}
+              style={{ padding: '0.375rem 0.75rem', border: 'none', backgroundColor: weightMode === 'precise' ? '#F97316' : '#fff', color: weightMode === 'precise' ? '#fff' : '#374151', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+            >
+              % 精密
+            </button>
+          </div>
+          {visibleAxes.length < MAX_AXES && (
+            <button
+              onClick={addAxis}
+              style={{ padding: '0.375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, color: '#374151', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+            >
+              <Plus size={14} /> 評価軸を追加
+            </button>
+          )}
+        </div>
       </div>
 
       {totalWeight !== 100 && (
@@ -265,8 +300,10 @@ const ScreeningSettings: React.FC = () => {
             isExpanded={expanded.has(axis.id)}
             isFirst={idx === 0}
             isLast={idx === visibleAxes.length - 1}
+            weightMode={weightMode}
             onToggle={() => toggleExpand(axis.id)}
             onUpdate={(mutator) => updateAxis(axis.id, mutator)}
+            onImportanceChange={(imp) => updateAxisImportance(axis.id, imp)}
             onRemove={() => removeAxis(axis.id)}
             onMoveUp={() => moveAxis(axis.id, -1)}
             onMoveDown={() => moveAxis(axis.id, 1)}
@@ -338,6 +375,37 @@ const ScreeningSettings: React.FC = () => {
 };
 
 /* =======================================
+   ImportanceStarPicker（軸の重要度★1-5）
+   ======================================= */
+const ImportanceStarPicker: React.FC<{ value: AxisImportance; onChange: (v: AxisImportance) => void }> = ({ value, onChange }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const display = hover ?? value;
+  return (
+    <div style={{ display: 'inline-flex', gap: '1px' }} onMouseLeave={() => setHover(null)}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          onClick={() => onChange(n as AxisImportance)}
+          onMouseEnter={() => setHover(n)}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            padding: '0 1px',
+            fontSize: '1rem',
+            color: n <= display ? '#F59E0B' : '#D1D5DB',
+            lineHeight: 1,
+          }}
+          title={`★${n}`}
+        >
+          ★
+        </button>
+      ))}
+    </div>
+  );
+};
+
+/* =======================================
    AxisCard
    ======================================= */
 interface AxisCardProps {
@@ -345,14 +413,16 @@ interface AxisCardProps {
   isExpanded: boolean;
   isFirst: boolean;
   isLast: boolean;
+  weightMode: 'symbol' | 'precise';
   onToggle: () => void;
   onUpdate: (mutator: (a: ScoringAxis) => ScoringAxis) => void;
+  onImportanceChange: (importance: AxisImportance) => void;
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
 }
 
-const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown }) => {
+const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, weightMode, onToggle, onUpdate, onImportanceChange, onRemove, onMoveUp, onMoveDown }) => {
   return (
     <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
       {/* ヘッダー */}
@@ -378,16 +448,25 @@ const AxisCard: React.FC<AxisCardProps> = ({ axis, isExpanded, isFirst, isLast, 
           }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
-          <label style={{ fontSize: '0.75rem', color: '#6B7280' }}>重要度</label>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={axis.weight}
-            onChange={(e) => onUpdate((a) => ({ ...a, weight: Number(e.target.value) || 0 }))}
-            style={{ width: '60px', padding: '0.25rem 0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '0.8125rem', textAlign: 'right' }}
-          />
-          <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>%</span>
+          {weightMode === 'symbol' ? (
+            <>
+              <ImportanceStarPicker value={axis.importance || 3} onChange={onImportanceChange} />
+              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', minWidth: '36px', textAlign: 'right' }}>({axis.weight}%)</span>
+            </>
+          ) : (
+            <>
+              <label style={{ fontSize: '0.75rem', color: '#6B7280' }}>重要度</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={axis.weight}
+                onChange={(e) => onUpdate((a) => ({ ...a, weight: Number(e.target.value) || 0 }))}
+                style={{ width: '60px', padding: '0.25rem 0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '0.8125rem', textAlign: 'right' }}
+              />
+              <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>%</span>
+            </>
+          )}
           <button onClick={onMoveUp} disabled={isFirst} style={{ padding: '0.25rem', border: 'none', background: 'transparent', cursor: isFirst ? 'not-allowed' : 'pointer', opacity: isFirst ? 0.3 : 1 }}><ArrowUp size={14} /></button>
           <button onClick={onMoveDown} disabled={isLast} style={{ padding: '0.25rem', border: 'none', background: 'transparent', cursor: isLast ? 'not-allowed' : 'pointer', opacity: isLast ? 0.3 : 1 }}><ArrowDown size={14} /></button>
           <button onClick={onRemove} style={{ padding: '0.25rem', border: 'none', background: 'transparent', cursor: 'pointer', color: '#DC2626' }}><Trash2 size={14} /></button>
