@@ -66,8 +66,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!found) return false;
       if (found.status === 'inactive') return false;
 
-      setClient(found);
-      loadClientData(found);
+      // 子アカウントは親のオプションを継承（オプションは親契約単位で管理）
+      let effective = found;
+      if (found.accountType === 'child' && found.parentId) {
+        const parent = clients.find((c) => c.id === found.parentId);
+        if (parent?.options) {
+          effective = { ...found, options: parent.options };
+        }
+      }
+
+      setClient(effective);
+      loadClientData(effective);
       // ログ記録
       const dataId = found.accountType === 'child' && found.parentId ? found.parentId : found.id;
       const operator = found.accountType === 'parent'
