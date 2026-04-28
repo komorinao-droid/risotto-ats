@@ -187,7 +187,7 @@ export interface ClientOperationLog {
   id: string;
   timestamp: string;
   operator: string;
-  category: 'applicant' | 'email' | 'auth' | 'other';
+  category: 'applicant' | 'email' | 'auth' | 'setting' | 'other';
   action: string;
   target: string;
   detail?: string;

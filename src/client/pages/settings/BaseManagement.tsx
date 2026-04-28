@@ -125,7 +125,7 @@ const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) =
 // ── メイン ──
 const BaseManagement: React.FC = () => {
   const navigate = useNavigate();
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, client, logAction } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -197,6 +197,7 @@ const BaseManagement: React.FC = () => {
 
   const save = () => {
     if (!form.name.trim()) return;
+    const isNew = editId === null;
     updateClientData((data) => {
       const list = [...data.bases];
       const baseData: Base = {
@@ -214,6 +215,7 @@ const BaseManagement: React.FC = () => {
       }
       return { ...data, bases: list };
     });
+    logAction('setting', isNew ? '拠点追加' : '拠点編集', form.name.trim());
     setModalOpen(false);
   };
 
@@ -225,6 +227,7 @@ const BaseManagement: React.FC = () => {
       ...data,
       bases: data.bases.filter((b) => b.id !== id),
     }));
+    logAction('setting', '拠点削除', base.name);
     if (selectedBaseId === id) goList();
   };
 

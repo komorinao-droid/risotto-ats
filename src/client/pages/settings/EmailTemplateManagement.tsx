@@ -28,7 +28,7 @@ const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{
 const SHARED = '__shared__';
 
 const EmailTemplateManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, client, logAction } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
@@ -117,12 +117,15 @@ const EmailTemplateManagement: React.FC = () => {
     }, 0);
   };
 
+  const scopeDetail = () => isBaseScope ? `拠点別: ${scope}` : '全社共通';
+
   const addTemplate = () => {
     if (!newName.trim()) return;
     writeTemplates((list) => {
       const maxId = list.reduce((m, t) => Math.max(m, t.id), 0);
       return [...list, { id: maxId + 1, name: newName.trim(), subject: '', body: '' }];
     });
+    logAction('setting', 'メールテンプレ追加', newName.trim(), scopeDetail());
     setNewName('');
     setModalOpen(false);
   };
@@ -131,6 +134,7 @@ const EmailTemplateManagement: React.FC = () => {
     const t = templates.find((t) => t.id === id);
     if (!t || !window.confirm(`"${t.name}" を削除しますか？`)) return;
     writeTemplates((list) => list.filter((t) => t.id !== id));
+    logAction('setting', 'メールテンプレ削除', t.name, scopeDetail());
     if (selectedId === id) setSelectedId(null);
   };
 

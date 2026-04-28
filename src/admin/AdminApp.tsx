@@ -1312,6 +1312,7 @@ const CATEGORY_LABELS: Record<ClientOperationLog['category'], { label: string; c
   applicant: { label: '応募者', color: '#1D4ED8', bg: '#DBEAFE' },
   email: { label: 'メール', color: '#9333EA', bg: '#F3E8FF' },
   auth: { label: '認証', color: '#15803D', bg: '#DCFCE7' },
+  setting: { label: '設定', color: '#B45309', bg: '#FEF3C7' },
   other: { label: 'その他', color: '#6B7280', bg: '#F3F4F6' },
 };
 

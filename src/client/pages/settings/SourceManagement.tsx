@@ -28,7 +28,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 const SHARED = '__shared__';
 
 const SourceManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, client, logAction } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<Omit<Source, 'id'>>({
     name: '',
@@ -75,12 +75,15 @@ const SourceManagement: React.FC = () => {
     setModalOpen(true);
   };
 
+  const scopeDetail = () => editingScope === SHARED ? '全社共通' : `拠点別: ${editingScope}`;
+
   const addSource = () => {
     if (!form.name.trim()) return;
     writeSources((list) => {
       const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
       return [...list, { id: maxId + 1, ...form, name: form.name.trim() }];
     });
+    logAction('setting', '応募媒体追加', form.name.trim(), scopeDetail());
     setModalOpen(false);
   };
 
@@ -92,6 +95,7 @@ const SourceManagement: React.FC = () => {
   const saveEdit = () => {
     if (!editRow || !editRow.name.trim()) return;
     writeSources((list) => list.map((s) => (s.id === editRow.id ? { ...editRow, name: editRow.name.trim() } : s)));
+    logAction('setting', '応募媒体編集', editRow.name.trim(), scopeDetail());
     setEditingId(null);
     setEditRow(null);
   };
@@ -116,6 +120,7 @@ const SourceManagement: React.FC = () => {
       next.applicants = data.applicants.map((a) => (a.src === source.name ? { ...a, src: '' } : a));
       return next;
     });
+    logAction('setting', '応募媒体削除', source.name, scopeDetail());
   };
 
   const removeOverride = () => {

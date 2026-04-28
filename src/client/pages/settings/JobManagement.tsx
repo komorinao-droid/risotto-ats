@@ -31,7 +31,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 const SHARED = '__shared__';
 
 const JobManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, client, logAction } = useAuth();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,6 +100,7 @@ const JobManagement: React.FC = () => {
 
   const save = () => {
     if (!form.name.trim()) return;
+    const isNew = editId === null;
     writeJobs((list) => {
       const updated = [...list];
       if (editId !== null) {
@@ -111,6 +112,8 @@ const JobManagement: React.FC = () => {
       }
       return updated;
     });
+    const scopeLabel = editingScope === SHARED ? '全社共通' : `職種別: ${editingScope}`;
+    logAction('setting', isNew ? '職種追加' : '職種編集', form.name.trim(), scopeLabel);
     setModalOpen(false);
   };
 
@@ -129,6 +132,8 @@ const JobManagement: React.FC = () => {
       next.applicants = data.applicants.map((a) => (a.job === job.name ? { ...a, job: '' } : a));
       return next;
     });
+    const scopeLabel = editingScope === SHARED ? '全社共通' : `職種別: ${editingScope}`;
+    logAction('setting', '職種削除', job.name, scopeLabel);
   };
 
   const removeOverride = () => {
