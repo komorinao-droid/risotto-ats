@@ -13,6 +13,7 @@ import {
   ChevronUp,
   ChevronDown,
   Menu,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 import type { Client } from '@/types';
@@ -36,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/applicants', label: '応募者管理', icon: Users },
   { path: '/progress', label: '進捗ボード', icon: KanbanSquare },
   { path: '/calendar', label: '面接カレンダー', icon: Calendar },
+  { path: '/reports', label: '採用レポート', icon: FileText },
   { path: '/statuses', label: 'ステータス管理', icon: Tags, permission: 'status' },
   { path: '/sources', label: '応募媒体管理', icon: Megaphone, permission: 'source' },
   { path: '/bases', label: '拠点管理', icon: Building2, permission: 'base' },

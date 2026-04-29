@@ -19,6 +19,7 @@ import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManage
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
+import RecruitmentReport from '@/client/pages/RecruitmentReport';
 
 const AuthenticatedApp: React.FC = () => {
   const { client, logout } = useAuth();
@@ -33,6 +34,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/applicant" element={<ApplicantDetail />} />
           <Route path="/progress" element={<ProgressBoard />} />
           <Route path="/calendar" element={<Calendar />} />
+          <Route path="/reports" element={<RecruitmentReport />} />
           <Route path="/statuses" element={<StatusManagement />} />
           <Route path="/sources" element={<SourceManagement />} />
           <Route path="/bases" element={<BaseManagement />} />
