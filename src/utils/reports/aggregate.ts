@@ -11,7 +11,7 @@
  *
  * 各クライアントが自由にステータス名を作れるため、stage 文字列の部分一致で判定する。
  */
-import type { Applicant, ClientData } from '@/types';
+import type { Applicant, ClientData, Status } from '@/types';
 import type {
   DateRange,
   FunnelMetrics,
@@ -22,37 +22,42 @@ import type {
   RecruitmentReport,
 } from './types';
 import { inRange } from './dateRange';
+import { getStatusCategory } from '@/utils/statusCategory';
 
 // =============================================================
 // ステータス分類ユーティリティ
 // =============================================================
 
-/** stage が採用に該当するか（SPD準拠: 採用/稼働/入社/内定承諾/面接合格 等） */
-export function isHired(stage: string): boolean {
-  if (!stage) return false;
-  return /採用|稼働|入社|内定承諾|内定【承諾】|面接合格|研没/.test(stage);
+/** stage が採用に該当するか（hired か active） */
+export function isHired(stage: string, statuses?: Status[]): boolean {
+  const c = getStatusCategory(stage, statuses);
+  return c === 'hired' || c === 'active';
 }
 
 /** stage が稼働に該当するか */
-export function isActive(stage: string): boolean {
-  if (!stage) return false;
-  return /稼働|入社/.test(stage);
+export function isActive(stage: string, statuses?: Status[]): boolean {
+  return getStatusCategory(stage, statuses) === 'active';
 }
 
-/** stage が内定に該当するか（承諾前後問わず） */
-export function isOffered(stage: string): boolean {
-  if (!stage) return false;
-  return /内定/.test(stage);
+/** stage が内定に該当するか（承諾前後問わず: offered/hired/active を内定到達としてカウント） */
+export function isOffered(stage: string, statuses?: Status[]): boolean {
+  const c = getStatusCategory(stage, statuses);
+  return c === 'offered' || c === 'hired' || c === 'active';
 }
 
-/** stage が「不合格」系か（NG判定） */
-export function isNg(stage: string): boolean {
-  if (!stage) return false;
-  return /不合格|対象外|条件不一致|連絡不通|重複|辞退/.test(stage);
+/** stage が「不合格・辞退」系か（NG判定） */
+export function isNg(stage: string, statuses?: Status[]): boolean {
+  return getStatusCategory(stage, statuses) === 'ng';
 }
 
-/** NG理由のカテゴリ判定（SPD準拠の4分類 + その他） */
-export function ngReason(stage: string, age?: number | string): NgBreakdown['byReason'] extends infer R ? keyof R : never {
+/** stage が面接以降に到達しているか（面接設定判定の補助） */
+export function isInterviewOrLater(stage: string, statuses?: Status[]): boolean {
+  const c = getStatusCategory(stage, statuses);
+  return c === 'interview' || c === 'offered' || c === 'hired' || c === 'active';
+}
+
+/** NG理由のカテゴリ判定（SPD準拠の4分類 + その他）。statuses 引数は後方互換のためオプション。 */
+export function ngReason(stage: string, age?: number | string, _statuses?: Status[]): NgBreakdown['byReason'] extends infer R ? keyof R : never {
   const ageNum = typeof age === 'number' ? age : age ? parseInt(String(age), 10) : NaN;
   if (!isNaN(ageNum) && (ageNum < 18 || ageNum >= 75)) {
     // 年齢NG（フィルタ条件は別途あるが、簡易判定）
@@ -90,32 +95,29 @@ export function filterApplicantsByRange(applicants: Applicant[], range: DateRang
 }
 
 /** ファネル指標を計算 */
-export function calcFunnel(applicants: Applicant[], events: { applicantId: number; date?: string }[] = []): FunnelMetrics {
+export function calcFunnel(applicants: Applicant[], events: { applicantId: number; date?: string }[] = [], statuses?: Status[]): FunnelMetrics {
   const total = applicants.length;
 
   // 面接設定: 面接イベントが存在する applicant を集計（events をソース）
   const eventApplicantIds = new Set(events.map((e) => e.applicantId));
-  // または stage に「面接」を含む（応募者カードのステータスが面接系の場合）
+  // または ステータス分類が interview 以降の場合
   const interviewSet = new Set<number>();
   applicants.forEach((a) => {
     if (eventApplicantIds.has(a.id)) interviewSet.add(a.id);
-    if (/面接|内定|採用|稼働|入社|合格|不合格（面接後）/.test(a.stage)) {
-      // ステータスが面接以降の段階に進んでいるなら面接設定済とみなす
-      if (!/不合格（面接前）|不合格（書類）|書類選考/.test(a.stage)) {
-        interviewSet.add(a.id);
-      }
+    if (isInterviewOrLater(a.stage, statuses)) {
+      interviewSet.add(a.id);
     }
   });
   const interviewScheduled = interviewSet.size;
 
   // 有効応募: NG だが面接まで進んでいる場合は「面接後にNGになった」扱いで有効に含める。
   // これにより 面接設定 ≤ 有効応募 が常に成立する。
-  const ngCount = applicants.filter((a) => (isNg(a.stage) || a.duplicate) && !interviewSet.has(a.id)).length;
+  const ngCount = applicants.filter((a) => (isNg(a.stage, statuses) || a.duplicate) && !interviewSet.has(a.id)).length;
   const valid = total - ngCount;
 
-  const offered = applicants.filter((a) => isOffered(a.stage)).length;
-  const hired = applicants.filter((a) => isHired(a.stage)).length;
-  const active = applicants.filter((a) => isActive(a.stage)).length;
+  const offered = applicants.filter((a) => isOffered(a.stage, statuses)).length;
+  const hired = applicants.filter((a) => isHired(a.stage, statuses)).length;
+  const active = applicants.filter((a) => isActive(a.stage, statuses)).length;
 
   const safe = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0);
 
@@ -136,8 +138,8 @@ export function calcFunnel(applicants: Applicant[], events: { applicantId: numbe
 }
 
 /** 選考NG内訳 */
-export function calcNgBreakdown(applicants: Applicant[]): NgBreakdown {
-  const ngs = applicants.filter((a) => isNg(a.stage) || a.duplicate);
+export function calcNgBreakdown(applicants: Applicant[], statuses?: Status[]): NgBreakdown {
+  const ngs = applicants.filter((a) => isNg(a.stage, statuses) || a.duplicate);
   const byReason: NgBreakdown['byReason'] = { age: 0, condition: 0, duplicate: 0, personality: 0, other: 0 };
   ngs.forEach((a) => {
     if (a.duplicate) {
@@ -151,8 +153,8 @@ export function calcNgBreakdown(applicants: Applicant[]): NgBreakdown {
 }
 
 /** NG中の年代別内訳 */
-export function calcNgAgeBreakdown(applicants: Applicant[]): { ageGroup: string; count: number; rate: number }[] {
-  const ngs = applicants.filter((a) => isNg(a.stage));
+export function calcNgAgeBreakdown(applicants: Applicant[], statuses?: Status[]): { ageGroup: string; count: number; rate: number }[] {
+  const ngs = applicants.filter((a) => isNg(a.stage, statuses));
   const byGroup: Record<string, number> = {};
   ngs.forEach((a) => {
     const g = ageGroupOf(a.age);
@@ -165,11 +167,9 @@ export function calcNgAgeBreakdown(applicants: Applicant[]): { ageGroup: string;
 }
 
 /** 拠点別マトリクス */
-export function calcByBase(applicants: Applicant[], events: { applicantId: number; date?: string }[]): MatrixRow[] {
+export function calcByBase(applicants: Applicant[], events: { applicantId: number; date?: string }[], statuses?: Status[]): MatrixRow[] {
   const baseSet = new Set<string>();
   applicants.forEach((a) => baseSet.add(a.base || '未設定'));
-  const eventByApplicant = new Map(events.map((e) => [e.applicantId, e]));
-  void eventByApplicant;
 
   return Array.from(baseSet).map((base) => {
     const inBase = applicants.filter((a) => (a.base || '未設定') === base);
@@ -177,13 +177,13 @@ export function calcByBase(applicants: Applicant[], events: { applicantId: numbe
       const a = applicants.find((ap) => ap.id === e.applicantId);
       return a && (a.base || '未設定') === base;
     });
-    const f = calcFunnel(inBase, inBaseEvents);
+    const f = calcFunnel(inBase, inBaseEvents, statuses);
     return { label: base, ...f };
   }).sort((a, b) => b.applications - a.applications);
 }
 
 /** 媒体別マトリクス */
-export function calcBySource(applicants: Applicant[], events: { applicantId: number; date?: string }[]): MatrixRow[] {
+export function calcBySource(applicants: Applicant[], events: { applicantId: number; date?: string }[], statuses?: Status[]): MatrixRow[] {
   const set = new Set<string>();
   applicants.forEach((a) => set.add(a.src || '未設定'));
   return Array.from(set).map((src) => {
@@ -192,32 +192,32 @@ export function calcBySource(applicants: Applicant[], events: { applicantId: num
       const a = applicants.find((ap) => ap.id === e.applicantId);
       return a && (a.src || '未設定') === src;
     });
-    const f = calcFunnel(inSrc, inSrcEvents);
+    const f = calcFunnel(inSrc, inSrcEvents, statuses);
     return { label: src, ...f };
   }).sort((a, b) => b.hired - a.hired || b.applications - a.applications);
 }
 
 /** 拠点×媒体 マトリクス */
-export function calcByBaseSource(applicants: Applicant[], events: { applicantId: number; date?: string }[]): { base: string; rows: MatrixRow[] }[] {
+export function calcByBaseSource(applicants: Applicant[], events: { applicantId: number; date?: string }[], statuses?: Status[]): { base: string; rows: MatrixRow[] }[] {
   const baseSet = new Set<string>();
   applicants.forEach((a) => baseSet.add(a.base || '未設定'));
   return Array.from(baseSet).map((base) => {
     const inBase = applicants.filter((a) => (a.base || '未設定') === base);
     const eventsInBase = events.filter((e) => inBase.some((a) => a.id === e.applicantId));
-    return { base, rows: calcBySource(inBase, eventsInBase) };
+    return { base, rows: calcBySource(inBase, eventsInBase, statuses) };
   });
 }
 
 /** 年代別集計 */
-export function calcByAge(applicants: Applicant[]): AgeBreakdown[] {
+export function calcByAge(applicants: Applicant[], statuses?: Status[]): AgeBreakdown[] {
   const totalApps = applicants.length || 1;
-  const totalHired = applicants.filter((a) => isHired(a.stage)).length || 1;
+  const totalHired = applicants.filter((a) => isHired(a.stage, statuses)).length || 1;
   const groupApps: Record<string, number> = {};
   const groupHired: Record<string, number> = {};
   applicants.forEach((a) => {
     const g = ageGroupOf(a.age);
     groupApps[g] = (groupApps[g] || 0) + 1;
-    if (isHired(a.stage)) groupHired[g] = (groupHired[g] || 0) + 1;
+    if (isHired(a.stage, statuses)) groupHired[g] = (groupHired[g] || 0) + 1;
   });
   return AGE_GROUPS_ORDER
     .filter((g) => groupApps[g] || groupHired[g])
@@ -231,22 +231,22 @@ export function calcByAge(applicants: Applicant[]): AgeBreakdown[] {
 }
 
 /** 拠点×年代 */
-export function calcByBaseAge(applicants: Applicant[]): { base: string; rows: AgeBreakdown[] }[] {
+export function calcByBaseAge(applicants: Applicant[], statuses?: Status[]): { base: string; rows: AgeBreakdown[] }[] {
   const baseSet = new Set<string>();
   applicants.forEach((a) => baseSet.add(a.base || '未設定'));
   return Array.from(baseSet).map((base) => ({
     base,
-    rows: calcByAge(applicants.filter((a) => (a.base || '未設定') === base)),
+    rows: calcByAge(applicants.filter((a) => (a.base || '未設定') === base), statuses),
   }));
 }
 
 /** 媒体×年代 */
-export function calcBySourceAge(applicants: Applicant[]): { source: string; rows: AgeBreakdown[] }[] {
+export function calcBySourceAge(applicants: Applicant[], statuses?: Status[]): { source: string; rows: AgeBreakdown[] }[] {
   const set = new Set<string>();
   applicants.forEach((a) => set.add(a.src || '未設定'));
   return Array.from(set).map((source) => ({
     source,
-    rows: calcByAge(applicants.filter((a) => (a.src || '未設定') === source)),
+    rows: calcByAge(applicants.filter((a) => (a.src || '未設定') === source), statuses),
   })).sort((a, b) => {
     const ah = a.rows.reduce((s, r) => s + r.hired, 0);
     const bh = b.rows.reduce((s, r) => s + r.hired, 0);
@@ -255,7 +255,7 @@ export function calcBySourceAge(applicants: Applicant[]): { source: string; rows
 }
 
 /** 月次トレンド（YYYY-MM 単位の応募/有効/面接/内定/採用） */
-export function calcByMonth(applicants: Applicant[], events: { applicantId: number; date?: string }[], range: DateRange): MonthlyBucket[] {
+export function calcByMonth(applicants: Applicant[], events: { applicantId: number; date?: string }[], range: DateRange, statuses?: Status[]): MonthlyBucket[] {
   const months: string[] = [];
   const start = new Date(range.start + 'T00:00:00');
   const end = new Date(range.end + 'T00:00:00');
@@ -280,12 +280,12 @@ export function calcByMonth(applicants: Applicant[], events: { applicantId: numb
     const b = bucket[m];
     if (!b) return;
     b.applications += 1;
-    const isInterview = eventApplicantIds.has(a.id) || (/面接|内定|採用|稼働|入社|合格/.test(a.stage) && !/不合格（面接前）|不合格（書類）|書類選考/.test(a.stage));
+    const isInterview = eventApplicantIds.has(a.id) || isInterviewOrLater(a.stage, statuses);
     // 面接まで進んだ場合は NG でも valid 扱い（面接設定 ≤ 有効を保証）
-    if (isInterview || (!isNg(a.stage) && !a.duplicate)) b.validApplications += 1;
+    if (isInterview || (!isNg(a.stage, statuses) && !a.duplicate)) b.validApplications += 1;
     if (isInterview) b.interviewScheduled += 1;
-    if (isOffered(a.stage)) b.offered += 1;
-    if (isHired(a.stage)) b.hired += 1;
+    if (isOffered(a.stage, statuses)) b.offered += 1;
+    if (isHired(a.stage, statuses)) b.hired += 1;
   });
 
   return months.map((m) => bucket[m]);
@@ -299,19 +299,20 @@ export function calcByMonth(applicants: Applicant[], events: { applicantId: numb
 export function buildReport(data: ClientData, range: DateRange): RecruitmentReport {
   const applicants = filterApplicantsByRange(data.applicants || [], range);
   const events = (data.events || []).filter((e) => inRange(e.date, range));
+  const statuses = data.statuses || [];
 
   return {
     range,
     generatedAt: new Date().toISOString(),
-    total: calcFunnel(applicants, events),
-    ngBreakdown: calcNgBreakdown(applicants),
-    byBase: calcByBase(applicants, events),
-    bySource: calcBySource(applicants, events),
-    byBaseSource: calcByBaseSource(applicants, events),
-    byAge: calcByAge(applicants),
-    byBaseAge: calcByBaseAge(applicants),
-    bySourceAge: calcBySourceAge(applicants),
-    ngAgeBreakdown: calcNgAgeBreakdown(applicants),
-    byMonth: calcByMonth(applicants, events, range),
+    total: calcFunnel(applicants, events, statuses),
+    ngBreakdown: calcNgBreakdown(applicants, statuses),
+    byBase: calcByBase(applicants, events, statuses),
+    bySource: calcBySource(applicants, events, statuses),
+    byBaseSource: calcByBaseSource(applicants, events, statuses),
+    byAge: calcByAge(applicants, statuses),
+    byBaseAge: calcByBaseAge(applicants, statuses),
+    bySourceAge: calcBySourceAge(applicants, statuses),
+    ngAgeBreakdown: calcNgAgeBreakdown(applicants, statuses),
+    byMonth: calcByMonth(applicants, events, range, statuses),
   };
 }

@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Status } from '@/types';
+import type { Status, StatusCategory } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
+import { ALL_CATEGORIES, categoryLabel, inferCategoryFromName } from '@/utils/statusCategory';
 
 const PAGE_SIZE = 10;
 
@@ -34,7 +35,7 @@ const StatusManagement: React.FC = () => {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [form, setForm] = useState({ name: '', color: COLORS[0].main });
+  const [form, setForm] = useState<{ name: string; color: string; category: StatusCategory }>({ name: '', color: COLORS[0].main, category: 'screening' });
   const [subInput, setSubInput] = useState<{ [id: number]: string }>({});
 
   const statuses = clientData?.statuses || [];
@@ -54,13 +55,13 @@ const StatusManagement: React.FC = () => {
 
   const openAddModal = () => {
     setEditId(null);
-    setForm({ name: '', color: COLORS[0].main });
+    setForm({ name: '', color: COLORS[0].main, category: 'screening' });
     setModalOpen(true);
   };
 
   const openEditModal = (s: Status) => {
     setEditId(s.id);
-    setForm({ name: s.name, color: s.color });
+    setForm({ name: s.name, color: s.color, category: s.category || inferCategoryFromName(s.name) });
     setModalOpen(true);
   };
 
@@ -71,7 +72,7 @@ const StatusManagement: React.FC = () => {
       if (editId !== null) {
         const idx = list.findIndex((s) => s.id === editId);
         if (idx >= 0) {
-          list[idx] = { ...list[idx], name: form.name.trim(), color: form.color };
+          list[idx] = { ...list[idx], name: form.name.trim(), color: form.color, category: form.category };
         }
       } else {
         const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
@@ -83,6 +84,7 @@ const StatusManagement: React.FC = () => {
           active: true,
           order: maxOrder + 1,
           subStatuses: [],
+          category: form.category,
         });
       }
       return { ...data, statuses: list };
@@ -206,6 +208,7 @@ const StatusManagement: React.FC = () => {
               <th style={{ textAlign: 'left', padding: '0.5rem', width: '60px' }}>順序</th>
               <th style={{ textAlign: 'left', padding: '0.5rem' }}>カラー</th>
               <th style={{ textAlign: 'left', padding: '0.5rem' }}>ステータス名</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>分類</th>
               <th style={{ textAlign: 'left', padding: '0.5rem' }}>状態</th>
               <th style={{ textAlign: 'left', padding: '0.5rem' }}>サブステータス</th>
               <th style={{ textAlign: 'right', padding: '0.5rem', width: '160px' }}>操作</th>
@@ -241,6 +244,39 @@ const StatusManagement: React.FC = () => {
                   />
                 </td>
                 <td style={{ padding: '0.5rem', fontWeight: 500 }}>{s.name}</td>
+                <td style={{ padding: '0.5rem' }}>
+                  {(() => {
+                    const c = s.category || inferCategoryFromName(s.name);
+                    const isInferred = !s.category;
+                    const colors: Record<StatusCategory, { bg: string; fg: string }> = {
+                      screening: { bg: '#F3F4F6', fg: '#374151' },
+                      interview: { bg: '#EFF6FF', fg: '#1E40AF' },
+                      offered:   { bg: '#FAF5FF', fg: '#6B21A8' },
+                      hired:     { bg: '#ECFDF5', fg: '#065F46' },
+                      active:    { bg: '#D1FAE5', fg: '#065F46' },
+                      ng:        { bg: '#FEF2F2', fg: '#991B1B' },
+                    };
+                    const col = colors[c];
+                    return (
+                      <span
+                        title={isInferred ? '名前から自動推定（編集で確定）' : '明示的に設定済み'}
+                        style={{
+                          display: 'inline-block',
+                          padding: '0.125rem 0.5rem',
+                          borderRadius: '999px',
+                          fontSize: '0.75rem',
+                          fontWeight: 500,
+                          backgroundColor: col.bg,
+                          color: col.fg,
+                          border: isInferred ? '1px dashed currentColor' : 'none',
+                          opacity: isInferred ? 0.7 : 1,
+                        }}
+                      >
+                        {categoryLabel(c)}{isInferred ? ' (推定)' : ''}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td style={{ padding: '0.5rem' }}>
                   <button
                     onClick={() => toggleActive(s.id)}
@@ -380,6 +416,23 @@ const StatusManagement: React.FC = () => {
               カラー
             </label>
             <ColorPalette value={form.color} onChange={(c) => setForm((f) => ({ ...f, color: c }))} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.875rem', fontWeight: 500 }}>
+              分類（採用レポート集計用）
+            </label>
+            <select
+              value={form.category}
+              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value as StatusCategory }))}
+              style={inputStyle}
+            >
+              {ALL_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{categoryLabel(c)}</option>
+              ))}
+            </select>
+            <p style={{ margin: '0.375rem 0 0', fontSize: '0.75rem', color: '#6B7280' }}>
+              採用レポートでファネル(応募→面接→内定→採用→稼働)/NGに振り分けるための分類です。
+            </p>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
             <button onClick={() => setModalOpen(false)} style={btnStyle('#374151', '#F3F4F6')}>

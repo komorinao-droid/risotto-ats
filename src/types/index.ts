@@ -139,6 +139,14 @@ export interface InterviewEvent {
 }
 
 // ステータス
+export type StatusCategory =
+  | 'screening' // 選考中（応募/書類選考 等）
+  | 'interview' // 面接調整中・面接確定
+  | 'offered'   // 内定（承諾前）
+  | 'hired'     // 採用決定（内定承諾済 等、まだ稼働前）
+  | 'active'    // 稼働・入社済み
+  | 'ng';       // 不合格・辞退・対象外・重複 等
+
 export interface Status {
   id: number;
   name: string;
@@ -146,6 +154,8 @@ export interface Status {
   active: boolean;
   order: number;
   subStatuses: string[];
+  /** レポート集計の分類タグ。未設定なら名前から推定。 */
+  category?: StatusCategory;
 }
 
 // 応募媒体
