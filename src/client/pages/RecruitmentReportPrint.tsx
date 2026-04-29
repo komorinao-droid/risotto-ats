@@ -464,21 +464,24 @@ const RecruitmentReportPrint: React.FC = () => {
         <Annotation rows={byAge} entityLabel="全社" />
       </PageWrap>
 
-      {/* 各支社×年代別 (2支社ずつ1ページに統合) */}
-      {chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).map((group, gIdx) => (
-        <PageWrap key={`base-age-${gIdx}`} pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">支社×年代別 {chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).length > 1 ? `(${gIdx + 1}/${chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).length})` : ''}</h2>
-          <div className="src-age-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-            {group.map(({ base, rows }) => (
-              <div key={base} className="base-age-block">
-                <h3 className="sub-h center">{base}</h3>
-                <AgeFunnelTable rows={rows} />
-                <Annotation rows={rows} entityLabel={base} />
-              </div>
-            ))}
-          </div>
-        </PageWrap>
-      ))}
+      {/* 各支社×年代別 (auto-fit: ブロック幅120mm以上で並べられるだけ並べる) */}
+      {(() => {
+        const groups = chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 4);
+        return groups.map((group, gIdx) => (
+          <PageWrap key={`base-age-${gIdx}`} pageNum={null} clientName={clientName} range={range}>
+            <h2 className="section-h">支社×年代別 {groups.length > 1 ? `(${gIdx + 1}/${groups.length})` : ''}</h2>
+            <div className="auto-grid lg">
+              {group.map(({ base, rows }) => (
+                <div key={base} className="base-age-block">
+                  <h3 className="sub-h center">{base}</h3>
+                  <AgeFunnelTable rows={rows} />
+                  <Annotation rows={rows} entityLabel={base} />
+                </div>
+              ))}
+            </div>
+          </PageWrap>
+        ));
+      })()}
 
       {/* 章扉: 媒体×年代 */}
       <PageWrap pageNum={null} clientName={clientName} range={range} chapterCover>
@@ -495,11 +498,11 @@ const RecruitmentReportPrint: React.FC = () => {
         </div>
       </PageWrap>
 
-      {/* 媒体×年代別（4媒体グリッド: A4横で1ページに集約） */}
-      {chunkN(topSourceAge, 4).map((group, idx) => (
+      {/* 媒体×年代別（auto-fit: ブロック幅60mm以上で並べられるだけ並べる） */}
+      {chunkN(topSourceAge, 8).map((group, idx, groups) => (
         <PageWrap key={`grp-${idx}`} pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">【媒体別】年代別に関して {chunkN(topSourceAge, 4).length > 1 ? `(${idx + 1}/${chunkN(topSourceAge, 4).length})` : ''}</h2>
-          <div className="src-age-grid">
+          <h2 className="section-h">【媒体別】年代別に関して {groups.length > 1 ? `(${idx + 1}/${groups.length})` : ''}</h2>
+          <div className="auto-grid sm">
             {group.map(({ source, rows }) => (
               <SourceAgeBlock key={source} source={source} rows={rows} />
             ))}
@@ -1313,13 +1316,23 @@ const PrintStyles: React.FC = () => (
 
     /* 媒体×年代ペア */
     .src-age-block { display: flex; flex-direction: column; }
-    .src-age-grid {
+
+    /* 自動グリッド: 項目数に応じてCSS側で列数が決まる
+       sm = 小さいブロック向け(媒体×年代等)、最小55mm幅 → 最大4-5列
+       lg = 大きいブロック向け(支社×年代等)、最小125mm幅 → 最大2列
+       1項目だけならカード1つ分の幅で左寄せ表示 */
+    .auto-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
       gap: 4mm;
+      align-items: start;
+      justify-content: start;
     }
-    .src-age-grid .src-age-block .age-table.compact th,
-    .src-age-grid .src-age-block .age-table.compact td {
+    .auto-grid.sm { grid-template-columns: repeat(auto-fit, minmax(55mm, 1fr)); }
+    .auto-grid.lg { grid-template-columns: repeat(auto-fit, minmax(125mm, 1fr)); }
+
+    /* sm グリッド内のテーブルはコンパクト */
+    .auto-grid.sm .src-age-block .age-table.compact th,
+    .auto-grid.sm .src-age-block .age-table.compact td {
       padding: 1mm 1.5mm; font-size: 8pt;
     }
     .base-age-block { display: flex; flex-direction: column; }
