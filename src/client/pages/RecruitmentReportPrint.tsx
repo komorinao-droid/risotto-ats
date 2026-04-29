@@ -1030,7 +1030,7 @@ const PrintStyles: React.FC = () => (
       font-size: 9pt; color: #9ca3af;
     }
     .page-body {
-      padding: 20mm 18mm 14mm;
+      padding: 20mm 18mm 22mm;
       height: 100%;
       box-sizing: border-box;
     }
