@@ -13,7 +13,7 @@ const fmt = (n: number, digits = 2) => (Number.isFinite(n) ? n.toFixed(digits) :
 
 function matrixSection(title: string, rows: MatrixRow[]): string[] {
   const lines: string[] = [];
-  lines.push(`# ${title}`);
+  lines.push(csvCell(`# ${title}`));
   lines.push(['対象', '応募', '有効', '面接', '内定', '採用', '稼働', '有効率(%)', '面接設定率(%)', '採用率(%)', '稼働率(%)'].join(','));
   rows.forEach((r) => {
     lines.push([
@@ -36,7 +36,7 @@ function matrixSection(title: string, rows: MatrixRow[]): string[] {
 
 function ageSection(title: string, rows: AgeBreakdown[]): string[] {
   const lines: string[] = [];
-  lines.push(`# ${title}`);
+  lines.push(csvCell(`# ${title}`));
   lines.push(['年代', '応募数', '応募割合(%)', '採用数', '採用割合(%)'].join(','));
   rows.forEach((r) => {
     lines.push([csvCell(r.ageGroup), r.applications, fmt(r.applicationRate), r.hired, fmt(r.hireRate)].join(','));

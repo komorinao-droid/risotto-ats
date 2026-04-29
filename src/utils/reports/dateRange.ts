@@ -106,37 +106,27 @@ export function prevRangeOf(range: DateRange): DateRange {
   return { start: fmt(prevStart), end: fmt(prevEnd) };
 }
 
-/** プリセットの場合は意味的に対応する前期間（先月→先々月、今期→前期 等）。 custom はカレンダー差分。 */
+/** プリセットの場合は意味的に対応する前期間（先月→先々月、今期→前期 等）。 custom はカレンダー差分。
+ *  月末日 (Mar 31 等) で月を引くとロールオーバー（Feb 31→Mar 3）するため、必ず月初を使う。 */
 export function prevRangeForPreset(preset: DatePreset, current: DateRange, today = new Date()): DateRange {
+  const anchorMonth = (offset: number) => new Date(today.getFullYear(), today.getMonth() + offset, 1);
   switch (preset) {
     case 'thisMonth':
       return presetToRange('lastMonth', today);
-    case 'lastMonth': {
-      const t = new Date(today);
-      t.setMonth(t.getMonth() - 1);
-      return presetToRange('lastMonth', t);
-    }
+    case 'lastMonth':
+      return presetToRange('lastMonth', anchorMonth(-1));
     case 'thisQuarter':
       return presetToRange('lastQuarter', today);
-    case 'lastQuarter': {
-      const t = new Date(today);
-      t.setMonth(t.getMonth() - 3);
-      return presetToRange('lastQuarter', t);
-    }
+    case 'lastQuarter':
+      return presetToRange('lastQuarter', anchorMonth(-3));
     case 'thisHalf':
       return presetToRange('lastHalf', today);
-    case 'lastHalf': {
-      const t = new Date(today);
-      t.setMonth(t.getMonth() - 6);
-      return presetToRange('lastHalf', t);
-    }
+    case 'lastHalf':
+      return presetToRange('lastHalf', anchorMonth(-6));
     case 'thisYear':
       return presetToRange('lastYear', today);
-    case 'lastYear': {
-      const t = new Date(today);
-      t.setFullYear(t.getFullYear() - 1);
-      return presetToRange('lastYear', t);
-    }
+    case 'lastYear':
+      return presetToRange('lastYear', new Date(today.getFullYear() - 1, today.getMonth(), 1));
     case 'custom':
     default:
       return prevRangeOf(current);
