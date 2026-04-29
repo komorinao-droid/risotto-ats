@@ -217,7 +217,7 @@ export interface ClientPermissions {
 }
 
 // クライアントオプション
-export type ClientOptionKey = 'aiScreening';
+export type ClientOptionKey = 'aiScreening' | 'recruitmentReport';
 
 export type ClientOptionStatus = 'active' | 'paused' | 'cancelled';
 

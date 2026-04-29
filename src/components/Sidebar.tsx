@@ -17,7 +17,7 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
-import type { Client } from '@/types';
+import type { Client, ClientOptionKey } from '@/types';
 
 interface SidebarProps {
   client: Client | null;
@@ -29,7 +29,7 @@ interface NavItem {
   label: string;
   icon: LucideIcon | null;
   permission?: keyof Client['permissions'];
-  optionRequired?: 'aiScreening';
+  optionRequired?: ClientOptionKey;
   children?: NavItem[];
 }
 
@@ -38,10 +38,10 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/applicants', label: '応募者管理', icon: Users },
   { path: '/progress', label: '進捗ボード', icon: KanbanSquare },
   { path: '/calendar', label: '面接カレンダー', icon: Calendar },
-  { path: '/reports', label: '採用レポート', icon: FileText },
+  { path: '/reports', label: '採用レポート', icon: FileText, optionRequired: 'recruitmentReport' },
   { path: '/statuses', label: 'ステータス管理', icon: Tags, permission: 'status' },
   { path: '/sources', label: '応募媒体管理', icon: Megaphone, permission: 'source' },
-  { path: '/media-costs', label: '媒体費用管理', icon: Wallet, permission: 'source' },
+  { path: '/media-costs', label: '媒体費用管理', icon: Wallet, permission: 'source', optionRequired: 'recruitmentReport' },
   { path: '/bases', label: '拠点管理', icon: Building2, permission: 'base' },
   { path: '/jobs', label: '職種管理', icon: Briefcase, permission: 'job' },
   {
@@ -67,7 +67,7 @@ function hasPermission(client: Client | null, permission?: keyof Client['permiss
   return !!client.permissions[permission];
 }
 
-function hasRequiredOption(client: Client | null, optionRequired?: 'aiScreening'): boolean {
+function hasRequiredOption(client: Client | null, optionRequired?: ClientOptionKey): boolean {
   if (!optionRequired) return true;
   if (!client) return false;
   // 子アカウントは親のオプションを参照（同じ ClientData を共有）

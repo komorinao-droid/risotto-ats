@@ -1334,7 +1334,7 @@ const OptionsSection: React.FC<{
     memo: '',
   });
 
-  const optionKeys: ClientOptionKey[] = ['aiScreening'];
+  const optionKeys: ClientOptionKey[] = ['aiScreening', 'recruitmentReport'];
 
   const openEdit = (key: ClientOptionKey) => {
     const existing = client.options?.[key];

@@ -7,12 +7,17 @@ import type { Client, ClientOption, ClientOptionKey } from '@/types';
 
 export const OPTION_LABELS: Record<ClientOptionKey, string> = {
   aiScreening: 'AIスクリーニング',
+  recruitmentReport: '採用レポート',
 };
 
 export const OPTION_DEFAULTS: Record<ClientOptionKey, Partial<ClientOption>> = {
   aiScreening: {
     monthlyFee: 10000,
     monthlyLimit: 100,
+  },
+  recruitmentReport: {
+    monthlyFee: 5000,
+    monthlyLimit: null, // 無制限
   },
 };
 
