@@ -704,7 +704,7 @@ const MonthlyTable: React.FC<{ data: MonthlyBucket[] }> = ({ data }) => {
     hired: acc.hired + d.hired,
   }), { applications: 0, validApplications: 0, interviewScheduled: 0, offered: 0, hired: 0 });
   return (
-    <table className="age-table" style={{ marginTop: '4mm' }}>
+    <table className="age-table monthly-table" style={{ marginTop: '4mm' }}>
       <thead>
         <tr><th>月</th><th>応募</th><th>有効応募</th><th>面接設定</th><th>内定</th><th>採用</th><th>採用率</th></tr>
       </thead>
@@ -1042,6 +1042,7 @@ const PrintStyles: React.FC = () => (
       padding: 20mm 18mm 22mm;
       height: 100%;
       box-sizing: border-box;
+      overflow: hidden;
     }
 
     /* 表紙 */
@@ -1386,8 +1387,9 @@ const PrintStyles: React.FC = () => (
     .num-em { font-weight: 700; font-size: 11pt; }
 
     /* 月次グラフ */
-    .chart-wrap { background: #fff; padding: 4mm; border: 1px solid #e5e7eb; border-radius: 2mm; }
-    .chart-wrap svg { width: 100%; height: auto; max-height: 80mm; }
+    .chart-wrap { background: #fff; padding: 3mm; border: 1px solid #e5e7eb; border-radius: 2mm; }
+    .chart-wrap svg { width: 100%; height: 50mm; }
+    .monthly-table th, .monthly-table td { padding: 1.5mm 2mm !important; font-size: 9pt !important; }
     .chart-legend {
       display: flex; gap: 8mm; justify-content: flex-end;
       font-size: 9pt; color: #6b7280; padding-top: 2mm;
