@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase, Target, AlertTriangle, GitBranch } from 'lucide-react';
+import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase, Target, AlertTriangle, GitBranch, Wallet } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn, GoalProgress } from '@/utils/reports/types';
 import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/utils/reports/dateRange';
@@ -65,7 +65,7 @@ const RecruitmentReport: React.FC = () => {
   const { client } = useAuth();
   const [preset, setPreset] = useState<DatePreset>('lastHalf');
   const [customRange, setCustomRange] = useState<DateRange>({ start: '', end: '' });
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step'>('summary');
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost'>('summary');
   const [stepAxis, setStepAxis] = useState<'source' | 'base' | 'job'>('source');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
@@ -144,7 +144,7 @@ const RecruitmentReport: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6B7280' }}>データがありません。</div>;
   }
 
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal, cost } = report;
   const overallMatrix: MatrixRow = { label: '全体', ...total };
 
   return (
@@ -299,6 +299,7 @@ const RecruitmentReport: React.FC = () => {
           ['source', '媒体別', Megaphone],
           ['job', '職種別', Briefcase],
           ['age', '年代分析', Users],
+          ['cost', 'コスト分析', Wallet],
         ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
@@ -653,9 +654,76 @@ const RecruitmentReport: React.FC = () => {
         </div>
       )}
 
+      {/* ===== コスト分析 ===== */}
+      {section === 'cost' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {!cost ? (
+            <div style={{ ...card, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+              <Wallet size={32} color="#F97316" style={{ margin: '0 auto 0.75rem' }} />
+              <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem', fontWeight: 700, color: '#111827' }}>媒体費用が未入力です</h3>
+              <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: '0 0 1rem', lineHeight: 1.6 }}>
+                サイドバーの「媒体費用管理」から月別の媒体費用を入力すると、<br />
+                CPA(応募1件あたりコスト)/CPH(採用1名あたりコスト)が自動算出されます。
+              </p>
+              <button
+                onClick={() => { window.location.href = '/media-costs'; }}
+                style={{ padding: '0.5rem 1rem', border: 'none', borderRadius: '6px', backgroundColor: '#F97316', color: '#fff', fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer' }}
+              >
+                媒体費用を入力する
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* 全体サマリ */}
+              <div style={card}>
+                <h3 style={sectionTitle}>
+                  <Wallet size={16} color="#F97316" />
+                  全体 コスト × 応募/採用
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.625rem' }}>
+                  <CostTile label="期間内 媒体費合計" value={`¥${cost.total.cost.toLocaleString('ja-JP')}`} sub={`${cost.monthsWithCost}ヶ月分`} color="#F97316" />
+                  <CostTile label="応募数" value={cost.total.applications.toLocaleString('ja-JP')} color="#3B82F6" />
+                  <CostTile label="採用数" value={cost.total.hired.toLocaleString('ja-JP')} color="#059669" />
+                  <CostTile label="CPA" value={cost.total.cpa > 0 ? `¥${Math.round(cost.total.cpa).toLocaleString('ja-JP')}` : '-'} sub="応募1件あたり" color="#0EA5E9" />
+                  <CostTile label="CPH" value={cost.total.cph > 0 ? `¥${Math.round(cost.total.cph).toLocaleString('ja-JP')}` : '-'} sub="採用1名あたり" color="#7C3AED" />
+                </div>
+              </div>
+
+              {/* 媒体別 */}
+              <div style={card}>
+                <h3 style={sectionTitle}>媒体別 費用対効果</h3>
+                <CostTable rows={cost.bySource} />
+              </div>
+
+              {/* 拠点×媒体 */}
+              {cost.byBaseSource.length > 1 && (
+                <div style={card}>
+                  <h3 style={sectionTitle}>拠点×媒体 費用対効果</h3>
+                  <p style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: 0 }}>媒体費は媒体全体への拠点応募者比率で按分しています。</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {cost.byBaseSource.map(({ base, rows }) => (
+                      <div key={base}>
+                        <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: '#1F2937', marginBottom: '0.5rem' }}>{base}</h4>
+                        <CostTable rows={rows} compact />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 月次媒体費 */}
+              <div style={card}>
+                <h3 style={sectionTitle}>月次媒体費</h3>
+                <MonthlyCostTable byMonth={cost.byMonth} bySources={cost.bySource.map((r) => r.source)} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div style={{ marginTop: '1.5rem', padding: '0.75rem 1rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
         <Calendar size={14} />
-        集計対象は 応募日（applicant.date）が選択期間内のレコードのみ。CSV/印刷/AI要約/前期比較/月次トレンドに対応。
+        集計対象は 応募日（applicant.date）が選択期間内のレコードのみ。CSV/印刷/AI要約/前期比較/月次トレンド/コスト分析に対応。
       </div>
 
       {/* 印刷時に非表示にする要素 */}
@@ -1187,5 +1255,78 @@ const Stat: React.FC<{ label: string; value: string; color: string }> = ({ label
     <div style={{ fontSize: '1.125rem', fontWeight: 700, color }}>{value}</div>
   </div>
 );
+
+/* ---- コスト関連サブコンポーネント ---- */
+const CostTile: React.FC<{ label: string; value: string; sub?: string; color: string }> = ({ label, value, sub, color }) => (
+  <div style={{ padding: '0.75rem 0.875rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '6px', borderLeft: `3px solid ${color}` }}>
+    <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginBottom: '0.125rem' }}>{label}</div>
+    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111827', lineHeight: 1.1 }}>{value}</div>
+    {sub && <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>{sub}</div>}
+  </div>
+);
+
+const CostTable: React.FC<{ rows: import('@/utils/reports/types').CostRow[]; compact?: boolean }> = ({ rows, compact }) => {
+  const yen = (n: number) => n > 0 ? `¥${Math.round(n).toLocaleString('ja-JP')}` : '-';
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: compact ? '0.75rem' : '0.8125rem' }}>
+        <thead>
+          <tr>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>媒体</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>費用</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>応募</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>採用</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>CPA(応募単価)</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>CPH(採用単価)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={6} style={{ padding: '1rem', textAlign: 'center', color: '#9CA3AF' }}>データなし</td></tr>
+          ) : rows.map((r) => (
+            <tr key={r.source}>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{r.source}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#9A3412', fontWeight: 600 }}>{yen(r.cost)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{r.applications}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#059669', fontWeight: 600 }}>{r.hired}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#0EA5E9' }}>{yen(r.cpa)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#7C3AED', fontWeight: 600 }}>{yen(r.cph)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const MonthlyCostTable: React.FC<{ byMonth: { yearMonth: string; total: number; bySource: { [s: string]: number } }[]; bySources: string[] }> = ({ byMonth, bySources }) => {
+  const yen = (n: number) => n > 0 ? `¥${Math.round(n).toLocaleString('ja-JP')}` : '-';
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+        <thead>
+          <tr>
+            <th style={{ padding: '0.5rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>月</th>
+            {bySources.slice(0, 8).map((s) => (
+              <th key={s} style={{ padding: '0.5rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>{s}</th>
+            ))}
+            <th style={{ padding: '0.5rem', backgroundColor: '#FFF7ED', color: '#9A3412', fontWeight: 700, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>月合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          {byMonth.map((m) => (
+            <tr key={m.yearMonth}>
+              <td style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{m.yearMonth}</td>
+              {bySources.slice(0, 8).map((s) => (
+                <td key={s} style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{yen(m.bySource[s] || 0)}</td>
+              ))}
+              <td style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', backgroundColor: '#FFF7ED', color: '#9A3412', fontWeight: 700 }}>{yen(m.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 export default RecruitmentReport;

@@ -445,4 +445,6 @@ export interface ClientData {
   screeningCriteria?: ScreeningCriteria;
   /** 月次採用目標（YYYY-MM → 採用目標人数）。レポートの達成率/着地ヨミ計算に使用。 */
   recruitmentGoals?: { [yearMonth: string]: number };
+  /** 媒体別月次費用（YYYY-MM → 媒体名 → 費用円）。レポートのCPA/CPH計算に使用。 */
+  mediaCosts?: { [yearMonth: string]: { [sourceName: string]: number } };
 }

@@ -91,6 +91,35 @@ export interface RecruitmentReport {
   byJobAge: { job: string; rows: AgeBreakdown[] }[]; // 職種×年代
   stepFunnel: StepFunnelData;                    // ステップ別到達率/通過率
   goal?: GoalProgress;                           // 採用目標達成率（期間内に該当目標があれば）
+  cost?: CostBreakdown;                          // 媒体費用×ROI分析（費用入力済みの場合）
+}
+
+/** 媒体費用×応募/採用 の費用対効果 */
+export interface CostRow {
+  source: string;
+  cost: number;          // 期間内の合計費用(円)
+  applications: number;  // 応募数
+  hired: number;         // 採用数
+  cpa: number;           // 応募1件あたりコスト(円) = cost / applications
+  cph: number;           // 採用1名あたりコスト(円) = cost / hired
+}
+
+export interface BaseSourceCostRow {
+  base: string;
+  rows: CostRow[];
+}
+
+export interface CostBreakdown {
+  /** 全体の媒体別費用対効果 */
+  bySource: CostRow[];
+  /** 拠点×媒体の費用対効果 */
+  byBaseSource: BaseSourceCostRow[];
+  /** 月次媒体費合計 */
+  byMonth: { yearMonth: string; total: number; bySource: { [source: string]: number } }[];
+  /** 全体の合計 */
+  total: { cost: number; applications: number; hired: number; cpa: number; cph: number };
+  /** 期間内に費用入力されている月の数（0なら全く未入力） */
+  monthsWithCost: number;
 }
 
 /** ステップ別ファネル（HERPの応募経路比較レポート相当） */

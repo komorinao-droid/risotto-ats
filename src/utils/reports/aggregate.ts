@@ -24,6 +24,8 @@ import type {
   StepFunnelColumn,
   StepFunnelData,
   GoalProgress,
+  CostBreakdown,
+  CostRow,
 } from './types';
 import { inRange } from './dateRange';
 import { getStatusCategory } from '@/utils/statusCategory';
@@ -477,6 +479,112 @@ export function calcGoalProgress(
 }
 
 // =============================================================
+// 媒体費用 × 費用対効果
+// =============================================================
+
+/** 期間内の媒体別費用合計を返す（月単位の費用設定を期間で合算） */
+export function sumMediaCostsInRange(
+  costs: { [yearMonth: string]: { [sourceName: string]: number } } | undefined,
+  range: DateRange,
+): { bySource: { [source: string]: number }; total: number; monthsWithCost: number } {
+  const result: { [source: string]: number } = {};
+  let total = 0;
+  let monthsWithCost = 0;
+  if (!costs) return { bySource: {}, total: 0, monthsWithCost: 0 };
+
+  const months = monthsInRange(range);
+  months.forEach((m) => {
+    const monthly = costs[m];
+    if (!monthly) return;
+    let monthSum = 0;
+    Object.entries(monthly).forEach(([src, val]) => {
+      const v = Number(val) || 0;
+      if (v > 0) {
+        result[src] = (result[src] || 0) + v;
+        total += v;
+        monthSum += v;
+      }
+    });
+    if (monthSum > 0) monthsWithCost += 1;
+  });
+
+  return { bySource: result, total, monthsWithCost };
+}
+
+/** 期間内の媒体費用×応募/採用の費用対効果を計算 */
+export function calcCostBreakdown(
+  applicants: Applicant[],
+  range: DateRange,
+  costs: { [yearMonth: string]: { [sourceName: string]: number } } | undefined,
+  statuses?: Status[],
+): CostBreakdown | undefined {
+  if (!costs) return undefined;
+  const summary = sumMediaCostsInRange(costs, range);
+  if (summary.total === 0) return undefined;
+
+  const buildRow = (source: string, cost: number, apps: Applicant[]): CostRow => {
+    const applications = apps.length;
+    const hired = apps.filter((a) => isHired(a.stage, statuses)).length;
+    return {
+      source,
+      cost,
+      applications,
+      hired,
+      cpa: applications > 0 ? cost / applications : 0,
+      cph: hired > 0 ? cost / hired : 0,
+    };
+  };
+
+  // 全体の媒体別
+  const bySource: CostRow[] = Object.keys(summary.bySource).map((src) => {
+    const apps = applicants.filter((a) => (a.src || '未設定') === src);
+    return buildRow(src, summary.bySource[src], apps);
+  }).sort((a, b) => b.cost - a.cost);
+
+  // 拠点×媒体: 拠点別の応募者で同じ媒体費用で再計算（媒体費は全社共通として案分しない）
+  const baseSet = new Set<string>();
+  applicants.forEach((a) => baseSet.add(a.base || '未設定'));
+  const byBaseSource = Array.from(baseSet).map((base) => {
+    const baseApps = applicants.filter((a) => (a.base || '未設定') === base);
+    const totalApps = applicants.length || 1;
+    const baseAppShare = baseApps.length / totalApps;
+    const rows: CostRow[] = Object.keys(summary.bySource).map((src) => {
+      const inSrc = baseApps.filter((a) => (a.src || '未設定') === src);
+      // 拠点比率で費用を案分
+      const allocCost = summary.bySource[src] * (baseApps.filter((a) => (a.src || '未設定') === src).length / Math.max(1, applicants.filter((a) => (a.src || '未設定') === src).length));
+      void baseAppShare;
+      return buildRow(src, allocCost, inSrc);
+    }).filter((r) => r.applications > 0 || r.cost > 0).sort((a, b) => b.cost - a.cost);
+    return { base, rows };
+  });
+
+  // 月次媒体費
+  const months = monthsInRange(range);
+  const byMonth = months.map((m) => {
+    const monthly = costs[m] || {};
+    const total = Object.values(monthly).reduce((s, v) => s + (Number(v) || 0), 0);
+    return { yearMonth: m, total, bySource: { ...monthly } };
+  });
+
+  const totalApps = applicants.length;
+  const totalHired = applicants.filter((a) => isHired(a.stage, statuses)).length;
+
+  return {
+    bySource,
+    byBaseSource,
+    byMonth,
+    total: {
+      cost: summary.total,
+      applications: totalApps,
+      hired: totalHired,
+      cpa: totalApps > 0 ? summary.total / totalApps : 0,
+      cph: totalHired > 0 ? summary.total / totalHired : 0,
+    },
+    monthsWithCost: summary.monthsWithCost,
+  };
+}
+
+// =============================================================
 // メインエントリ
 // =============================================================
 
@@ -503,5 +611,6 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     byJobAge: calcByJobAge(applicants, statuses),
     stepFunnel: calcStepFunnel(applicants, events, statuses),
     goal: calcGoalProgress(applicants, range, data.recruitmentGoals, statuses),
+    cost: calcCostBreakdown(applicants, range, data.mediaCosts, statuses),
   };
 }

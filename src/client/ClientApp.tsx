@@ -19,6 +19,7 @@ import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManage
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
+import MediaCostManagement from '@/client/pages/settings/MediaCostManagement';
 import RecruitmentReport from '@/client/pages/RecruitmentReport';
 import RecruitmentReportPrint from '@/client/pages/RecruitmentReportPrint';
 
@@ -48,6 +49,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/reports" element={<RecruitmentReport />} />
           <Route path="/statuses" element={<StatusManagement />} />
           <Route path="/sources" element={<SourceManagement />} />
+          <Route path="/media-costs" element={<MediaCostManagement />} />
           <Route path="/bases" element={<BaseManagement />} />
           <Route path="/jobs" element={<JobManagement />} />
           <Route path="/settings/hearing" element={<HearingManagement />} />

@@ -81,7 +81,7 @@ const RecruitmentReportPrint: React.FC = () => {
   }
 
   const clientName = client.companyName || 'クライアント名未設定';
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge, byJob, byMonth, stepFunnel } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge, byJob, byMonth, stepFunnel, cost } = report;
   const overall: MatrixRow = { label: '全体', ...total };
 
   // 採用数上位10媒体（媒体×年代用）
@@ -153,8 +153,9 @@ const RecruitmentReportPrint: React.FC = () => {
           <TocSection num="04" title="ステップ別ファネル" desc="応募→面接→内定→採用 各ステップの到達率・通過率" />
           <TocSection num="05" title="支社別 / 媒体別 / 職種別" desc="セグメント別ファネル詳細" />
           <TocSection num="06" title="年代分析" desc="年代別の応募・採用の傾向" />
-          <TocSection num="07" title="ハイライト & ボトルネック" desc="優秀セグメント・要改善セグメント" />
-          <TocSection num="08" title="今後のアクション" desc="次期に向けた推奨事項" />
+          <TocSection num="07" title="媒体費用×費用対効果" desc="CPA/CPH による投資効率の可視化" />
+          <TocSection num="08" title="ハイライト & ボトルネック" desc="優秀セグメント・要改善セグメント" />
+          <TocSection num="09" title="今後のアクション" desc="次期に向けた推奨事項" />
         </div>
       </PageWrap>
 
@@ -407,6 +408,57 @@ const RecruitmentReportPrint: React.FC = () => {
           <RankBlock title="採用率 TOP5" rows={sourceRankByRate} metricKey="applicationToHireRate" metricLabel="採用率%" color="#F97316" isPct />
         </div>
       </PageWrap>
+
+      {/* ===== コスト分析 (費用入力済みの場合のみ) ===== */}
+      {cost && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">媒体費用 × 費用対効果</h2>
+          <p className="lead">期間内の媒体費合計と、媒体ごとのCPA(応募1件あたりコスト)/CPH(採用1名あたりコスト)。投資効率の高い媒体を見極める指標。</p>
+          <div className="cost-summary-grid">
+            <div className="cost-tile" style={{ borderLeftColor: '#F97316' }}>
+              <div className="cost-label">期間内 媒体費合計</div>
+              <div className="cost-value">¥{cost.total.cost.toLocaleString('ja-JP')}</div>
+              <div className="cost-sub">{cost.monthsWithCost}ヶ月分</div>
+            </div>
+            <div className="cost-tile" style={{ borderLeftColor: '#3B82F6' }}>
+              <div className="cost-label">応募数</div>
+              <div className="cost-value">{cost.total.applications}名</div>
+            </div>
+            <div className="cost-tile" style={{ borderLeftColor: '#059669' }}>
+              <div className="cost-label">採用数</div>
+              <div className="cost-value">{cost.total.hired}名</div>
+            </div>
+            <div className="cost-tile" style={{ borderLeftColor: '#0EA5E9' }}>
+              <div className="cost-label">CPA</div>
+              <div className="cost-value">{cost.total.cpa > 0 ? '¥' + Math.round(cost.total.cpa).toLocaleString('ja-JP') : '-'}</div>
+              <div className="cost-sub">応募1件あたり</div>
+            </div>
+            <div className="cost-tile" style={{ borderLeftColor: '#7C3AED' }}>
+              <div className="cost-label">CPH</div>
+              <div className="cost-value">{cost.total.cph > 0 ? '¥' + Math.round(cost.total.cph).toLocaleString('ja-JP') : '-'}</div>
+              <div className="cost-sub">採用1名あたり</div>
+            </div>
+          </div>
+          <h3 className="sub-h" style={{ marginTop: '6mm' }}>媒体別 費用対効果（費用が高い順）</h3>
+          <CostMatrixTable rows={cost.bySource} />
+        </PageWrap>
+      )}
+
+      {/* 拠点×媒体 コスト分析 */}
+      {cost && cost.byBaseSource.length > 1 && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">拠点×媒体 費用対効果</h2>
+          <p className="lead">媒体費は拠点別の応募者比率で按分。拠点ごとの媒体投資効率を比較。</p>
+          <div className="auto-grid lg">
+            {cost.byBaseSource.filter(b => b.rows.length > 0).map(({ base, rows }) => (
+              <div key={base} className="cost-base-block">
+                <h3 className="sub-h center">{base}</h3>
+                <CostMatrixTable rows={rows} compact />
+              </div>
+            ))}
+          </div>
+        </PageWrap>
+      )}
 
       {/* ===== 各支社×媒体別 (各支社1ページ。表が大きいので統合せず) ===== */}
       {byBaseSource.filter(({ rows }) => rows.length > 0).map(({ base, rows }) => (
@@ -803,6 +855,38 @@ const RankBlock: React.FC<{ title: string; rows: MatrixRow[]; metricKey: keyof M
     </ol>
   </div>
 );
+
+const CostMatrixTable: React.FC<{ rows: import('@/utils/reports/types').CostRow[]; compact?: boolean }> = ({ rows, compact }) => {
+  const yen = (n: number) => n > 0 ? '¥' + Math.round(n).toLocaleString('ja-JP') : '-';
+  return (
+    <table className={`cost-matrix ${compact ? 'compact' : ''}`}>
+      <thead>
+        <tr>
+          <th>媒体</th>
+          <th>費用</th>
+          <th>応募</th>
+          <th>採用</th>
+          <th>CPA</th>
+          <th>CPH</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <tr><td colSpan={6} style={{ textAlign: 'center', color: '#9CA3AF' }}>データなし</td></tr>
+        ) : rows.map((r) => (
+          <tr key={r.source}>
+            <td className="cost-label-col">{r.source}</td>
+            <td className="num cost-amount">{yen(r.cost)}</td>
+            <td className="num">{r.applications}</td>
+            <td className="num accent">{r.hired}</td>
+            <td className="num cost-cpa">{yen(r.cpa)}</td>
+            <td className="num cost-cph">{yen(r.cph)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+};
 
 const ActionCard: React.FC<{ num: string; color: string; title: string; body: string }> = ({ num, color, title, body }) => (
   <div className="action-card" style={{ borderLeftColor: color }}>
@@ -1447,6 +1531,43 @@ const PrintStyles: React.FC = () => (
 
     /* 裏表紙 */
     .end-meta { margin-top: 12mm; font-size: 11pt; color: #4b5563; }
+
+    /* コスト分析 */
+    .cost-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 3mm;
+      margin: 4mm 0;
+    }
+    .cost-tile {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-left: 4px solid #f97316;
+      border-radius: 2mm;
+      padding: 3mm 4mm;
+    }
+    .cost-label { font-size: 9pt; color: #6b7280; margin-bottom: 1mm; }
+    .cost-value { font-size: 14pt; font-weight: 800; color: #1f2937; line-height: 1.1; }
+    .cost-sub { font-size: 8pt; color: #9ca3af; margin-top: 1mm; }
+    .cost-matrix {
+      width: 100%; border-collapse: collapse; font-size: 9pt;
+    }
+    .cost-matrix th {
+      background: #f97316; color: #fff;
+      padding: 2mm 2.5mm; border: 1px solid #ea580c;
+      text-align: center; font-weight: 600; font-size: 8.5pt;
+    }
+    .cost-matrix td {
+      padding: 2mm 2.5mm; border: 1px solid #fed7aa;
+    }
+    .cost-matrix td.num { text-align: right; }
+    .cost-matrix td.accent { color: #059669; font-weight: 700; }
+    .cost-matrix td.cost-amount { color: #9a3412; font-weight: 700; }
+    .cost-matrix td.cost-cpa { color: #0ea5e9; }
+    .cost-matrix td.cost-cph { color: #7c3aed; font-weight: 700; }
+    .cost-matrix td.cost-label-col { font-weight: 600; }
+    .cost-matrix.compact th, .cost-matrix.compact td { padding: 1.5mm 2mm; font-size: 8pt; }
+    .cost-base-block { display: flex; flex-direction: column; }
 
     /* AI 総評 */
     .ai-loading { padding: 30mm 0; text-align: center; color: #6b7280; }

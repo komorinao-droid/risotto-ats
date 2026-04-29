@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Menu,
   FileText,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import type { Client } from '@/types';
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/reports', label: '採用レポート', icon: FileText },
   { path: '/statuses', label: 'ステータス管理', icon: Tags, permission: 'status' },
   { path: '/sources', label: '応募媒体管理', icon: Megaphone, permission: 'source' },
+  { path: '/media-costs', label: '媒体費用管理', icon: Wallet, permission: 'source' },
   { path: '/bases', label: '拠点管理', icon: Building2, permission: 'base' },
   { path: '/jobs', label: '職種管理', icon: Briefcase, permission: 'job' },
   {
