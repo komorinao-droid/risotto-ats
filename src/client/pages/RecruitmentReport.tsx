@@ -803,7 +803,7 @@ const AISummarySection: React.FC<{
       <h3 style={{ ...sectionTitle, margin: 0 }}>
         <Sparkles size={16} color="#7C3AED" />
         AI 総評
-        {summary?.model && <span style={{ fontSize: '0.625rem', color: '#9CA3AF', fontWeight: 400, marginLeft: '0.5rem' }}>{summary.model}</span>}
+        <span style={{ fontSize: '0.625rem', color: '#9CA3AF', fontWeight: 400, marginLeft: '0.5rem' }}>RISOTTO AI</span>
       </h3>
       <button
         className="no-print"
@@ -830,7 +830,7 @@ const AISummarySection: React.FC<{
     {error && <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEE2E2', color: '#991B1B', fontSize: '0.75rem', borderRadius: '4px', marginBottom: '0.5rem' }}>エラー: {error}</div>}
     {!summary && !loading && !error && (
       <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
-        Claude Haiku がレポートを分析し、ハイライト・懸念点・提案を要約します。「要約を生成」をクリックしてください。
+        RISOTTO AI がレポートを分析し、ハイライト・懸念点・提案を要約します。「要約を生成」をクリックしてください。
       </div>
     )}
     {summary && (

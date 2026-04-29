@@ -192,8 +192,7 @@ const RecruitmentReportPrint: React.FC = () => {
         <PageWrap pageNum={null} clientName={clientName} range={range}>
           <h2 className="section-h">AI 総評</h2>
           <p className="lead">
-            Claude AI による本期間データの自動分析結果。
-            {aiSummary?.model && <span className="muted"> （生成: {aiSummary.model}）</span>}
+            RISOTTO AI による本期間データの自動分析結果。
           </p>
           {aiLoading && (
             <div className="ai-loading">
