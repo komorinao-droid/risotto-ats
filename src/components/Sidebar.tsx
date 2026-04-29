@@ -13,8 +13,6 @@ import {
   ChevronUp,
   ChevronDown,
   Menu,
-  FileText,
-  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import type { Client, ClientOptionKey } from '@/types';
@@ -38,10 +36,8 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/applicants', label: '応募者管理', icon: Users },
   { path: '/progress', label: '進捗ボード', icon: KanbanSquare },
   { path: '/calendar', label: '面接カレンダー', icon: Calendar },
-  { path: '/reports', label: '採用レポート', icon: FileText, optionRequired: 'recruitmentReport' },
   { path: '/statuses', label: 'ステータス管理', icon: Tags, permission: 'status' },
   { path: '/sources', label: '応募媒体管理', icon: Megaphone, permission: 'source' },
-  { path: '/media-costs', label: '媒体費用管理', icon: Wallet, permission: 'source', optionRequired: 'recruitmentReport' },
   { path: '/bases', label: '拠点管理', icon: Building2, permission: 'base' },
   { path: '/jobs', label: '職種管理', icon: Briefcase, permission: 'job' },
   {
@@ -55,6 +51,8 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/email-templates', label: 'メールテンプレート', icon: null, permission: 'mailtemplate' },
       { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
       { path: '/settings/screening', label: 'AIスクリーニング', icon: null, optionRequired: 'aiScreening' },
+      { path: '/reports', label: '採用レポート', icon: null, optionRequired: 'recruitmentReport' },
+      { path: '/media-costs', label: '媒体費用管理', icon: null, optionRequired: 'recruitmentReport' },
       { path: '/settings/account', label: 'アカウント', icon: null },
     ],
   },
