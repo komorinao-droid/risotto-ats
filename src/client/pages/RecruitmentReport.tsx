@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users } from 'lucide-react';
+import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { DatePreset, DateRange, MatrixRow, AgeBreakdown } from '@/utils/reports/types';
-import { presetToRange, presetLabel, formatRange } from '@/utils/reports/dateRange';
+import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket } from '@/utils/reports/types';
+import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/utils/reports/dateRange';
 import { buildReport } from '@/utils/reports/aggregate';
+import { downloadCSV, printReport } from '@/utils/reports/export';
 import { storage } from '@/utils/storage';
 
 const card: React.CSSProperties = {
@@ -50,6 +51,15 @@ const pct = (n: number) => (n === 0 ? '0.00%' : `${n.toFixed(2)}%`);
 
 const PRESETS: DatePreset[] = ['thisMonth', 'lastMonth', 'thisQuarter', 'lastQuarter', 'thisHalf', 'lastHalf', 'thisYear', 'lastYear'];
 
+interface AISummary {
+  headline: string;
+  highlights: string[];
+  concerns: string[];
+  recommendations: string[];
+  model?: string;
+  generatedAt?: string;
+}
+
 const RecruitmentReport: React.FC = () => {
   const { client } = useAuth();
   const [preset, setPreset] = useState<DatePreset>('lastHalf');
@@ -57,6 +67,10 @@ const RecruitmentReport: React.FC = () => {
   const [section, setSection] = useState<'summary' | 'base' | 'source' | 'age'>('summary');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [aiSummary, setAiSummary] = useState<AISummary | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const range: DateRange = useMemo(() => {
     if (preset === 'custom') {
@@ -64,6 +78,8 @@ const RecruitmentReport: React.FC = () => {
     }
     return presetToRange(preset);
   }, [preset, customRange]);
+
+  const prevRange: DateRange = useMemo(() => prevRangeForPreset(preset, range), [preset, range]);
 
   // 親アカウントのデータをそのまま使う（子アカで拠点フィルタ済みでも、レポートは全社視点で表示）
   const fullData = useMemo(() => {
@@ -77,6 +93,36 @@ const RecruitmentReport: React.FC = () => {
   }, [client]);
 
   const report = useMemo(() => (fullData ? buildReport(fullData, range) : null), [fullData, range]);
+  const prevReport = useMemo(() => (fullData && compareEnabled ? buildReport(fullData, prevRange) : null), [fullData, prevRange, compareEnabled]);
+
+  // 期間が変わったらAI要約をクリア
+  React.useEffect(() => {
+    setAiSummary(null);
+    setAiError(null);
+  }, [range.start, range.end, compareEnabled]);
+
+  const generateAISummary = async () => {
+    if (!report) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const resp = await fetch('/api/report-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report, prevReport: compareEnabled ? prevReport : null }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      setAiSummary(data);
+    } catch (e: any) {
+      setAiError(e.message || 'AI要約の生成に失敗しました');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const toggleBaseSrc = (base: string) => setExpandedBaseSrc((s) => {
     const n = new Set(s);
@@ -96,13 +142,52 @@ const RecruitmentReport: React.FC = () => {
   const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown } = report;
 
   return (
-    <div style={{ padding: '1.5rem 2rem', maxWidth: '1200px' }}>
+    <div style={{ padding: '1.5rem 2rem', maxWidth: '1200px' }} className="report-root">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FileText size={20} color="#0EA5E9" />
           採用レポート
         </h2>
-        <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{formatRange(range)}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>{formatRange(range)}</span>
+          <button
+            className="no-print"
+            onClick={() => setCompareEnabled((v) => !v)}
+            title={`前期間: ${formatRange(prevRange)}`}
+            style={{
+              padding: '0.375rem 0.75rem',
+              border: '1px solid ' + (compareEnabled ? '#0EA5E9' : '#E5E7EB'),
+              borderRadius: '6px',
+              backgroundColor: compareEnabled ? '#F0F9FF' : '#fff',
+              color: compareEnabled ? '#0369A1' : '#374151',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+            }}
+          >
+            <ArrowLeftRight size={12} />
+            前期比較 {compareEnabled ? 'ON' : 'OFF'}
+          </button>
+          <button
+            className="no-print"
+            onClick={() => downloadCSV(report, `recruitment-${range.start}_${range.end}.csv`)}
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#374151', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            <Download size={12} />
+            CSV
+          </button>
+          <button
+            className="no-print"
+            onClick={printReport}
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#374151', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            <Printer size={12} />
+            印刷/PDF
+          </button>
+        </div>
       </div>
 
       {/* 期間選択 */}
@@ -186,21 +271,46 @@ const RecruitmentReport: React.FC = () => {
       {/* ===== サマリ ===== */}
       {section === 'summary' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* AI要約 */}
+          <AISummarySection
+            loading={aiLoading}
+            error={aiError}
+            summary={aiSummary}
+            onGenerate={generateAISummary}
+            compareEnabled={compareEnabled}
+          />
+
           {/* ファネル */}
           <div style={card}>
             <h3 style={sectionTitle}>
               <BarChart3 size={16} color="#0EA5E9" />
               採用ファネル（全体）
+              {compareEnabled && (
+                <span style={{ fontSize: '0.6875rem', color: '#6B7280', fontWeight: 400, marginLeft: '0.5rem' }}>
+                  前期 {formatRange(prevRange)} と比較
+                </span>
+              )}
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.625rem' }}>
-              <FunnelTile label="応募数" value={total.applications} color="#3B82F6" />
-              <FunnelTile label="有効応募数" value={total.validApplications} sub={pct(total.validRate)} color="#0891B2" />
-              <FunnelTile label="面接設定数" value={total.interviewScheduled} sub={pct(total.validToInterviewRate)} color="#6366F1" />
-              <FunnelTile label="内定数" value={total.offered} sub={pct(total.interviewToOfferRate) + ' / 応募 ' + pct(total.applications > 0 ? (total.offered / total.applications) * 100 : 0)} color="#A855F7" />
-              <FunnelTile label="採用数" value={total.hired} sub={pct(total.applicationToHireRate) + ' (応募比)'} color="#059669" />
-              <FunnelTile label="稼働数" value={total.active} sub={pct(total.applicationToActiveRate)} color="#10B981" />
+              <FunnelTile label="応募数" value={total.applications} prev={prevReport?.total.applications} color="#3B82F6" />
+              <FunnelTile label="有効応募数" value={total.validApplications} prev={prevReport?.total.validApplications} sub={pct(total.validRate)} color="#0891B2" />
+              <FunnelTile label="面接設定数" value={total.interviewScheduled} prev={prevReport?.total.interviewScheduled} sub={pct(total.validToInterviewRate)} color="#6366F1" />
+              <FunnelTile label="内定数" value={total.offered} prev={prevReport?.total.offered} sub={pct(total.interviewToOfferRate)} color="#A855F7" />
+              <FunnelTile label="採用数" value={total.hired} prev={prevReport?.total.hired} sub={pct(total.applicationToHireRate) + ' (応募比)'} color="#059669" />
+              <FunnelTile label="稼働数" value={total.active} prev={prevReport?.total.active} sub={pct(total.applicationToActiveRate)} color="#10B981" />
             </div>
           </div>
+
+          {/* 月次トレンド */}
+          {report.byMonth.length > 1 && (
+            <div style={card}>
+              <h3 style={sectionTitle}>
+                <TrendingUp size={16} color="#0EA5E9" />
+                月次推移
+              </h3>
+              <TrendChart data={report.byMonth} />
+            </div>
+          )}
 
           {/* NG内訳 */}
           <div style={card}>
@@ -392,8 +502,17 @@ const RecruitmentReport: React.FC = () => {
 
       <div style={{ marginTop: '1.5rem', padding: '0.75rem 1rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
         <Calendar size={14} />
-        集計対象は 応募日（applicant.date）が選択期間内のレコードのみ。次フェーズで PDF/Excel 出力に対応予定。
+        集計対象は 応募日（applicant.date）が選択期間内のレコードのみ。CSV/印刷/AI要約/前期比較/月次トレンドに対応。
       </div>
+
+      {/* 印刷時に非表示にする要素 */}
+      <style>{`
+        @media print {
+          aside, .sidebar, .no-print { display: none !important; }
+          .report-root { padding: 0 !important; max-width: none !important; }
+          body { background: #fff !important; }
+        }
+      `}</style>
     </div>
   );
 };
@@ -402,11 +521,194 @@ const RecruitmentReport: React.FC = () => {
    Sub components
    ============================================================= */
 
-const FunnelTile: React.FC<{ label: string; value: number; sub?: string; color: string }> = ({ label, value, sub, color }) => (
-  <div style={{ padding: '0.75rem 0.875rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '6px', borderLeft: `3px solid ${color}` }}>
-    <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginBottom: '0.125rem' }}>{label}</div>
-    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', lineHeight: 1.1 }}>{fmt(value)}</div>
-    {sub && <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>{sub}</div>}
+const FunnelTile: React.FC<{ label: string; value: number; prev?: number; sub?: string; color: string }> = ({ label, value, prev, sub, color }) => {
+  const hasPrev = typeof prev === 'number';
+  const delta = hasPrev ? value - (prev as number) : 0;
+  const deltaPct = hasPrev && (prev as number) > 0 ? (delta / (prev as number)) * 100 : null;
+  const positive = delta > 0;
+  const negative = delta < 0;
+  const dColor = positive ? '#059669' : negative ? '#DC2626' : '#6B7280';
+  const Arrow = positive ? TrendingUp : negative ? TrendingDown : Minus;
+
+  return (
+    <div style={{ padding: '0.75rem 0.875rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '6px', borderLeft: `3px solid ${color}` }}>
+      <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginBottom: '0.125rem' }}>{label}</div>
+      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', lineHeight: 1.1 }}>{fmt(value)}</div>
+      {sub && <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>{sub}</div>}
+      {hasPrev && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.375rem', fontSize: '0.6875rem', color: dColor, fontWeight: 600 }}>
+          <Arrow size={11} strokeWidth={2.5} />
+          <span>{delta > 0 ? '+' : ''}{fmt(delta)}{deltaPct !== null ? ` (${delta > 0 ? '+' : ''}${deltaPct.toFixed(1)}%)` : ''}</span>
+          <span style={{ color: '#9CA3AF', fontWeight: 400 }}>vs 前期 {fmt(prev as number)}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ---- 月次トレンド SVG チャート ---- */
+const TrendChart: React.FC<{ data: MonthlyBucket[] }> = ({ data }) => {
+  const W = Math.max(640, data.length * 80);
+  const H = 240;
+  const PAD_L = 40;
+  const PAD_R = 16;
+  const PAD_T = 12;
+  const PAD_B = 36;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  const maxApp = Math.max(1, ...data.map((d) => d.applications));
+  const maxHire = Math.max(1, ...data.map((d) => d.hired));
+  const maxAxis = Math.max(maxApp, maxHire * 5);
+
+  const barW = (innerW / data.length) * 0.55;
+  const slot = innerW / data.length;
+
+  const xAt = (i: number) => PAD_L + slot * i + slot / 2;
+  const yAt = (v: number) => PAD_T + innerH - (v / maxAxis) * innerH;
+
+  const ticks = 4;
+  const tickValues = Array.from({ length: ticks + 1 }, (_, i) => Math.ceil((maxAxis * i) / ticks));
+
+  // 採用折れ線パス
+  const linePath = data
+    .map((d, i) => {
+      const x = xAt(i);
+      const y = yAt(d.hired);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} style={{ display: 'block' }}>
+        {/* グリッド */}
+        {tickValues.map((tv, i) => {
+          const y = yAt(tv);
+          return (
+            <g key={i}>
+              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="#F3F4F6" strokeWidth={1} />
+              <text x={PAD_L - 6} y={y + 3} fontSize={10} fill="#9CA3AF" textAnchor="end">{tv}</text>
+            </g>
+          );
+        })}
+
+        {/* 応募数バー */}
+        {data.map((d, i) => {
+          const cx = xAt(i);
+          const yTop = yAt(d.applications);
+          const h = PAD_T + innerH - yTop;
+          return (
+            <g key={d.month}>
+              <rect x={cx - barW / 2} y={yTop} width={barW} height={Math.max(0, h)} fill="#3B82F6" opacity={0.7} rx={2} />
+              {/* ラベル */}
+              {d.applications > 0 && (
+                <text x={cx} y={yTop - 4} fontSize={10} fill="#3B82F6" textAnchor="middle" fontWeight={600}>{d.applications}</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* 採用折れ線 */}
+        <path d={linePath} fill="none" stroke="#059669" strokeWidth={2} />
+        {data.map((d, i) => {
+          const x = xAt(i);
+          const y = yAt(d.hired);
+          return (
+            <g key={`p-${d.month}`}>
+              <circle cx={x} cy={y} r={3.5} fill="#059669" />
+              {d.hired > 0 && (
+                <text x={x + 6} y={y - 4} fontSize={10} fill="#059669" fontWeight={700}>{d.hired}</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* X軸ラベル */}
+        {data.map((d, i) => (
+          <text key={`x-${d.month}`} x={xAt(i)} y={H - 14} fontSize={10} fill="#6B7280" textAnchor="middle">{d.month.slice(2).replace('-', '/')}</text>
+        ))}
+      </svg>
+      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', fontSize: '0.6875rem', color: '#6B7280', padding: '0.25rem 0.5rem' }}>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, backgroundColor: '#3B82F6', opacity: 0.7, borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />応募</span>
+        <span><span style={{ display: 'inline-block', width: 10, height: 2, backgroundColor: '#059669', marginRight: 4, verticalAlign: 'middle' }} />採用</span>
+      </div>
+    </div>
+  );
+};
+
+/* ---- AI 要約セクション ---- */
+const AISummarySection: React.FC<{
+  loading: boolean;
+  error: string | null;
+  summary: AISummary | null;
+  onGenerate: () => void;
+  compareEnabled: boolean;
+}> = ({ loading, error, summary, onGenerate, compareEnabled }) => (
+  <div style={{ ...card, background: 'linear-gradient(135deg, #FAF5FF 0%, #F0F9FF 100%)', borderColor: '#DDD6FE' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+      <h3 style={{ ...sectionTitle, margin: 0 }}>
+        <Sparkles size={16} color="#7C3AED" />
+        AI 総評
+        {summary?.model && <span style={{ fontSize: '0.625rem', color: '#9CA3AF', fontWeight: 400, marginLeft: '0.5rem' }}>{summary.model}</span>}
+      </h3>
+      <button
+        className="no-print"
+        onClick={onGenerate}
+        disabled={loading}
+        style={{
+          padding: '0.375rem 0.875rem',
+          border: 'none',
+          borderRadius: '6px',
+          backgroundColor: loading ? '#A78BFA' : '#7C3AED',
+          color: '#fff',
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          cursor: loading ? 'wait' : 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.25rem',
+        }}
+      >
+        <Sparkles size={12} />
+        {loading ? '生成中…' : summary ? '再生成' : (compareEnabled ? '前期比較込みで生成' : '要約を生成')}
+      </button>
+    </div>
+    {error && <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEE2E2', color: '#991B1B', fontSize: '0.75rem', borderRadius: '4px', marginBottom: '0.5rem' }}>エラー: {error}</div>}
+    {!summary && !loading && !error && (
+      <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+        Claude Haiku がレポートを分析し、ハイライト・懸念点・提案を要約します。「要約を生成」をクリックしてください。
+      </div>
+    )}
+    {summary && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1F2937', lineHeight: 1.55 }}>{summary.headline}</div>
+        {summary.highlights.length > 0 && (
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#059669', marginBottom: '0.25rem' }}>✓ ハイライト</div>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
+              {summary.highlights.map((h, i) => <li key={i}>{h}</li>)}
+            </ul>
+          </div>
+        )}
+        {summary.concerns.length > 0 && (
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#DC2626', marginBottom: '0.25rem' }}>! 懸念点</div>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
+              {summary.concerns.map((h, i) => <li key={i}>{h}</li>)}
+            </ul>
+          </div>
+        )}
+        {summary.recommendations.length > 0 && (
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#0EA5E9', marginBottom: '0.25rem' }}>→ 推奨アクション</div>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.6 }}>
+              {summary.recommendations.map((h, i) => <li key={i}>{h}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    )}
   </div>
 );
 

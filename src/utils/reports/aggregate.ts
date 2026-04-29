@@ -18,6 +18,7 @@ import type {
   NgBreakdown,
   AgeBreakdown,
   MatrixRow,
+  MonthlyBucket,
   RecruitmentReport,
 } from './types';
 import { inRange } from './dateRange';
@@ -250,6 +251,42 @@ export function calcBySourceAge(applicants: Applicant[]): { source: string; rows
   });
 }
 
+/** 月次トレンド（YYYY-MM 単位の応募/有効/面接/内定/採用） */
+export function calcByMonth(applicants: Applicant[], events: { applicantId: number; date?: string }[], range: DateRange): MonthlyBucket[] {
+  const months: string[] = [];
+  const start = new Date(range.start + 'T00:00:00');
+  const end = new Date(range.end + 'T00:00:00');
+  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cur <= end) {
+    const m = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
+    months.push(m);
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  const eventApplicantIds = new Set(events.map((e) => e.applicantId));
+
+  const bucket: Record<string, MonthlyBucket> = {};
+  months.forEach((m) => {
+    bucket[m] = { month: m, applications: 0, validApplications: 0, interviewScheduled: 0, offered: 0, hired: 0 };
+  });
+
+  applicants.forEach((a) => {
+    const d = a.date;
+    if (!d) return;
+    const m = d.slice(0, 7);
+    const b = bucket[m];
+    if (!b) return;
+    b.applications += 1;
+    if (!isNg(a.stage) && !a.duplicate) b.validApplications += 1;
+    const isInterview = eventApplicantIds.has(a.id) || (/面接|内定|採用|稼働|入社|合格/.test(a.stage) && !/不合格（面接前）|不合格（書類）|書類選考/.test(a.stage));
+    if (isInterview) b.interviewScheduled += 1;
+    if (isOffered(a.stage)) b.offered += 1;
+    if (isHired(a.stage)) b.hired += 1;
+  });
+
+  return months.map((m) => bucket[m]);
+}
+
 // =============================================================
 // メインエントリ
 // =============================================================
@@ -271,5 +308,6 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     byBaseAge: calcByBaseAge(applicants),
     bySourceAge: calcBySourceAge(applicants),
     ngAgeBreakdown: calcNgAgeBreakdown(applicants),
+    byMonth: calcByMonth(applicants, events, range),
   };
 }

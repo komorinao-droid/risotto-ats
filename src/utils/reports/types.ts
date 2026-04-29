@@ -63,6 +63,16 @@ export interface MatrixRow extends FunnelMetrics {
   label: string;       // 拠点名 or 媒体名
 }
 
+/** 月次バケット（トレンド表示用） */
+export interface MonthlyBucket {
+  month: string;            // 'YYYY-MM'
+  applications: number;
+  validApplications: number;
+  interviewScheduled: number;
+  offered: number;
+  hired: number;
+}
+
 /** 完全な採用レポート */
 export interface RecruitmentReport {
   range: DateRange;
@@ -76,6 +86,7 @@ export interface RecruitmentReport {
   byBaseAge: { base: string; rows: AgeBreakdown[] }[]; // 拠点×年代
   bySourceAge: { source: string; rows: AgeBreakdown[] }[]; // 媒体×年代
   ngAgeBreakdown: { ageGroup: string; count: number; rate: number }[];
+  byMonth: MonthlyBucket[];                      // 月次推移
 }
 
 export type SourceData = {
