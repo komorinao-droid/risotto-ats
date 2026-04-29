@@ -743,7 +743,7 @@ const FunnelChart: React.FC<{ total: any }> = ({ total }) => {
       {stages.map((s, i) => (
         <React.Fragment key={s.label}>
           <div className="funnel-tile">
-            {s.sub && <div className="funnel-rate">{s.sub}</div>}
+            <div className="funnel-rate">{s.sub || '\u00A0'}</div>
             <div className="funnel-num">{fmt(s.value)}</div>
             <div className="funnel-label">{s.label}</div>
           </div>
@@ -1059,30 +1059,43 @@ const PrintStyles: React.FC = () => (
 
     /* ファネル */
     .funnel {
-      display: flex; align-items: center; justify-content: center;
+      display: flex; align-items: stretch; justify-content: center;
       gap: 2mm;
       margin: 12mm 0;
       flex-wrap: nowrap;
     }
     .funnel-tile {
-      flex: 1;
+      flex: 1 1 0;
       min-width: 28mm;
+      min-height: 32mm;
       background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
       border: 2px solid #f97316;
       border-radius: 3mm;
       padding: 4mm 2mm;
       text-align: center;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      font-family: 'Yu Gothic', 'Hiragino Sans', 'Meiryo', sans-serif;
     }
     .funnel-rate {
       font-size: 11pt; font-weight: 700; color: #f97316;
       margin-bottom: 2mm;
+      min-height: 13pt;
+      font-family: inherit;
     }
     .funnel-num {
-      font-size: 22pt; font-weight: 800; color: #1f2937;
+      font-size: 24pt; font-weight: 800; color: #1f2937;
       line-height: 1;
+      font-family: inherit;
     }
-    .funnel-label { font-size: 9pt; color: #6b7280; margin-top: 2mm; }
-    .funnel-arrow { color: #f97316; font-size: 16pt; font-weight: 700; }
+    .funnel-label {
+      font-size: 9pt; color: #6b7280; margin-top: 2mm;
+      font-family: inherit;
+    }
+    .funnel-arrow {
+      color: #f97316; font-size: 16pt; font-weight: 700;
+      align-self: center;
+      font-family: inherit;
+    }
 
     /* NG セクション */
     .row-2col {
@@ -1212,7 +1225,7 @@ const PrintStyles: React.FC = () => (
     }
     .toc-num {
       font-size: 22pt; font-weight: 800; color: #f97316;
-      min-width: 18mm; line-height: 1; font-family: 'Yu Mincho', serif;
+      min-width: 18mm; line-height: 1; font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif;
     }
     .toc-title { font-size: 13pt; font-weight: 700; color: #1f2937; margin-bottom: 1mm; }
     .toc-desc { font-size: 9pt; color: #6b7280; line-height: 1.5; }
@@ -1288,7 +1301,7 @@ const PrintStyles: React.FC = () => (
       font-size: 10pt;
     }
     .rank-list li:last-child { border-bottom: none; }
-    .rank-num { font-size: 16pt; font-weight: 800; min-width: 8mm; font-family: 'Yu Mincho', serif; line-height: 1; }
+    .rank-num { font-size: 16pt; font-weight: 800; min-width: 8mm; font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; line-height: 1; }
     .rank-label { flex: 1; }
     .rank-val { font-weight: 700; color: #1f2937; }
 
@@ -1300,7 +1313,7 @@ const PrintStyles: React.FC = () => (
     }
     .action-num {
       font-size: 18pt; font-weight: 800; line-height: 1;
-      margin-bottom: 2mm; font-family: 'Yu Mincho', serif;
+      margin-bottom: 2mm; font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif;
     }
     .action-title { font-size: 11pt; font-weight: 700; color: #1f2937; margin-bottom: 2mm; }
     .action-body { font-size: 9pt; color: #4b5563; line-height: 1.6; }
