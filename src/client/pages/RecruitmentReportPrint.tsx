@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { DateRange, MatrixRow, AgeBreakdown } from '@/utils/reports/types';
-import { presetToRange, formatRange } from '@/utils/reports/dateRange';
+import type { DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn } from '@/utils/reports/types';
+import { presetToRange, formatRange, prevRangeOf } from '@/utils/reports/dateRange';
 import { buildReport } from '@/utils/reports/aggregate';
 import { storage } from '@/utils/storage';
 
@@ -39,6 +39,8 @@ const RecruitmentReportPrint: React.FC = () => {
   }, [client]);
 
   const report = useMemo(() => (fullData ? buildReport(fullData, range) : null), [fullData, range]);
+  const prevRange = useMemo(() => prevRangeOf(range), [range]);
+  const prevReport = useMemo(() => (fullData ? buildReport(fullData, prevRange) : null), [fullData, prevRange]);
 
   // ?print=1 で自動印刷
   useEffect(() => {
@@ -52,10 +54,36 @@ const RecruitmentReportPrint: React.FC = () => {
   }
 
   const clientName = client.companyName || 'クライアント名未設定';
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge, byJob, byMonth, stepFunnel } = report;
+  const overall: MatrixRow = { label: '全体', ...total };
 
   // 採用数上位10媒体（媒体×年代用）
   const topSourceAge = bySourceAge.filter((s) => s.rows.reduce((a, r) => a + r.applications, 0) > 0).slice(0, 10);
+
+  // ボトルネック検出: 採用率が全体比50%未満で母数3以上
+  const bottlenecks = [...byBase, ...bySource, ...byJob]
+    .filter((r) => r.applications >= 3)
+    .map((r) => {
+      const ratio = total.applicationToHireRate > 0 ? r.applicationToHireRate / total.applicationToHireRate : 1;
+      return { row: r, ratio };
+    })
+    .filter((b) => b.ratio < 0.5)
+    .sort((a, b) => a.ratio - b.ratio);
+
+  // ハイライト検出: 採用率が全体比130%超で母数3以上
+  const highlights = [...byBase, ...bySource, ...byJob]
+    .filter((r) => r.applications >= 3 && r.hired > 0)
+    .map((r) => {
+      const ratio = total.applicationToHireRate > 0 ? r.applicationToHireRate / total.applicationToHireRate : 1;
+      return { row: r, ratio };
+    })
+    .filter((h) => h.ratio > 1.3)
+    .sort((a, b) => b.ratio - a.ratio);
+
+  // 媒体ランキング(採用数TOP/コスパTOP/応募数TOP)
+  const sourceRankByHired = [...bySource].filter((s) => s.applications > 0).sort((a, b) => b.hired - a.hired).slice(0, 5);
+  const sourceRankByRate = [...bySource].filter((s) => s.applications >= 3).sort((a, b) => b.applicationToHireRate - a.applicationToHireRate).slice(0, 5);
+  const sourceRankByApp = [...bySource].sort((a, b) => b.applications - a.applications).slice(0, 5);
 
   return (
     <div className="print-root">
@@ -88,6 +116,21 @@ const RecruitmentReportPrint: React.FC = () => {
         </div>
       </section>
 
+      {/* ===== 目次 ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">目次</h2>
+        <div className="toc">
+          <TocSection num="01" title="資料概要" desc="本資料の目的・前提・データ定義" />
+          <TocSection num="02" title="エグゼクティブサマリ" desc="採用ファネル全体・前期比較・ハイライト・課題" />
+          <TocSection num="03" title="月次トレンド" desc="応募・採用の月次推移とパターン分析" />
+          <TocSection num="04" title="ステップ別ファネル" desc="応募→面接→内定→採用 各ステップの到達率・通過率" />
+          <TocSection num="05" title="支社別 / 媒体別 / 職種別" desc="セグメント別ファネル詳細" />
+          <TocSection num="06" title="年代分析" desc="年代別の応募・採用の傾向" />
+          <TocSection num="07" title="ハイライト & ボトルネック" desc="優秀セグメント・要改善セグメント" />
+          <TocSection num="08" title="今後のアクション" desc="次期に向けた推奨事項" />
+        </div>
+      </PageWrap>
+
       {/* ===== p.2 振り返り資料について ===== */}
       <PageWrap pageNum={2} clientName={clientName} range={range}>
         <h2 className="section-h">振り返り資料について</h2>
@@ -109,11 +152,74 @@ const RecruitmentReportPrint: React.FC = () => {
         </table>
       </PageWrap>
 
-      {/* ===== p.3 採用ファネル全体 ===== */}
+      {/* ===== エグゼクティブサマリ: ファネル全体 ===== */}
       <PageWrap pageNum={3} clientName={clientName} range={range}>
-        <h2 className="section-h">{formatRange(range)}：応募〜採用数</h2>
-        <p className="lead">{formatRange(range)}：応募〜採用数（全社分）</p>
+        <h2 className="section-h">エグゼクティブサマリ - 採用ファネル（全社）</h2>
+        <p className="lead">{formatRange(range)} の採用活動全体像。前期との比較を併記。</p>
         <FunnelChart total={total} />
+        {prevReport && <FunnelComparison curr={total} prev={prevReport.total} prevRange={prevRange} />}
+      </PageWrap>
+
+      {/* ===== ハイライト & 課題サマリ ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">ハイライト & 課題</h2>
+        <div className="row-2col">
+          <div>
+            <h3 className="sub-h" style={{ background: '#D1FAE5', color: '#065F46', borderColor: '#059669' }}>✓ ハイライト</h3>
+            {highlights.length === 0 ? (
+              <p className="muted">特筆すべきハイライトはありません（全体平均比130%超のセグメント）</p>
+            ) : (
+              <ul className="insight-list good">
+                {highlights.slice(0, 5).map(({ row, ratio }, i) => (
+                  <li key={i}>
+                    <strong>{row.label}</strong>: 採用率 <span className="num-em">{pct(row.applicationToHireRate, 1)}</span>
+                    <span className="muted"> (全体比 +{((ratio - 1) * 100).toFixed(0)}%)</span>
+                    <div className="muted">応募{fmt(row.applications)}名 / 採用{fmt(row.hired)}名</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h3 className="sub-h" style={{ background: '#FEE2E2', color: '#991B1B', borderColor: '#DC2626' }}>! 要改善ポイント</h3>
+            {bottlenecks.length === 0 ? (
+              <p className="muted">大きな課題はありません（全体平均比50%未満のセグメント）</p>
+            ) : (
+              <ul className="insight-list bad">
+                {bottlenecks.slice(0, 5).map(({ row, ratio }, i) => (
+                  <li key={i}>
+                    <strong>{row.label}</strong>: 採用率 <span className="num-em">{pct(row.applicationToHireRate, 1)}</span>
+                    <span className="muted"> (全体比 -{((1 - ratio) * 100).toFixed(0)}%)</span>
+                    <div className="muted">応募{fmt(row.applications)}名 / 採用{fmt(row.hired)}名</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </PageWrap>
+
+      {/* ===== 月次トレンド ===== */}
+      {byMonth.length > 1 && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">月次トレンド</h2>
+          <p className="lead">応募数・採用数の月別推移。トレンドの変化点や繁閑差を可視化。</p>
+          <MonthlyChart data={byMonth} />
+          <MonthlyTable data={byMonth} />
+        </PageWrap>
+      )}
+
+      {/* ===== ステップ別ファネル ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">ステップ別 到達率/通過率（媒体別）</h2>
+        <p className="lead">応募→面接→内定→採用の各ステップで、媒体ごとの通過率を比較。母数の少ないセグメントは判定対象外。</p>
+        <StepFunnelTable overall={stepFunnel.overall} columns={stepFunnel.bySource.slice(0, 10)} />
+      </PageWrap>
+
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">ステップ別 到達率/通過率（拠点別）</h2>
+        <p className="lead">支社単位での歩留まり比較。支社特有の課題を発見しやすい切り口。</p>
+        <StepFunnelTable overall={stepFunnel.overall} columns={stepFunnel.byBase} />
       </PageWrap>
 
       {/* ===== p.4 数字の定義と注意点 ===== */}
@@ -188,6 +294,26 @@ const RecruitmentReportPrint: React.FC = () => {
         <h2 className="section-h">{formatRange(range)}：求人媒体別</h2>
         <p className="lead">求人媒体別の応募〜採用数は下記となります。<span className="muted">※採用数が多い順</span></p>
         <FunnelMatrix rows={bySource} headerLabel="求人媒体" />
+      </PageWrap>
+
+      {/* ===== 職種別ファネル ===== */}
+      {byJob.length > 0 && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">職種別 ファネル</h2>
+          <p className="lead">職種ごとの応募〜採用数。職種特性に応じた採用戦略の判断材料。<span className="muted">※採用数が多い順</span></p>
+          <FunnelMatrix rows={[overall, ...byJob]} highlightFirst headerLabel="職種" />
+        </PageWrap>
+      )}
+
+      {/* ===== 媒体ランキング ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">媒体ランキング</h2>
+        <p className="lead">3つの観点（応募数・採用数・採用率）でTOP5を抽出。媒体ポートフォリオの最適化に活用。</p>
+        <div className="rank-grid">
+          <RankBlock title="応募数 TOP5" rows={sourceRankByApp} metricKey="applications" metricLabel="応募" color="#3B82F6" />
+          <RankBlock title="採用数 TOP5" rows={sourceRankByHired} metricKey="hired" metricLabel="採用" color="#059669" />
+          <RankBlock title="採用率 TOP5" rows={sourceRankByRate} metricKey="applicationToHireRate" metricLabel="採用率%" color="#F97316" isPct />
+        </div>
       </PageWrap>
 
       {/* ===== 各支社×媒体別 ===== */}
@@ -283,12 +409,308 @@ const RecruitmentReportPrint: React.FC = () => {
         </PageWrap>
       ))}
 
+      {/* ===== 推奨アクション ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range}>
+        <h2 className="section-h">今後のアクション</h2>
+        <p className="lead">本期間のデータから導かれる、次期に向けた推奨事項です。</p>
+        <div className="action-grid">
+          <ActionCard
+            num="01"
+            color="#059669"
+            title="高採用率セグメントへの配分強化"
+            body={
+              highlights.length > 0
+                ? `${highlights.slice(0, 2).map((h) => h.row.label).join('・')} は全体平均を大きく上回る採用率。次期は配信量・予算を重点配分し、採用効率の最大化を狙う。`
+                : '全体平均を大きく上回るセグメントは現状ありません。媒体ポートフォリオの再点検を推奨します。'
+            }
+          />
+          <ActionCard
+            num="02"
+            color="#DC2626"
+            title="低採用率セグメントの要因調査"
+            body={
+              bottlenecks.length > 0
+                ? `${bottlenecks.slice(0, 2).map((b) => b.row.label).join('・')} の採用率が著しく低調。原因（応募者の質・選考フロー・面接調整時間など）を深掘りし、撤退/改善の判断を。`
+                : '大きな課題セグメントは検出されていません。良好な状態を維持してください。'
+            }
+          />
+          <ActionCard
+            num="03"
+            color="#0EA5E9"
+            title="ステップ別ボトルネックの解消"
+            body={`応募→面接設定率は ${pct(total.validToInterviewRate, 1)}、面接→内定率は ${pct(total.applications > 0 && total.interviewScheduled > 0 ? (total.offered / total.interviewScheduled) * 100 : 0, 1)}。最も歩留まりが低いステップに焦点を当て、面接調整の自動化・選考スピード改善などの施策を検討。`}
+          />
+          <ActionCard
+            num="04"
+            color="#7C3AED"
+            title="年代別マーケティング最適化"
+            body={
+              byAge.length > 0
+                ? (() => {
+                    const topApp = [...byAge].sort((a, b) => b.applications - a.applications)[0];
+                    const topHired = [...byAge].filter((a) => a.hired > 0).sort((a, b) => b.hired - a.hired)[0];
+                    return `応募の中心は${topApp.ageGroup}（${topApp.applicationRate.toFixed(1)}%）、採用の中心は${topHired?.ageGroup || '-'}（${topHired?.hireRate.toFixed(1) || '0'}%）。媒体ごとに刺さる年代層を見極め、ターゲティング配信を強化。`;
+                  })()
+                : '年代データを取得できません。応募者プロフィールの登録率を上げてください。'
+            }
+          />
+          <ActionCard
+            num="05"
+            color="#F59E0B"
+            title="NG要因の根本対策"
+            body={(() => {
+              const reasons = ngBreakdown.byReason;
+              const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
+              const labelMap: Record<string, string> = { age: '年齢NG', condition: '条件不一致', duplicate: '重複応募', personality: '人物不適合', other: 'その他' };
+              if (!top || top[1] === 0) return 'NG件数は限定的です。継続して水準を維持してください。';
+              return `NG要因の最多は「${labelMap[top[0]] || top[0]}」が${top[1]}名（${ngBreakdown.total > 0 ? Math.round((top[1] / ngBreakdown.total) * 100) : 0}%）。求人原稿/媒体選定/事前スクリーニング設定の見直しで、応募の質を上流から改善。`;
+            })()}
+          />
+          <ActionCard
+            num="06"
+            color="#EC4899"
+            title="次期レポートに向けたデータ整備"
+            body="ステータス分類タグの完全設定、面接イベントの記録漏れ防止、応募者プロフィール（年代/求人）の入力率改善により、レポートの精度がさらに向上します。"
+          />
+        </div>
+      </PageWrap>
+
+      {/* ===== 裏表紙 ===== */}
+      <PageWrap pageNum={null} clientName={clientName} range={range} chapterCover>
+        <div className="chapter-content">
+          <div className="chapter-eyebrow">END OF REPORT</div>
+          <h1 className="chapter-title">ありがとうございました</h1>
+          <p className="chapter-desc">
+            本資料に関するご質問・追加分析のご要望は、<br />
+            担当者までお気軽にお問い合わせください。
+          </p>
+          <div className="end-meta">
+            <div>{clientName}</div>
+            <div className="muted">採用レポート / {formatRange(range)}</div>
+            <div className="muted" style={{ marginTop: '4mm' }}>powered by RISOTTO ATS</div>
+          </div>
+        </div>
+      </PageWrap>
+
       <PrintStyles />
     </div>
   );
 };
 
 /* ===== サブコンポーネント ===== */
+
+const TocSection: React.FC<{ num: string; title: string; desc: string }> = ({ num, title, desc }) => (
+  <div className="toc-row">
+    <div className="toc-num">{num}</div>
+    <div className="toc-body">
+      <div className="toc-title">{title}</div>
+      <div className="toc-desc">{desc}</div>
+    </div>
+  </div>
+);
+
+const FunnelComparison: React.FC<{ curr: any; prev: any; prevRange: DateRange }> = ({ curr, prev, prevRange }) => {
+  const items = [
+    { label: '応募数', curr: curr.applications, prev: prev.applications },
+    { label: '有効応募', curr: curr.validApplications, prev: prev.validApplications },
+    { label: '面接設定', curr: curr.interviewScheduled, prev: prev.interviewScheduled },
+    { label: '内定', curr: curr.offered, prev: prev.offered },
+    { label: '採用', curr: curr.hired, prev: prev.hired },
+    { label: '稼働', curr: curr.active, prev: prev.active },
+  ];
+  return (
+    <div className="comparison-block">
+      <div className="comparison-label">前期比較 ({prevRange.start} 〜 {prevRange.end})</div>
+      <div className="comparison-grid">
+        {items.map((it) => {
+          const diff = it.curr - it.prev;
+          const ratio = it.prev > 0 ? (diff / it.prev) * 100 : (it.curr > 0 ? 100 : 0);
+          const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+          return (
+            <div key={it.label} className={`comparison-cell ${cls}`}>
+              <div className="comparison-key">{it.label}</div>
+              <div className="comparison-val">{fmt(it.curr)}</div>
+              <div className="comparison-diff">
+                {diff > 0 ? '▲' : diff < 0 ? '▼' : '−'} {Math.abs(diff)} ({ratio > 0 ? '+' : ''}{ratio.toFixed(1)}%)
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const MonthlyChart: React.FC<{ data: MonthlyBucket[] }> = ({ data }) => {
+  const W = 1100, H = 240, PL = 50, PR = 20, PT = 20, PB = 40;
+  const innerW = W - PL - PR;
+  const innerH = H - PT - PB;
+  const maxApp = Math.max(1, ...data.map((d) => d.applications));
+  const slot = innerW / data.length;
+  const barW = slot * 0.5;
+  const xAt = (i: number) => PL + slot * i + slot / 2;
+  const yAt = (v: number) => PT + innerH - (v / maxApp) * innerH;
+
+  const linePath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(d.hired * (maxApp / Math.max(1, ...data.map(x => x.hired)))).toFixed(1)}`).join(' ');
+  const maxHired = Math.max(1, ...data.map((d) => d.hired));
+
+  return (
+    <div className="chart-wrap">
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        {[0, 0.25, 0.5, 0.75, 1].map((r, i) => {
+          const y = PT + innerH * (1 - r);
+          return (
+            <g key={i}>
+              <line x1={PL} y1={y} x2={W - PR} y2={y} stroke="#F3F4F6" strokeWidth={1} />
+              <text x={PL - 6} y={y + 3} fontSize={10} fill="#9CA3AF" textAnchor="end">{Math.round(maxApp * r)}</text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => {
+          const yTop = yAt(d.applications);
+          return (
+            <g key={d.month}>
+              <rect x={xAt(i) - barW / 2} y={yTop} width={barW} height={Math.max(0, PT + innerH - yTop)} fill="#FB923C" opacity={0.9} rx={2} />
+              {d.applications > 0 && <text x={xAt(i)} y={yTop - 4} fontSize={11} fill="#9A3412" textAnchor="middle" fontWeight={700}>{d.applications}</text>}
+            </g>
+          );
+        })}
+        <path d={linePath} fill="none" stroke="#059669" strokeWidth={2.5} />
+        {data.map((d, i) => (
+          <g key={`p-${d.month}`}>
+            <circle cx={xAt(i)} cy={yAt(d.hired * (maxApp / maxHired))} r={4} fill="#059669" />
+            {d.hired > 0 && <text x={xAt(i) + 8} y={yAt(d.hired * (maxApp / maxHired)) - 4} fontSize={11} fill="#065F46" fontWeight={700}>{d.hired}</text>}
+          </g>
+        ))}
+        {data.map((d, i) => (
+          <text key={`x-${d.month}`} x={xAt(i)} y={H - 14} fontSize={10} fill="#6B7280" textAnchor="middle">{d.month.slice(2).replace('-', '/')}</text>
+        ))}
+      </svg>
+      <div className="chart-legend">
+        <span><span className="legend-box" style={{ background: '#FB923C' }} />応募数</span>
+        <span><span className="legend-line" style={{ background: '#059669' }} />採用数(右軸スケール)</span>
+      </div>
+    </div>
+  );
+};
+
+const MonthlyTable: React.FC<{ data: MonthlyBucket[] }> = ({ data }) => {
+  const totals = data.reduce((acc, d) => ({
+    applications: acc.applications + d.applications,
+    validApplications: acc.validApplications + d.validApplications,
+    interviewScheduled: acc.interviewScheduled + d.interviewScheduled,
+    offered: acc.offered + d.offered,
+    hired: acc.hired + d.hired,
+  }), { applications: 0, validApplications: 0, interviewScheduled: 0, offered: 0, hired: 0 });
+  return (
+    <table className="age-table" style={{ marginTop: '4mm' }}>
+      <thead>
+        <tr><th>月</th><th>応募</th><th>有効応募</th><th>面接設定</th><th>内定</th><th>採用</th><th>採用率</th></tr>
+      </thead>
+      <tbody>
+        {data.map((d) => (
+          <tr key={d.month}>
+            <td>{d.month}</td>
+            <td className="num">{fmt(d.applications)}</td>
+            <td className="num">{fmt(d.validApplications)}</td>
+            <td className="num">{fmt(d.interviewScheduled)}</td>
+            <td className="num">{fmt(d.offered)}</td>
+            <td className="num accent">{fmt(d.hired)}</td>
+            <td className="num">{d.applications > 0 ? pct((d.hired / d.applications) * 100, 1) : '-'}</td>
+          </tr>
+        ))}
+        <tr className="total-row">
+          <td>合計</td>
+          <td className="num">{fmt(totals.applications)}</td>
+          <td className="num">{fmt(totals.validApplications)}</td>
+          <td className="num">{fmt(totals.interviewScheduled)}</td>
+          <td className="num">{fmt(totals.offered)}</td>
+          <td className="num accent">{fmt(totals.hired)}</td>
+          <td className="num">{totals.applications > 0 ? pct((totals.hired / totals.applications) * 100, 1) : '-'}</td>
+        </tr>
+      </tbody>
+    </table>
+  );
+};
+
+const StepFunnelTable: React.FC<{ overall: StepFunnelColumn; columns: StepFunnelColumn[] }> = ({ overall, columns }) => {
+  const cols = columns;
+  return (
+    <table className="step-table">
+      <thead>
+        <tr>
+          <th rowSpan={2}>ステップ</th>
+          <th rowSpan={2} className="overall-col">全体</th>
+          {cols.map((c) => <th key={c.label} colSpan={2}>{c.label}</th>)}
+        </tr>
+        <tr>
+          {cols.map((c) => (
+            <React.Fragment key={c.label}>
+              <th className="rate-h">人数</th>
+              <th className="rate-h">通過率</th>
+            </React.Fragment>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {overall.steps.map((step, idx) => {
+          const overallRate = step.conversionRate;
+          return (
+            <tr key={step.key}>
+              <td className="step-label">{step.label}</td>
+              <td className="num overall-col">
+                <div className="num-em">{fmt(step.count)}</div>
+                <div className="muted">{step.reachRate.toFixed(1)}% / {step.conversionRate.toFixed(1)}%</div>
+              </td>
+              {cols.map((c) => {
+                const s = c.steps[idx];
+                const sample = c.steps[0]?.count || 0;
+                let bgColor = 'transparent';
+                let fgColor = '#374151';
+                if (sample >= 3 && overallRate > 0 && idx > 0) {
+                  const ratio = s.conversionRate / overallRate;
+                  if (ratio < 0.5) { bgColor = '#FEE2E2'; fgColor = '#991B1B'; }
+                  else if (ratio < 0.7) { bgColor = '#FEF3C7'; fgColor = '#92400E'; }
+                  else if (ratio > 1.3) { bgColor = '#D1FAE5'; fgColor = '#065F46'; }
+                }
+                return (
+                  <React.Fragment key={c.label}>
+                    <td className="num" style={{ backgroundColor: bgColor, color: fgColor }}>{fmt(s.count)}</td>
+                    <td className="num" style={{ backgroundColor: bgColor, color: fgColor }}>{idx === 0 ? '-' : `${s.conversionRate.toFixed(1)}%`}</td>
+                  </React.Fragment>
+                );
+              })}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+};
+
+const RankBlock: React.FC<{ title: string; rows: MatrixRow[]; metricKey: keyof MatrixRow; metricLabel: string; color: string; isPct?: boolean }> = ({ title, rows, metricKey, metricLabel, color, isPct }) => (
+  <div className="rank-block">
+    <h3 className="rank-title" style={{ background: color }}>{title}</h3>
+    <ol className="rank-list">
+      {rows.length === 0 ? <li className="muted">データなし</li> : rows.map((r, i) => (
+        <li key={r.label}>
+          <span className="rank-num" style={{ color }}>{i + 1}</span>
+          <span className="rank-label">{r.label}</span>
+          <span className="rank-val">{isPct ? pct(r[metricKey] as number, 1) : fmt(r[metricKey] as number)}<span className="muted" style={{ marginLeft: '0.5em', fontSize: '0.85em' }}>{!isPct && metricLabel}</span></span>
+        </li>
+      ))}
+    </ol>
+  </div>
+);
+
+const ActionCard: React.FC<{ num: string; color: string; title: string; body: string }> = ({ num, color, title, body }) => (
+  <div className="action-card" style={{ borderLeftColor: color }}>
+    <div className="action-num" style={{ color }}>{num}</div>
+    <div className="action-title">{title}</div>
+    <div className="action-body">{body}</div>
+  </div>
+);
+
 
 const PageWrap: React.FC<{
   pageNum: number | null;
@@ -460,7 +882,7 @@ function chunkPairs<T>(arr: T[]): T[][] {
 const PrintStyles: React.FC = () => (
   <style>{`
     @page {
-      size: A4;
+      size: A4 landscape;
       margin: 0;
     }
     .print-root {
@@ -490,8 +912,8 @@ const PrintStyles: React.FC = () => (
     .op-bar button.primary { background: #f97316; border-color: #f97316; font-weight: 600; }
 
     .page {
-      width: 210mm;
-      height: 297mm;
+      width: 297mm;
+      height: 210mm;
       margin: 1rem auto;
       background: #fff;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
@@ -505,18 +927,18 @@ const PrintStyles: React.FC = () => (
 
     .page-header {
       position: absolute; top: 0; left: 0; right: 0;
-      height: 22mm;
-      padding: 8mm 15mm 0;
+      height: 16mm;
+      padding: 6mm 18mm 0;
       display: flex; justify-content: space-between;
       font-size: 9pt; color: #9ca3af;
       border-bottom: 1px solid #f3f4f6;
     }
     .page-footer {
-      position: absolute; bottom: 8mm; right: 15mm;
+      position: absolute; bottom: 6mm; right: 18mm;
       font-size: 9pt; color: #9ca3af;
     }
     .page-body {
-      padding: 28mm 15mm 18mm;
+      padding: 20mm 18mm 14mm;
       height: 100%;
       box-sizing: border-box;
     }
@@ -524,20 +946,20 @@ const PrintStyles: React.FC = () => (
     /* 表紙 */
     .cover { display: flex; flex-direction: column; padding: 0; }
     .cover-band {
-      height: 60mm;
+      height: 45mm;
       background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
       position: relative;
     }
     .cover-band::after {
       content: '';
-      position: absolute; bottom: -10mm; left: 0; right: 0;
-      height: 10mm;
+      position: absolute; bottom: -7mm; left: 0; right: 0;
+      height: 7mm;
       background: linear-gradient(135deg, #fdba74, #fed7aa);
     }
     .cover-body {
       flex: 1;
       display: flex; flex-direction: column; justify-content: center;
-      padding: 0 25mm;
+      padding: 0 30mm;
     }
     .cover-eyebrow {
       font-size: 11pt; letter-spacing: 0.3em; color: #f97316;
@@ -780,6 +1202,111 @@ const PrintStyles: React.FC = () => (
 
     /* 媒体×年代ペア */
     .src-age-block { display: flex; flex-direction: column; }
+
+    /* 目次 */
+    .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-top: 6mm; }
+    .toc-row {
+      display: flex; gap: 5mm; align-items: flex-start;
+      padding: 4mm 5mm;
+      background: #fff7ed; border-radius: 2mm; border-left: 4px solid #f97316;
+    }
+    .toc-num {
+      font-size: 22pt; font-weight: 800; color: #f97316;
+      min-width: 18mm; line-height: 1; font-family: 'Yu Mincho', serif;
+    }
+    .toc-title { font-size: 13pt; font-weight: 700; color: #1f2937; margin-bottom: 1mm; }
+    .toc-desc { font-size: 9pt; color: #6b7280; line-height: 1.5; }
+
+    /* 前期比較 */
+    .comparison-block { margin-top: 8mm; }
+    .comparison-label {
+      font-size: 10pt; color: #6b7280; margin-bottom: 3mm;
+      padding: 1mm 3mm; background: #f3f4f6; border-radius: 1mm; display: inline-block;
+    }
+    .comparison-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3mm; }
+    .comparison-cell {
+      padding: 4mm; border-radius: 2mm; text-align: center;
+      background: #f9fafb; border: 1px solid #e5e7eb;
+    }
+    .comparison-cell.up { background: #ecfdf5; border-color: #6ee7b7; }
+    .comparison-cell.down { background: #fef2f2; border-color: #fca5a5; }
+    .comparison-key { font-size: 9pt; color: #6b7280; }
+    .comparison-val { font-size: 18pt; font-weight: 800; color: #1f2937; line-height: 1.1; margin: 1mm 0; }
+    .comparison-diff { font-size: 9pt; font-weight: 600; }
+    .comparison-cell.up .comparison-diff { color: #059669; }
+    .comparison-cell.down .comparison-diff { color: #dc2626; }
+    .comparison-cell.flat .comparison-diff { color: #9ca3af; }
+
+    /* インサイトリスト */
+    .insight-list { list-style: none; margin: 0; padding: 0; }
+    .insight-list li {
+      padding: 3mm 4mm; margin-bottom: 2mm;
+      border-radius: 2mm; font-size: 10pt; line-height: 1.6;
+    }
+    .insight-list.good li { background: #ecfdf5; border-left: 3px solid #059669; }
+    .insight-list.bad li { background: #fef2f2; border-left: 3px solid #dc2626; }
+    .num-em { font-weight: 700; font-size: 11pt; }
+
+    /* 月次グラフ */
+    .chart-wrap { background: #fff; padding: 4mm; border: 1px solid #e5e7eb; border-radius: 2mm; }
+    .chart-wrap svg { width: 100%; height: auto; max-height: 80mm; }
+    .chart-legend {
+      display: flex; gap: 8mm; justify-content: flex-end;
+      font-size: 9pt; color: #6b7280; padding-top: 2mm;
+    }
+    .legend-box { display: inline-block; width: 10pt; height: 10pt; margin-right: 4pt; vertical-align: middle; border-radius: 1pt; }
+    .legend-line { display: inline-block; width: 14pt; height: 2pt; margin-right: 4pt; vertical-align: middle; }
+
+    /* ステップファネルテーブル */
+    .step-table {
+      width: 100%; border-collapse: collapse; font-size: 9pt;
+    }
+    .step-table th {
+      background: #f97316; color: #fff;
+      padding: 2mm 1.5mm; border: 1px solid #ea580c;
+      text-align: center; font-weight: 600; font-size: 8.5pt;
+    }
+    .step-table th.rate-h { background: #fb923c; font-size: 7.5pt; }
+    .step-table th.overall-col { background: #ea580c; }
+    .step-table td {
+      padding: 2mm 1.5mm; border: 1px solid #fed7aa;
+    }
+    .step-table td.num { text-align: right; }
+    .step-table td.step-label { font-weight: 600; background: #fff7ed; }
+    .step-table td.overall-col { background: #ffedd5; font-weight: 600; }
+
+    /* ランキング */
+    .rank-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5mm; }
+    .rank-block { background: #fff; border: 1px solid #e5e7eb; border-radius: 2mm; overflow: hidden; }
+    .rank-title {
+      color: #fff; padding: 3mm 4mm; font-size: 11pt; font-weight: 700; margin: 0;
+    }
+    .rank-list { list-style: none; margin: 0; padding: 3mm 4mm; }
+    .rank-list li {
+      display: flex; align-items: center; gap: 3mm;
+      padding: 2mm 0; border-bottom: 1px dashed #e5e7eb;
+      font-size: 10pt;
+    }
+    .rank-list li:last-child { border-bottom: none; }
+    .rank-num { font-size: 16pt; font-weight: 800; min-width: 8mm; font-family: 'Yu Mincho', serif; line-height: 1; }
+    .rank-label { flex: 1; }
+    .rank-val { font-weight: 700; color: #1f2937; }
+
+    /* アクション */
+    .action-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4mm; margin-top: 4mm; }
+    .action-card {
+      background: #fff; padding: 4mm 5mm; border-radius: 2mm;
+      border: 1px solid #e5e7eb; border-left-width: 5px;
+    }
+    .action-num {
+      font-size: 18pt; font-weight: 800; line-height: 1;
+      margin-bottom: 2mm; font-family: 'Yu Mincho', serif;
+    }
+    .action-title { font-size: 11pt; font-weight: 700; color: #1f2937; margin-bottom: 2mm; }
+    .action-body { font-size: 9pt; color: #4b5563; line-height: 1.6; }
+
+    /* 裏表紙 */
+    .end-meta { margin-top: 12mm; font-size: 11pt; color: #4b5563; }
 
     /* 印刷時 */
     @media print {
