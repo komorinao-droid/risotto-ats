@@ -42,9 +42,40 @@ function filterDataByBase(data: ClientData, baseName: string): ClientData {
   };
 }
 
+const SESSION_KEY = 'risotto-client-session';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [client, setClient] = useState<Client | null>(null);
+  // sessionStorage から復元（新しいタブを開いた時/F5時に維持）
+  const [client, setClient] = useState<Client | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      return raw ? (JSON.parse(raw) as Client) : null;
+    } catch { return null; }
+  });
   const [clientData, setClientData] = useState<ClientData | null>(null);
+
+  // client 変更時に sessionStorage を同期
+  useEffect(() => {
+    try {
+      if (client) sessionStorage.setItem(SESSION_KEY, JSON.stringify(client));
+      else sessionStorage.removeItem(SESSION_KEY);
+    } catch { /* ignore */ }
+  }, [client]);
+
+  // 復元された client がある場合、データを再ロード
+  useEffect(() => {
+    if (client && !clientData) {
+      const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      try {
+        let data = storage.getClientData(dataId);
+        if (client.accountType === 'child' && client.baseName) {
+          data = filterDataByBase(data, client.baseName);
+        }
+        setClientData(data);
+      } catch { /* ignore */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resolveClientId = useCallback((c: Client): string => {
     return c.accountType === 'child' && c.parentId ? c.parentId : c.id;

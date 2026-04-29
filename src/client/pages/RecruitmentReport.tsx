@@ -187,11 +187,39 @@ const RecruitmentReport: React.FC = () => {
           </button>
           <button
             className="no-print"
-            onClick={printReport}
-            style={{ padding: '0.375rem 0.75rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#374151', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+            onClick={async () => {
+              const { downloadExcel } = await import('@/utils/reports/excel');
+              downloadExcel(report, client?.companyName || 'クライアント', `recruitment-${range.start}_${range.end}.xlsx`);
+            }}
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #059669', borderRadius: '6px', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            <Download size={12} />
+            Excel
+          </button>
+          <button
+            className="no-print"
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (preset === 'custom') {
+                params.set('start', range.start);
+                params.set('end', range.end);
+              } else {
+                params.set('preset', preset);
+              }
+              window.open(`/reports/print?${params.toString()}`, '_blank');
+            }}
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #F97316', borderRadius: '6px', backgroundColor: '#F97316', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
           >
             <Printer size={12} />
-            印刷/PDF
+            納品資料 (PDF)
+          </button>
+          <button
+            className="no-print"
+            onClick={printReport}
+            title="この画面そのままを印刷"
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#6B7280', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            画面印刷
           </button>
         </div>
       </div>

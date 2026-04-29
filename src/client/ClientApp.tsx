@@ -20,9 +20,20 @@ import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
 import RecruitmentReport from '@/client/pages/RecruitmentReport';
+import RecruitmentReportPrint from '@/client/pages/RecruitmentReportPrint';
 
 const AuthenticatedApp: React.FC = () => {
   const { client, logout } = useAuth();
+  const isPrintRoute = window.location.pathname.startsWith('/reports/print');
+
+  if (isPrintRoute) {
+    // 印刷ビューはサイドバー無しのフル画面
+    return (
+      <Routes>
+        <Route path="/reports/print" element={<RecruitmentReportPrint />} />
+      </Routes>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
