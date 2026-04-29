@@ -1115,9 +1115,9 @@ const PrintStyles: React.FC = () => (
       display: flex; flex-direction: column; align-items: center;
     }
     .ng-bar.app { background: #f97316; }
-    .ng-bar.valid { background: #fb923c; margin-left: 8mm; margin-right: 8mm; }
-    .ng-bar-label { font-size: 9pt; opacity: 0.9; }
-    .ng-bar-num { font-size: 20pt; font-weight: 800; }
+    .ng-bar.valid { background: #fb923c; }
+    .ng-bar-label { font-size: 9pt; opacity: 0.9; font-family: inherit; }
+    .ng-bar-num { font-size: 20pt; font-weight: 800; font-family: inherit; }
 
     .ng-table { width: 100%; border-collapse: collapse; font-size: 10pt; }
     .ng-table th, .ng-table td {
