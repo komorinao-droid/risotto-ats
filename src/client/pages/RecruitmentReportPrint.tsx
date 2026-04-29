@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn } from '@/utils/reports/types';
 import { presetToRange, formatRange, prevRangeOf } from '@/utils/reports/dateRange';
@@ -42,12 +42,39 @@ const RecruitmentReportPrint: React.FC = () => {
   const prevRange = useMemo(() => prevRangeOf(range), [range]);
   const prevReport = useMemo(() => (fullData ? buildReport(fullData, prevRange) : null), [fullData, prevRange]);
 
-  // ?print=1 で自動印刷
+  // AI 総評: ?ai=1 が付いている時のみ取得
+  const wantAI = search.get('ai') === '1';
+  const [aiSummary, setAiSummary] = useState<{ headline: string; highlights: string[]; concerns: string[]; recommendations: string[]; model?: string; generatedAt?: string } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (search.get('print') === '1' && report) {
-      setTimeout(() => { window.print(); }, 800);
-    }
-  }, [report]);
+    if (!wantAI || !report) return;
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(null);
+    fetch('/api/report-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report, prevReport }),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => { if (!cancelled) setAiSummary(data); })
+      .catch((e) => { if (!cancelled) setAiError(e.message || 'AI要約の生成に失敗'); })
+      .finally(() => { if (!cancelled) setAiLoading(false); });
+    return () => { cancelled = true; };
+  }, [wantAI, report, prevReport]);
+
+  // ?print=1 で自動印刷。?ai=1 の場合は AI 取得完了を待つ。
+  useEffect(() => {
+    if (search.get('print') !== '1' || !report) return;
+    if (wantAI && aiLoading) return;
+    if (wantAI && !aiSummary && !aiError) return;
+    setTimeout(() => { window.print(); }, 800);
+  }, [report, wantAI, aiLoading, aiSummary, aiError]);
 
   if (!report || !client) {
     return <div style={{ padding: '2rem' }}>データを読み込み中...</div>;
@@ -159,6 +186,72 @@ const RecruitmentReportPrint: React.FC = () => {
         <FunnelChart total={total} />
         {prevReport && <FunnelComparison curr={total} prev={prevReport.total} prevRange={prevRange} />}
       </PageWrap>
+
+      {/* ===== AI 総評 (?ai=1 の時のみ) ===== */}
+      {wantAI && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">AI 総評</h2>
+          <p className="lead">
+            Claude AI による本期間データの自動分析結果。
+            {aiSummary?.model && <span className="muted"> （生成: {aiSummary.model}）</span>}
+          </p>
+          {aiLoading && (
+            <div className="ai-loading">
+              <div className="ai-spinner" />
+              <div>AI が分析中です...</div>
+            </div>
+          )}
+          {aiError && (
+            <div className="ai-error">
+              <strong>分析エラー:</strong> {aiError}
+              <div className="muted">ANTHROPIC_API_KEY が未設定の可能性があります。</div>
+            </div>
+          )}
+          {aiSummary && (
+            <div className="ai-content">
+              <div className="ai-headline">
+                <div className="ai-eyebrow">総評</div>
+                <div className="ai-headline-text">{aiSummary.headline}</div>
+              </div>
+              <div className="ai-grid">
+                <div className="ai-block ai-good">
+                  <div className="ai-block-title">✓ ハイライト</div>
+                  {aiSummary.highlights.length > 0 ? (
+                    <ul>
+                      {aiSummary.highlights.map((h, i) => <li key={i}>{h}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="muted">該当なし</p>
+                  )}
+                </div>
+                <div className="ai-block ai-bad">
+                  <div className="ai-block-title">! 懸念点</div>
+                  {aiSummary.concerns.length > 0 ? (
+                    <ul>
+                      {aiSummary.concerns.map((h, i) => <li key={i}>{h}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="muted">該当なし</p>
+                  )}
+                </div>
+                <div className="ai-block ai-action">
+                  <div className="ai-block-title">→ 推奨アクション</div>
+                  {aiSummary.recommendations.length > 0 ? (
+                    <ul>
+                      {aiSummary.recommendations.map((h, i) => <li key={i}>{h}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="muted">該当なし</p>
+                  )}
+                </div>
+              </div>
+              <p className="ai-disclaimer">
+                ※ 本総評は AI による自動生成です。最終的な意思決定は人間の判断と組み合わせてください。
+              </p>
+            </div>
+          )}
+        </PageWrap>
+      )}
 
       {/* ===== ハイライト & 課題サマリ ===== */}
       <PageWrap pageNum={null} clientName={clientName} range={range}>
@@ -1320,6 +1413,52 @@ const PrintStyles: React.FC = () => (
 
     /* 裏表紙 */
     .end-meta { margin-top: 12mm; font-size: 11pt; color: #4b5563; }
+
+    /* AI 総評 */
+    .ai-loading { padding: 30mm 0; text-align: center; color: #6b7280; }
+    .ai-spinner {
+      width: 12mm; height: 12mm; border: 3px solid #fed7aa;
+      border-top-color: #f97316; border-radius: 50%;
+      margin: 0 auto 4mm; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ai-error {
+      padding: 6mm; background: #fef2f2; border-left: 4px solid #dc2626;
+      border-radius: 2mm; color: #991b1b; font-size: 10pt;
+    }
+    .ai-content { display: flex; flex-direction: column; gap: 5mm; }
+    .ai-headline {
+      padding: 5mm 6mm;
+      background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+      border: 1px solid #fed7aa;
+      border-radius: 2mm;
+    }
+    .ai-eyebrow {
+      font-size: 9pt; letter-spacing: 0.2em; color: #f97316;
+      font-weight: 700; margin-bottom: 2mm;
+    }
+    .ai-headline-text {
+      font-size: 13pt; font-weight: 700; color: #1f2937;
+      line-height: 1.6;
+    }
+    .ai-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4mm;
+    }
+    .ai-block {
+      padding: 4mm 5mm;
+      border-radius: 2mm;
+      border: 1px solid #e5e7eb;
+    }
+    .ai-block.ai-good { background: #ecfdf5; border-color: #6ee7b7; }
+    .ai-block.ai-bad { background: #fef2f2; border-color: #fca5a5; }
+    .ai-block.ai-action { background: #eff6ff; border-color: #93c5fd; }
+    .ai-block-title { font-size: 11pt; font-weight: 700; margin-bottom: 3mm; }
+    .ai-good .ai-block-title { color: #065f46; }
+    .ai-bad .ai-block-title { color: #991b1b; }
+    .ai-action .ai-block-title { color: #1e40af; }
+    .ai-block ul { margin: 0; padding-left: 5mm; }
+    .ai-block li { font-size: 9.5pt; color: #1f2937; line-height: 1.7; margin-bottom: 2mm; }
+    .ai-disclaimer { font-size: 8pt; color: #9ca3af; margin-top: 2mm; text-align: right; }
 
     /* 印刷時 */
     @media print {

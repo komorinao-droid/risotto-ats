@@ -215,6 +215,25 @@ const RecruitmentReport: React.FC = () => {
           </button>
           <button
             className="no-print"
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (preset === 'custom') {
+                params.set('start', range.start);
+                params.set('end', range.end);
+              } else {
+                params.set('preset', preset);
+              }
+              params.set('ai', '1');
+              window.open(`/reports/print?${params.toString()}`, '_blank');
+            }}
+            title="AI総評ページ込みのPDFを生成"
+            style={{ padding: '0.375rem 0.75rem', border: '1px solid #7C3AED', borderRadius: '6px', backgroundColor: '#7C3AED', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            <Sparkles size={12} />
+            AI総評付きPDF
+          </button>
+          <button
+            className="no-print"
             onClick={printReport}
             title="この画面そのままを印刷"
             style={{ padding: '0.375rem 0.75rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#6B7280', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
