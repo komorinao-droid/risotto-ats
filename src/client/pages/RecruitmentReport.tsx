@@ -85,7 +85,14 @@ const RecruitmentReport: React.FC = () => {
 
   const range: DateRange = useMemo(() => {
     if (preset === 'custom') {
-      return customRange.start && customRange.end ? customRange : presetToRange('thisMonth');
+      if (customRange.start && customRange.end) {
+        // 逆順入力された場合は自動でスワップ
+        if (customRange.start > customRange.end) {
+          return { start: customRange.end, end: customRange.start };
+        }
+        return customRange;
+      }
+      return presetToRange('thisMonth');
     }
     return presetToRange(preset);
   }, [preset, customRange]);
@@ -108,11 +115,11 @@ const RecruitmentReport: React.FC = () => {
   const report = useMemo(() => (fullData ? buildReport(fullData, range) : null), [fullData, range]);
   const prevReport = useMemo(() => (fullData && compareEnabled ? buildReport(fullData, prevRange) : null), [fullData, prevRange, compareEnabled]);
 
-  // 期間が変わったらAI要約をクリア
+  // 期間/前期範囲/比較ON-OFF が変わったらAI要約をクリア（stale 防止）
   React.useEffect(() => {
     setAiSummary(null);
     setAiError(null);
-  }, [range.start, range.end, compareEnabled]);
+  }, [range.start, range.end, prevRange.start, prevRange.end, compareEnabled]);
 
   const generateAISummary = async () => {
     if (!report) return;

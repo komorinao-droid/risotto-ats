@@ -390,31 +390,34 @@ export function calcStepFunnel(
 ): StepFunnelData {
   const overall = calcStepFunnelColumn('全体', applicants, events, statuses);
 
-  const sourceSet = new Set<string>();
-  applicants.forEach((a) => sourceSet.add(a.src || '未設定'));
-  const bySource = Array.from(sourceSet).map((src) =>
-    calcStepFunnelColumn(src, applicants.filter((a) => (a.src || '未設定') === src),
-      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.src || '未設定') === src)),
-      statuses)
-  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+  // 軸別の応募者をグルーピング + イベントを applicantId で索引化（O(N²) → O(N)）
+  const groupBy = (key: 'src' | 'base' | 'job'): Map<string, Applicant[]> => {
+    const map = new Map<string, Applicant[]>();
+    applicants.forEach((a) => {
+      const k = (a[key] as string) || '未設定';
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(a);
+    });
+    return map;
+  };
+  const bySrc = groupBy('src');
+  const byBaseMap = groupBy('base');
+  const byJobMap = groupBy('job');
 
-  const baseSet = new Set<string>();
-  applicants.forEach((a) => baseSet.add(a.base || '未設定'));
-  const byBase = Array.from(baseSet).map((base) =>
-    calcStepFunnelColumn(base, applicants.filter((a) => (a.base || '未設定') === base),
-      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.base || '未設定') === base)),
-      statuses)
-  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+  const buildColumns = (groupMap: Map<string, Applicant[]>): StepFunnelColumn[] => {
+    return Array.from(groupMap.entries()).map(([label, apps]) => {
+      const ids = new Set(apps.map((a) => a.id));
+      const inEvents = events.filter((e) => ids.has(e.applicantId));
+      return calcStepFunnelColumn(label, apps, inEvents, statuses);
+    }).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+  };
 
-  const jobSet = new Set<string>();
-  applicants.forEach((a) => jobSet.add(a.job || '未設定'));
-  const byJob = Array.from(jobSet).map((job) =>
-    calcStepFunnelColumn(job, applicants.filter((a) => (a.job || '未設定') === job),
-      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.job || '未設定') === job)),
-      statuses)
-  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
-
-  return { overall, bySource, byBase, byJob };
+  return {
+    overall,
+    bySource: buildColumns(bySrc),
+    byBase: buildColumns(byBaseMap),
+    byJob: buildColumns(byJobMap),
+  };
 }
 
 // =============================================================
@@ -541,18 +544,25 @@ export function calcCostBreakdown(
     return buildRow(src, summary.bySource[src], apps);
   }).sort((a, b) => b.cost - a.cost);
 
-  // 拠点×媒体: 拠点別の応募者で同じ媒体費用で再計算（媒体費は全社共通として案分しない）
+  // 拠点×媒体: 媒体費を「全社のその媒体経由の応募者に対する、拠点経由応募者の比率」で按分
+  //   - 全社応募0の媒体（つまり費用は入力されてるが期間内に応募0） → 按分不能なので0円扱い
+  //   - 該当媒体に応募者がいる拠点だけ表示（全媒体0応募の拠点は表示するが行は空）
   const baseSet = new Set<string>();
   applicants.forEach((a) => baseSet.add(a.base || '未設定'));
+  // 媒体ごとに、応募者IDとその拠点を一度だけ計算してキャッシュ
+  const srcToApps = new Map<string, Applicant[]>();
+  Object.keys(summary.bySource).forEach((src) => {
+    srcToApps.set(src, applicants.filter((a) => (a.src || '未設定') === src));
+  });
+
   const byBaseSource = Array.from(baseSet).map((base) => {
-    const baseApps = applicants.filter((a) => (a.base || '未設定') === base);
-    const totalApps = applicants.length || 1;
-    const baseAppShare = baseApps.length / totalApps;
     const rows: CostRow[] = Object.keys(summary.bySource).map((src) => {
-      const inSrc = baseApps.filter((a) => (a.src || '未設定') === src);
-      // 拠点比率で費用を案分
-      const allocCost = summary.bySource[src] * (baseApps.filter((a) => (a.src || '未設定') === src).length / Math.max(1, applicants.filter((a) => (a.src || '未設定') === src).length));
-      void baseAppShare;
+      const allSrcApps = srcToApps.get(src) || [];
+      const inSrc = allSrcApps.filter((a) => (a.base || '未設定') === base);
+      // 全社応募0の媒体は按分不能 → 0円
+      const allocCost = allSrcApps.length > 0
+        ? summary.bySource[src] * (inSrc.length / allSrcApps.length)
+        : 0;
       return buildRow(src, allocCost, inSrc);
     }).filter((r) => r.applications > 0 || r.cost > 0).sort((a, b) => b.cost - a.cost);
     return { base, rows };

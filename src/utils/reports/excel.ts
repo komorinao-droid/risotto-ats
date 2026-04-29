@@ -67,6 +67,12 @@ const critFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { a
 
 // ===== シート構築ヘルパ =====
 
+/** Excel シート名の禁止文字 (\ / ? * [ ] :) を置換し、最大31文字に切り詰める */
+function sanitizeSheetName(name: string, fallback = 'Sheet'): string {
+  const sanitized = (name || fallback).replace(/[\\/?*[\]:]+/g, '_').trim();
+  return (sanitized || fallback).slice(0, 31);
+}
+
 function setColumnWidths(sheet: ExcelJS.Worksheet, widths: number[]) {
   widths.forEach((w, i) => {
     sheet.getColumn(i + 1).width = w;
@@ -231,7 +237,7 @@ function buildMonthlySheet(wb: ExcelJS.Workbook, report: RecruitmentReport) {
 }
 
 function buildMatrixSheet(wb: ExcelJS.Workbook, sheetName: string, title: string, rows: MatrixRow[], overall: MatrixRow) {
-  const sheet = wb.addWorksheet(sheetName);
+  const sheet = wb.addWorksheet(sanitizeSheetName(sheetName));
   setColumnWidths(sheet, [22, 8, 8, 8, 8, 8, 8, 12, 14, 12, 12]);
   addTitle(sheet, title, 11);
   addHeaderRow(sheet, ['対象', '応募', '有効', '面接', '内定', '採用', '稼働', '有効率', '面接設定率', '採用率', '稼働率']);
