@@ -87,6 +87,8 @@ export interface RecruitmentReport {
   bySourceAge: { source: string; rows: AgeBreakdown[] }[]; // 媒体×年代
   ngAgeBreakdown: { ageGroup: string; count: number; rate: number }[];
   byMonth: MonthlyBucket[];                      // 月次推移
+  byJob: MatrixRow[];                            // 職種別マトリクス
+  byJobAge: { job: string; rows: AgeBreakdown[] }[]; // 職種×年代
 }
 
 export type SourceData = {

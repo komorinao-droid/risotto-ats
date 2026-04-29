@@ -86,6 +86,7 @@ export function reportToCSV(report: RecruitmentReport): string {
 
   lines.push(...matrixSection('支社別', report.byBase));
   lines.push(...matrixSection('媒体別', report.bySource));
+  lines.push(...matrixSection('職種別', report.byJob));
   report.byBaseSource.forEach(({ base, rows }) => {
     if (rows.length) lines.push(...matrixSection(`支社×媒体: ${base}`, rows));
   });
@@ -95,6 +96,9 @@ export function reportToCSV(report: RecruitmentReport): string {
   });
   report.bySourceAge.forEach(({ source, rows }) => {
     if (rows.length) lines.push(...ageSection(`媒体×年代: ${source}`, rows));
+  });
+  report.byJobAge.forEach(({ job, rows }) => {
+    if (rows.length) lines.push(...ageSection(`職種×年代: ${job}`, rows));
   });
 
   return lines.join('\r\n');

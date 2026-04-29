@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight } from 'lucide-react';
+import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket } from '@/utils/reports/types';
 import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/utils/reports/dateRange';
@@ -64,7 +64,7 @@ const RecruitmentReport: React.FC = () => {
   const { client } = useAuth();
   const [preset, setPreset] = useState<DatePreset>('lastHalf');
   const [customRange, setCustomRange] = useState<DateRange>({ start: '', end: '' });
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'age'>('summary');
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age'>('summary');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
   const [compareEnabled, setCompareEnabled] = useState(false);
@@ -139,7 +139,7 @@ const RecruitmentReport: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6B7280' }}>データがありません。</div>;
   }
 
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge } = report;
 
   return (
     <div style={{ padding: '1.5rem 2rem', maxWidth: '1200px' }} className="report-root">
@@ -243,6 +243,7 @@ const RecruitmentReport: React.FC = () => {
           ['summary', 'サマリ', BarChart3],
           ['base', '拠点別', Building2],
           ['source', '媒体別', Megaphone],
+          ['job', '職種別', Briefcase],
           ['age', '年代分析', Users],
         ] as const).map(([key, label, Icon]) => (
           <button
@@ -408,6 +409,38 @@ const RecruitmentReport: React.FC = () => {
             媒体別 ファネル（採用数の多い順）
           </h3>
           <MatrixTable rows={bySource} />
+        </div>
+      )}
+
+      {/* ===== 職種別 ===== */}
+      {section === 'job' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={card}>
+            <h3 style={sectionTitle}>
+              <Briefcase size={16} color="#0891B2" />
+              職種別 ファネル（採用数の多い順）
+            </h3>
+            <MatrixTable rows={[{ label: '全体', ...total }, ...byJob]} highlightFirst />
+          </div>
+          <div style={card}>
+            <h3 style={sectionTitle}>職種 × 年代別（採用数上位）</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {byJobAge.slice(0, 10).map(({ job, rows }) => {
+                const totalH = rows.reduce((s, r) => s + r.hired, 0);
+                const totalA = rows.reduce((s, r) => s + r.applications, 0);
+                if (totalA === 0) return null;
+                return (
+                  <div key={job} style={{ border: '1px solid #E5E7EB', borderRadius: '6px', padding: '0.625rem 0.875rem' }}>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.375rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{job}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#6B7280', fontWeight: 400 }}>応募 {fmt(totalA)} / 採用 {fmt(totalH)}</span>
+                    </div>
+                    <AgeTable rows={rows} compact />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

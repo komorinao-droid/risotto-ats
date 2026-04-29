@@ -5,6 +5,7 @@ import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
 import { ALL_CATEGORIES, categoryLabel, inferCategoryFromName } from '@/utils/statusCategory';
+import { STATUS_TEMPLATES, getTemplateById } from '@/utils/statusTemplates';
 
 const PAGE_SIZE = 10;
 
@@ -37,6 +38,9 @@ const StatusManagement: React.FC = () => {
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<{ name: string; color: string; category: StatusCategory }>({ name: '', color: COLORS[0].main, category: 'screening' });
   const [subInput, setSubInput] = useState<{ [id: number]: string }>({});
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(STATUS_TEMPLATES[0].id);
+  const [templateMode, setTemplateMode] = useState<'replace' | 'append'>('replace');
 
   const statuses = clientData?.statuses || [];
 
@@ -153,6 +157,37 @@ const StatusManagement: React.FC = () => {
     }));
   };
 
+  const applyTemplate = () => {
+    const tpl = getTemplateById(selectedTemplateId);
+    if (!tpl) return;
+    const confirmMsg = templateMode === 'replace'
+      ? `テンプレート「${tpl.name}」で既存の全ステータスを置き換えますか？\n（応募者の現在のステータスは名前一致で維持されますが、不一致のものは空になります）`
+      : `テンプレート「${tpl.name}」のステータスを末尾に追加します。重複名はスキップします。`;
+    if (!window.confirm(confirmMsg)) return;
+
+    updateClientData((data) => {
+      const existingNames = new Set((data.statuses || []).map((s) => s.name));
+      const baseList = templateMode === 'replace' ? [] : [...(data.statuses || [])];
+      const baseMaxId = baseList.reduce((m, s) => Math.max(m, s.id), 0);
+      const baseMaxOrder = baseList.reduce((m, s) => Math.max(m, s.order), 0);
+      let nextId = baseMaxId;
+      let nextOrder = baseMaxOrder;
+      const added = tpl.items
+        .filter((it) => templateMode === 'replace' ? true : !existingNames.has(it.name))
+        .map((it) => ({
+          id: ++nextId,
+          name: it.name,
+          color: it.color,
+          active: true,
+          order: ++nextOrder,
+          subStatuses: it.subStatuses || [],
+          category: it.category,
+        }));
+      return { ...data, statuses: [...baseList, ...added] };
+    });
+    setTemplateModalOpen(false);
+  };
+
   if (!canEdit) {
     return <div style={{ padding: '2rem', color: '#6b7280' }}>この機能へのアクセス権がありません。</div>;
   }
@@ -161,9 +196,14 @@ const StatusManagement: React.FC = () => {
     <div style={{ padding: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>ステータス管理</h2>
-        <button onClick={openAddModal} style={btnStyle('#fff', '#3B82F6')}>
-          + 新規追加
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => setTemplateModalOpen(true)} style={btnStyle('#374151', '#F3F4F6')}>
+            テンプレートから一括登録
+          </button>
+          <button onClick={openAddModal} style={btnStyle('#fff', '#3B82F6')}>
+            + 新規追加
+          </button>
+        </div>
       </div>
 
       {/* Filter tabs */}
@@ -395,6 +435,79 @@ const StatusManagement: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* テンプレート一括登録モーダル */}
+      <Modal isOpen={templateModalOpen} onClose={() => setTemplateModalOpen(false)} title="テンプレートから一括登録">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <p style={{ margin: 0, fontSize: '0.8125rem', color: '#6B7280' }}>
+            業種別のステータスセットをまとめて登録できます。各テンプレートはレポート分類タグも設定済みです。
+          </p>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>テンプレート選択</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {STATUS_TEMPLATES.map((tpl) => (
+                <label
+                  key={tpl.id}
+                  style={{
+                    display: 'flex',
+                    gap: '0.5rem',
+                    padding: '0.625rem',
+                    border: '1px solid ' + (selectedTemplateId === tpl.id ? '#3B82F6' : '#E5E7EB'),
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    backgroundColor: selectedTemplateId === tpl.id ? '#EFF6FF' : '#fff',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="tpl"
+                    checked={selectedTemplateId === tpl.id}
+                    onChange={() => setSelectedTemplateId(tpl.id)}
+                    style={{ marginTop: '0.125rem' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{tpl.name}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: '0.125rem' }}>{tpl.description}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.375rem' }}>
+                      {tpl.items.map((it) => (
+                        <span
+                          key={it.name}
+                          style={{ display: 'inline-block', padding: '0.125rem 0.5rem', borderRadius: '999px', fontSize: '0.6875rem', backgroundColor: it.color + '22', color: it.color, fontWeight: 500 }}
+                        >
+                          {it.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>登録モード</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <label style={{ flex: 1, display: 'flex', gap: '0.5rem', padding: '0.5rem', border: '1px solid ' + (templateMode === 'replace' ? '#DC2626' : '#E5E7EB'), borderRadius: '6px', cursor: 'pointer', backgroundColor: templateMode === 'replace' ? '#FEF2F2' : '#fff' }}>
+                <input type="radio" name="mode" checked={templateMode === 'replace'} onChange={() => setTemplateMode('replace')} />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.8125rem' }}>置き換え</div>
+                  <div style={{ fontSize: '0.6875rem', color: '#6B7280' }}>既存の全ステータスを削除してテンプレートで上書き</div>
+                </div>
+              </label>
+              <label style={{ flex: 1, display: 'flex', gap: '0.5rem', padding: '0.5rem', border: '1px solid ' + (templateMode === 'append' ? '#3B82F6' : '#E5E7EB'), borderRadius: '6px', cursor: 'pointer', backgroundColor: templateMode === 'append' ? '#EFF6FF' : '#fff' }}>
+                <input type="radio" name="mode" checked={templateMode === 'append'} onChange={() => setTemplateMode('append')} />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.8125rem' }}>追加</div>
+                  <div style={{ fontSize: '0.6875rem', color: '#6B7280' }}>既存を維持してテンプレートを末尾に追加（重複名はスキップ）</div>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+            <button onClick={() => setTemplateModalOpen(false)} style={btnStyle('#374151', '#F3F4F6')}>キャンセル</button>
+            <button onClick={applyTemplate} style={btnStyle('#fff', '#3B82F6')}>適用</button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Add/Edit Modal */}
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editId ? 'ステータス編集' : '新規ステータス追加'}>

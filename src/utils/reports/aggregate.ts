@@ -240,6 +240,35 @@ export function calcByBaseAge(applicants: Applicant[], statuses?: Status[]): { b
   }));
 }
 
+/** 職種別マトリクス */
+export function calcByJob(applicants: Applicant[], events: { applicantId: number; date?: string }[], statuses?: Status[]): MatrixRow[] {
+  const set = new Set<string>();
+  applicants.forEach((a) => set.add(a.job || '未設定'));
+  return Array.from(set).map((job) => {
+    const inJob = applicants.filter((a) => (a.job || '未設定') === job);
+    const inJobEvents = events.filter((e) => {
+      const a = applicants.find((ap) => ap.id === e.applicantId);
+      return a && (a.job || '未設定') === job;
+    });
+    const f = calcFunnel(inJob, inJobEvents, statuses);
+    return { label: job, ...f };
+  }).sort((a, b) => b.hired - a.hired || b.applications - a.applications);
+}
+
+/** 職種×年代 */
+export function calcByJobAge(applicants: Applicant[], statuses?: Status[]): { job: string; rows: AgeBreakdown[] }[] {
+  const set = new Set<string>();
+  applicants.forEach((a) => set.add(a.job || '未設定'));
+  return Array.from(set).map((job) => ({
+    job,
+    rows: calcByAge(applicants.filter((a) => (a.job || '未設定') === job), statuses),
+  })).sort((a, b) => {
+    const ah = a.rows.reduce((s, r) => s + r.hired, 0);
+    const bh = b.rows.reduce((s, r) => s + r.hired, 0);
+    return bh - ah;
+  });
+}
+
 /** 媒体×年代 */
 export function calcBySourceAge(applicants: Applicant[], statuses?: Status[]): { source: string; rows: AgeBreakdown[] }[] {
   const set = new Set<string>();
@@ -314,5 +343,7 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     bySourceAge: calcBySourceAge(applicants, statuses),
     ngAgeBreakdown: calcNgAgeBreakdown(applicants, statuses),
     byMonth: calcByMonth(applicants, events, range, statuses),
+    byJob: calcByJob(applicants, events, statuses),
+    byJobAge: calcByJobAge(applicants, statuses),
   };
 }
