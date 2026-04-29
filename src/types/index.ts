@@ -443,4 +443,6 @@ export interface ClientData {
   sourcesByBase?: { [baseName: string]: Source[] };
   emailTemplatesByBase?: { [baseName: string]: EmailTemplate[] };
   screeningCriteria?: ScreeningCriteria;
+  /** 月次採用目標（YYYY-MM → 採用目標人数）。レポートの達成率/着地ヨミ計算に使用。 */
+  recruitmentGoals?: { [yearMonth: string]: number };
 }

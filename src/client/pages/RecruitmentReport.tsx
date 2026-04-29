@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase } from 'lucide-react';
+import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase, Target, AlertTriangle, GitBranch } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket } from '@/utils/reports/types';
+import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn, GoalProgress } from '@/utils/reports/types';
 import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/utils/reports/dateRange';
 import { buildReport } from '@/utils/reports/aggregate';
 import { downloadCSV, printReport } from '@/utils/reports/export';
+import { evaluateRow, bgForLevel, fgForLevel } from '@/utils/reports/bottleneck';
 import { storage } from '@/utils/storage';
 
 const card: React.CSSProperties = {
@@ -64,13 +65,15 @@ const RecruitmentReport: React.FC = () => {
   const { client } = useAuth();
   const [preset, setPreset] = useState<DatePreset>('lastHalf');
   const [customRange, setCustomRange] = useState<DateRange>({ start: '', end: '' });
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age'>('summary');
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step'>('summary');
+  const [stepAxis, setStepAxis] = useState<'source' | 'base' | 'job'>('source');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [aiSummary, setAiSummary] = useState<AISummary | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [dataRev, setDataRev] = useState(0); // データ再読込トリガー
 
   const range: DateRange = useMemo(() => {
     if (preset === 'custom') {
@@ -90,7 +93,9 @@ const RecruitmentReport: React.FC = () => {
     } catch {
       return null;
     }
-  }, [client]);
+  // dataRev を deps に含めることで目標値更新時に再フェッチ
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, dataRev]);
 
   const report = useMemo(() => (fullData ? buildReport(fullData, range) : null), [fullData, range]);
   const prevReport = useMemo(() => (fullData && compareEnabled ? buildReport(fullData, prevRange) : null), [fullData, prevRange, compareEnabled]);
@@ -139,7 +144,8 @@ const RecruitmentReport: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6B7280' }}>データがありません。</div>;
   }
 
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal } = report;
+  const overallMatrix: MatrixRow = { label: '全体', ...total };
 
   return (
     <div style={{ padding: '1.5rem 2rem', maxWidth: '1200px' }} className="report-root">
@@ -241,6 +247,7 @@ const RecruitmentReport: React.FC = () => {
       <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         {([
           ['summary', 'サマリ', BarChart3],
+          ['step', 'ステップ別', GitBranch],
           ['base', '拠点別', Building2],
           ['source', '媒体別', Megaphone],
           ['job', '職種別', Briefcase],
@@ -272,6 +279,24 @@ const RecruitmentReport: React.FC = () => {
       {/* ===== サマリ ===== */}
       {section === 'summary' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* 採用目標 */}
+          <GoalSection
+            goal={goal}
+            range={range}
+            onUpdateGoal={(yearMonth, value) => {
+              if (!client) return;
+              const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+              try {
+                const data = storage.getClientData(dataId);
+                const newGoals = { ...(data.recruitmentGoals || {}) };
+                if (value > 0) newGoals[yearMonth] = value;
+                else delete newGoals[yearMonth];
+                storage.saveClientData(dataId, { ...data, recruitmentGoals: newGoals });
+                setDataRev((v) => v + 1);
+              } catch (e) { console.error(e); }
+            }}
+          />
+
           {/* AI要約 */}
           <AISummarySection
             loading={aiLoading}
@@ -358,6 +383,54 @@ const RecruitmentReport: React.FC = () => {
         </div>
       )}
 
+      {/* ===== ステップ別 ===== */}
+      {section === 'step' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={card}>
+            <h3 style={sectionTitle}>
+              <GitBranch size={16} color="#0EA5E9" />
+              ステップ別 到達率/通過率
+            </h3>
+            <p style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: 0, marginBottom: '0.75rem' }}>
+              縦軸=選考ステップ。各セルに人数・到達率(応募比)・通過率(前ステップ比)を表示。HERPの応募経路比較レポート相当。
+            </p>
+            <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.75rem', color: '#6B7280', alignSelf: 'center' }}>軸:</span>
+              {([
+                ['source', '媒体別', Megaphone],
+                ['base', '拠点別', Building2],
+                ['job', '職種別', Briefcase],
+              ] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setStepAxis(key)}
+                  style={{
+                    padding: '0.25rem 0.625rem',
+                    border: '1px solid ' + (stepAxis === key ? '#0EA5E9' : '#E5E7EB'),
+                    borderRadius: '6px',
+                    backgroundColor: stepAxis === key ? '#F0F9FF' : '#fff',
+                    color: stepAxis === key ? '#0369A1' : '#374151',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <Icon size={12} />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <StepFunnelTable
+              overall={stepFunnel.overall}
+              columns={stepAxis === 'source' ? stepFunnel.bySource : stepAxis === 'base' ? stepFunnel.byBase : stepFunnel.byJob}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ===== 拠点別 ===== */}
       {section === 'base' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -366,7 +439,7 @@ const RecruitmentReport: React.FC = () => {
               <Building2 size={16} color="#0284C7" />
               支社別 ファネル
             </h3>
-            <MatrixTable rows={[{ label: '全体', ...total }, ...byBase]} highlightFirst />
+            <MatrixTable rows={[overallMatrix, ...byBase]} highlightFirst overall={overallMatrix} />
           </div>
           <div style={card}>
             <h3 style={sectionTitle}>支社×媒体別</h3>
@@ -390,7 +463,7 @@ const RecruitmentReport: React.FC = () => {
                     </button>
                     {open && (
                       <div style={{ padding: '0.5rem 0.875rem' }}>
-                        <MatrixTable rows={rows} />
+                        <MatrixTable rows={rows} overall={overallMatrix} />
                       </div>
                     )}
                   </div>
@@ -408,7 +481,7 @@ const RecruitmentReport: React.FC = () => {
             <Megaphone size={16} color="#DB2777" />
             媒体別 ファネル（採用数の多い順）
           </h3>
-          <MatrixTable rows={bySource} />
+          <MatrixTable rows={bySource} overall={overallMatrix} />
         </div>
       )}
 
@@ -420,7 +493,7 @@ const RecruitmentReport: React.FC = () => {
               <Briefcase size={16} color="#0891B2" />
               職種別 ファネル（採用数の多い順）
             </h3>
-            <MatrixTable rows={[{ label: '全体', ...total }, ...byJob]} highlightFirst />
+            <MatrixTable rows={[overallMatrix, ...byJob]} highlightFirst overall={overallMatrix} />
           </div>
           <div style={card}>
             <h3 style={sectionTitle}>職種 × 年代別（採用数上位）</h3>
@@ -745,44 +818,67 @@ const AISummarySection: React.FC<{
   </div>
 );
 
-const MatrixTable: React.FC<{ rows: MatrixRow[]; highlightFirst?: boolean }> = ({ rows, highlightFirst }) => (
-  <div style={{ overflowX: 'auto' }}>
-    <table style={tableStyle}>
-      <thead>
-        <tr>
-          <th style={thStyle}>対象</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>応募</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>有効</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>面接</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>内定</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>採用</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>稼働</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>有効率</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>面接設定率</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>採用率</th>
-          <th style={{ ...thStyle, textAlign: 'right' }}>稼働率</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={r.label} style={{ backgroundColor: highlightFirst && i === 0 ? '#F0F9FF' : 'transparent' }}>
-            <td style={{ ...tdStyle, fontWeight: highlightFirst && i === 0 ? 700 : 500 }}>{r.label}</td>
-            <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.applications)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.validApplications)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.interviewScheduled)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.offered)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#059669' }}>{fmt(r.hired)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.active)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.validRate)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.validToInterviewRate)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.applicationToHireRate)}</td>
-            <td style={{ ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.applicationToActiveRate)}</td>
+const MatrixTable: React.FC<{ rows: MatrixRow[]; highlightFirst?: boolean; overall?: MatrixRow }> = ({ rows, highlightFirst, overall }) => {
+  const cellStyle = (level: ReturnType<typeof evaluateRow>['validRate']) => ({
+    ...tdStyle,
+    textAlign: 'right' as const,
+    color: level.level === 'normal' ? '#6B7280' : fgForLevel(level.level),
+    backgroundColor: bgForLevel(level.level),
+    fontWeight: level.level !== 'normal' ? 600 : 400,
+  });
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>対象</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>応募</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>有効</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>面接</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>内定</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>採用</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>稼働</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>有効率</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>面接設定率</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>採用率</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>稼働率</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-);
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const isOverallRow = (highlightFirst && i === 0) || (overall && r.label === overall.label && r.applications === overall.applications);
+            const bn = overall && !isOverallRow ? evaluateRow(r, overall) : null;
+            return (
+              <tr key={r.label} style={{ backgroundColor: highlightFirst && i === 0 ? '#F0F9FF' : 'transparent' }}>
+                <td style={{ ...tdStyle, fontWeight: highlightFirst && i === 0 ? 700 : 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  {bn && (bn.applicationToHireRate.level === 'critical' || bn.validToInterviewRate.level === 'critical') && (
+                    <AlertTriangle size={12} color="#DC2626" />
+                  )}
+                  {r.label}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.applications)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.validApplications)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.interviewScheduled)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.offered)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#059669' }}>{fmt(r.hired)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.active)}</td>
+                <td style={bn ? cellStyle(bn.validRate) : { ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.validRate)}</td>
+                <td style={bn ? cellStyle(bn.validToInterviewRate) : { ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.validToInterviewRate)}</td>
+                <td style={bn ? cellStyle(bn.applicationToHireRate) : { ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.applicationToHireRate)}</td>
+                <td style={bn ? cellStyle(bn.applicationToActiveRate) : { ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{pct(r.applicationToActiveRate)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {overall && (
+        <p style={{ margin: '0.5rem 0 0', fontSize: '0.6875rem', color: '#9CA3AF' }}>
+          通過率セルは全体平均との比較で着色（赤=平均の50%未満、黄=70%未満、緑=130%以上）。母数3未満は判定対象外。
+        </p>
+      )}
+    </div>
+  );
+};
 
 const AgeTable: React.FC<{ rows: AgeBreakdown[]; compact?: boolean }> = ({ rows, compact }) => (
   <div style={{ overflowX: 'auto' }}>
@@ -808,6 +904,240 @@ const AgeTable: React.FC<{ rows: AgeBreakdown[]; compact?: boolean }> = ({ rows,
         ))}
       </tbody>
     </table>
+  </div>
+);
+
+/* ---- ステップ別到達率/通過率テーブル ---- */
+const StepFunnelTable: React.FC<{ overall: StepFunnelColumn; columns: StepFunnelColumn[] }> = ({ overall, columns }) => {
+  // 軸の値が多い場合はトップ8まで表示
+  const displayCols = columns.slice(0, 8);
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>ステップ</th>
+            <th style={{ ...thStyle, textAlign: 'right', backgroundColor: '#F0F9FF' }}>全体</th>
+            {displayCols.map((c) => (
+              <th key={c.label} style={{ ...thStyle, textAlign: 'right' }}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {overall.steps.map((step, idx) => (
+            <React.Fragment key={step.key}>
+              <tr style={{ borderTop: idx === 0 ? '2px solid #E5E7EB' : '1px solid #F3F4F6' }}>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>{step.label}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, backgroundColor: '#F0F9FF' }}>
+                  <div>{fmt(step.count)}</div>
+                  <div style={{ fontSize: '0.6875rem', color: '#6B7280', fontWeight: 400 }}>
+                    到達{step.reachRate.toFixed(1)}% / 通過{step.conversionRate.toFixed(1)}%
+                  </div>
+                </td>
+                {displayCols.map((c) => {
+                  const s = c.steps[idx];
+                  const overallRate = step.conversionRate;
+                  const sampleSize = c.steps[0]?.count || 0;
+                  let bgColor = 'transparent';
+                  let fgColor = '#374151';
+                  if (sampleSize >= 3 && overallRate > 0 && idx > 0) {
+                    const ratio = s.conversionRate / overallRate;
+                    if (ratio < 0.5) { bgColor = '#FEE2E2'; fgColor = '#991B1B'; }
+                    else if (ratio < 0.7) { bgColor = '#FEF3C7'; fgColor = '#92400E'; }
+                    else if (ratio > 1.3) { bgColor = '#D1FAE5'; fgColor = '#065F46'; }
+                  }
+                  return (
+                    <td key={c.label} style={{ ...tdStyle, textAlign: 'right', backgroundColor: bgColor }}>
+                      <div style={{ color: fgColor, fontWeight: bgColor !== 'transparent' ? 600 : 400 }}>{fmt(s.count)}</div>
+                      <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', fontWeight: 400 }}>
+                        {s.reachRate.toFixed(1)}% {idx > 0 && `/ ${s.conversionRate.toFixed(1)}%`}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ margin: '0.5rem 0 0', fontSize: '0.6875rem', color: '#9CA3AF' }}>
+        各セル: 上段=人数、下段=到達率(応募比) / 通過率(前ステップ比)。通過率セルは全体通過率との比較で着色。
+        {columns.length > displayCols.length && ` 上位${displayCols.length}件のみ表示（全${columns.length}件）。`}
+      </p>
+    </div>
+  );
+};
+
+/* ---- 採用目標ゲージ + インライン編集 ---- */
+const GoalSection: React.FC<{
+  goal: GoalProgress | undefined;
+  range: DateRange;
+  onUpdateGoal: (yearMonth: string, value: number) => void;
+}> = ({ goal, range, onUpdateGoal }) => {
+  const [editing, setEditing] = useState(false);
+  const [tempGoals, setTempGoals] = useState<{ [m: string]: string }>({});
+
+  // 期間内の月リスト
+  const months: string[] = (() => {
+    const list: string[] = [];
+    const s = new Date(range.start + 'T00:00:00');
+    const e = new Date(range.end + 'T00:00:00');
+    const cur = new Date(s.getFullYear(), s.getMonth(), 1);
+    while (cur <= e) {
+      list.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    return list;
+  })();
+
+  const startEdit = () => {
+    const initial: { [m: string]: string } = {};
+    months.forEach((m) => {
+      const found = goal?.monthly.find((mm) => mm.yearMonth === m);
+      initial[m] = found?.target ? String(found.target) : '';
+    });
+    setTempGoals(initial);
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    months.forEach((m) => {
+      const val = parseInt(tempGoals[m] || '0', 10) || 0;
+      onUpdateGoal(m, val);
+    });
+    setEditing(false);
+  };
+
+  if (!goal && !editing) {
+    return (
+      <div style={{ ...card, background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', borderColor: '#FDE68A' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Target size={16} color="#D97706" />
+            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#92400E' }}>採用目標が未設定です</span>
+            <span style={{ fontSize: '0.75rem', color: '#92400E' }}>月次目標を設定すると、達成率と着地ヨミが表示されます。</span>
+          </div>
+          <button onClick={startEdit} className="no-print" style={{ padding: '0.375rem 0.875rem', border: 'none', borderRadius: '6px', backgroundColor: '#D97706', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            目標を設定
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div style={card}>
+        <h3 style={sectionTitle}>
+          <Target size={16} color="#D97706" />
+          採用目標を編集
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
+          {months.map((m) => (
+            <label key={m} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>{m}</span>
+              <input
+                type="number"
+                min={0}
+                value={tempGoals[m] || ''}
+                onChange={(e) => setTempGoals((g) => ({ ...g, [m]: e.target.value }))}
+                placeholder="0"
+                style={{ padding: '0.375rem 0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '0.875rem' }}
+              />
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+          <button onClick={() => setEditing(false)} style={{ padding: '0.375rem 0.875rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#374151', fontSize: '0.75rem', cursor: 'pointer' }}>キャンセル</button>
+          <button onClick={saveEdit} style={{ padding: '0.375rem 0.875rem', border: 'none', borderRadius: '6px', backgroundColor: '#D97706', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>保存</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!goal) return null;
+
+  // ゲージ用のパス計算
+  const gaugeRate = Math.min(100, goal.projectedAchievementRate);
+  const gaugeColor = gaugeRate >= 100 ? '#059669' : gaugeRate >= 80 ? '#0EA5E9' : gaugeRate >= 60 ? '#F59E0B' : '#DC2626';
+
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+        <h3 style={{ ...sectionTitle, margin: 0 }}>
+          <Target size={16} color="#D97706" />
+          採用目標 達成率 {goal.isPastPeriod ? '' : '/ 着地ヨミ'}
+        </h3>
+        <button onClick={startEdit} className="no-print" style={{ padding: '0.25rem 0.625rem', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff', color: '#6B7280', fontSize: '0.6875rem', cursor: 'pointer' }}>
+          編集
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <Gauge value={gaugeRate} color={gaugeColor} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.75rem', flex: 1, minWidth: '300px' }}>
+          <Stat label="目標" value={`${goal.targetHires}名`} color="#6B7280" />
+          <Stat label="実績" value={`${goal.actualHires}名`} color="#059669" />
+          {!goal.isPastPeriod && <Stat label="着地ヨミ" value={`${goal.projectedHires}名`} color="#0EA5E9" />}
+          <Stat
+            label={goal.isPastPeriod ? '達成率' : '予測達成率'}
+            value={`${(goal.isPastPeriod ? goal.achievementRate : goal.projectedAchievementRate).toFixed(1)}%`}
+            color={gaugeColor}
+          />
+        </div>
+      </div>
+      {goal.monthly.length > 1 && (
+        <div style={{ marginTop: '0.875rem' }}>
+          <table style={{ ...tableStyle, fontSize: '0.75rem' }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>月</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>目標</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>実績</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>達成率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {goal.monthly.map((m) => {
+                const rate = m.target > 0 ? (m.actual / m.target) * 100 : 0;
+                const c = rate >= 100 ? '#059669' : rate >= 80 ? '#0EA5E9' : rate >= 60 ? '#F59E0B' : '#DC2626';
+                return (
+                  <tr key={m.yearMonth}>
+                    <td style={tdStyle}>{m.yearMonth}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{m.target}名</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#059669' }}>{m.actual}名</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: c }}>{m.target > 0 ? rate.toFixed(1) + '%' : '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Gauge: React.FC<{ value: number; color: string }> = ({ value, color }) => {
+  const radius = 56;
+  const circumference = Math.PI * radius;
+  const dash = (Math.min(100, value) / 100) * circumference;
+  return (
+    <div style={{ position: 'relative', width: 140, height: 80 }}>
+      <svg width={140} height={80} viewBox="0 0 140 80">
+        <path d={`M 14 70 A ${radius} ${radius} 0 0 1 126 70`} fill="none" stroke="#E5E7EB" strokeWidth={12} strokeLinecap="round" />
+        <path d={`M 14 70 A ${radius} ${radius} 0 0 1 126 70`} fill="none" stroke={color} strokeWidth={12} strokeLinecap="round" strokeDasharray={`${dash} ${circumference}`} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 6 }}>
+        <div style={{ fontSize: '1.5rem', fontWeight: 700, color, lineHeight: 1 }}>{value.toFixed(0)}<span style={{ fontSize: '0.875rem' }}>%</span></div>
+      </div>
+    </div>
+  );
+};
+
+const Stat: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
+  <div>
+    <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginBottom: '0.125rem' }}>{label}</div>
+    <div style={{ fontSize: '1.125rem', fontWeight: 700, color }}>{value}</div>
   </div>
 );
 

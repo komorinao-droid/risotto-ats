@@ -89,6 +89,47 @@ export interface RecruitmentReport {
   byMonth: MonthlyBucket[];                      // 月次推移
   byJob: MatrixRow[];                            // 職種別マトリクス
   byJobAge: { job: string; rows: AgeBreakdown[] }[]; // 職種×年代
+  stepFunnel: StepFunnelData;                    // ステップ別到達率/通過率
+  goal?: GoalProgress;                           // 採用目標達成率（期間内に該当目標があれば）
+}
+
+/** ステップ別ファネル（HERPの応募経路比較レポート相当） */
+export interface StepFunnelStep {
+  key: 'application' | 'interview' | 'offered' | 'hired' | 'active';
+  label: string;
+  count: number;
+  reachRate: number;       // 応募からの到達率 (%)
+  conversionRate: number;  // 前ステップからの通過率 (%)
+}
+
+export interface StepFunnelColumn {
+  label: string;           // 軸の値（"全体" or 媒体名 or 拠点名 or 職種名）
+  steps: StepFunnelStep[];
+}
+
+export interface StepFunnelData {
+  bySource: StepFunnelColumn[];   // 媒体別
+  byBase: StepFunnelColumn[];     // 拠点別
+  byJob: StepFunnelColumn[];      // 職種別
+  overall: StepFunnelColumn;      // 全体
+}
+
+/** 採用目標進捗 */
+export interface GoalProgress {
+  /** 期間内の月次目標合計 */
+  targetHires: number;
+  /** 期間内の実績採用数 */
+  actualHires: number;
+  /** 着地ヨミ（経過日数から線形外挿） */
+  projectedHires: number;
+  /** 達成率 (%) = actual/target */
+  achievementRate: number;
+  /** 着地予測達成率 (%) = projected/target */
+  projectedAchievementRate: number;
+  /** 期間に含まれる月次目標の内訳 */
+  monthly: { yearMonth: string; target: number; actual: number }[];
+  /** 期間が完全に過去か（着地ヨミ = actual） */
+  isPastPeriod: boolean;
 }
 
 export type SourceData = {

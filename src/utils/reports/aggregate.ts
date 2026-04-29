@@ -20,6 +20,10 @@ import type {
   MatrixRow,
   MonthlyBucket,
   RecruitmentReport,
+  StepFunnelStep,
+  StepFunnelColumn,
+  StepFunnelData,
+  GoalProgress,
 } from './types';
 import { inRange } from './dateRange';
 import { getStatusCategory } from '@/utils/statusCategory';
@@ -321,6 +325,158 @@ export function calcByMonth(applicants: Applicant[], events: { applicantId: numb
 }
 
 // =============================================================
+// ステップ別到達率/通過率（HERP応募経路比較相当）
+// =============================================================
+
+/** 単一カラム（指定された応募者群）のステップファネル行を計算 */
+export function calcStepFunnelColumn(
+  label: string,
+  applicants: Applicant[],
+  events: { applicantId: number; date?: string }[],
+  statuses?: Status[],
+): StepFunnelColumn {
+  const total = applicants.length;
+  const eventApplicantIds = new Set(events.map((e) => e.applicantId));
+
+  // 各ステップに「到達した」応募者数（累計）
+  const reached = {
+    application: total,
+    interview: 0,
+    offered: 0,
+    hired: 0,
+    active: 0,
+  };
+
+  applicants.forEach((a) => {
+    const cat = getStatusCategory(a.stage, statuses);
+    const reachedInterview = eventApplicantIds.has(a.id) || cat === 'interview' || cat === 'offered' || cat === 'hired' || cat === 'active';
+    if (reachedInterview) reached.interview += 1;
+    if (cat === 'offered' || cat === 'hired' || cat === 'active') reached.offered += 1;
+    if (cat === 'hired' || cat === 'active') reached.hired += 1;
+    if (cat === 'active') reached.active += 1;
+  });
+
+  const safeRate = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0);
+
+  const stepDefs: { key: StepFunnelStep['key']; label: string; count: number }[] = [
+    { key: 'application', label: '応募',     count: reached.application },
+    { key: 'interview',   label: '面接到達', count: reached.interview },
+    { key: 'offered',     label: '内定',     count: reached.offered },
+    { key: 'hired',       label: '採用',     count: reached.hired },
+    { key: 'active',      label: '稼働',     count: reached.active },
+  ];
+
+  const steps: StepFunnelStep[] = stepDefs.map((s, i) => {
+    const prevCount = i === 0 ? s.count : stepDefs[i - 1].count;
+    return {
+      key: s.key,
+      label: s.label,
+      count: s.count,
+      reachRate: safeRate(s.count, total),
+      conversionRate: i === 0 ? 100 : safeRate(s.count, prevCount),
+    };
+  });
+
+  return { label, steps };
+}
+
+/** 全体 + 軸別のステップファネルをまとめて計算 */
+export function calcStepFunnel(
+  applicants: Applicant[],
+  events: { applicantId: number; date?: string }[],
+  statuses?: Status[],
+): StepFunnelData {
+  const overall = calcStepFunnelColumn('全体', applicants, events, statuses);
+
+  const sourceSet = new Set<string>();
+  applicants.forEach((a) => sourceSet.add(a.src || '未設定'));
+  const bySource = Array.from(sourceSet).map((src) =>
+    calcStepFunnelColumn(src, applicants.filter((a) => (a.src || '未設定') === src),
+      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.src || '未設定') === src)),
+      statuses)
+  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+
+  const baseSet = new Set<string>();
+  applicants.forEach((a) => baseSet.add(a.base || '未設定'));
+  const byBase = Array.from(baseSet).map((base) =>
+    calcStepFunnelColumn(base, applicants.filter((a) => (a.base || '未設定') === base),
+      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.base || '未設定') === base)),
+      statuses)
+  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+
+  const jobSet = new Set<string>();
+  applicants.forEach((a) => jobSet.add(a.job || '未設定'));
+  const byJob = Array.from(jobSet).map((job) =>
+    calcStepFunnelColumn(job, applicants.filter((a) => (a.job || '未設定') === job),
+      events.filter((e) => applicants.find((a) => a.id === e.applicantId && (a.job || '未設定') === job)),
+      statuses)
+  ).sort((a, b) => (b.steps[0]?.count || 0) - (a.steps[0]?.count || 0));
+
+  return { overall, bySource, byBase, byJob };
+}
+
+// =============================================================
+// 採用目標達成率/着地ヨミ
+// =============================================================
+
+/** 期間内の月のリスト（YYYY-MM）を返す */
+function monthsInRange(range: DateRange): string[] {
+  const months: string[] = [];
+  const start = new Date(range.start + 'T00:00:00');
+  const end = new Date(range.end + 'T00:00:00');
+  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cur <= end) {
+    months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`);
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return months;
+}
+
+/** 採用目標達成率/着地ヨミを計算 */
+export function calcGoalProgress(
+  applicants: Applicant[],
+  range: DateRange,
+  goals: { [yearMonth: string]: number } | undefined,
+  statuses?: Status[],
+  today: Date = new Date(),
+): GoalProgress | undefined {
+  if (!goals) return undefined;
+  const months = monthsInRange(range);
+  const monthly = months.map((m) => ({
+    yearMonth: m,
+    target: goals[m] || 0,
+    actual: applicants.filter((a) => (a.date || '').startsWith(m) && isHired(a.stage, statuses)).length,
+  }));
+  const targetHires = monthly.reduce((s, m) => s + m.target, 0);
+  if (targetHires === 0) return undefined;
+  const actualHires = monthly.reduce((s, m) => s + m.actual, 0);
+
+  // 期間が完全に過去なら projected = actual
+  const end = new Date(range.end + 'T23:59:59');
+  const start = new Date(range.start + 'T00:00:00');
+  const isPastPeriod = today.getTime() > end.getTime();
+  const todayClamp = today < start ? start : today < end ? today : end;
+  const elapsedMs = todayClamp.getTime() - start.getTime() + 24 * 60 * 60 * 1000;
+  const totalMs = end.getTime() - start.getTime() + 1000;
+  const elapsedRatio = totalMs > 0 ? Math.min(1, elapsedMs / totalMs) : 1;
+  const projectedHires = isPastPeriod
+    ? actualHires
+    : elapsedRatio > 0
+      ? Math.round(actualHires / elapsedRatio)
+      : actualHires;
+
+  return {
+    targetHires,
+    actualHires,
+    projectedHires,
+    achievementRate: targetHires > 0 ? (actualHires / targetHires) * 100 : 0,
+    projectedAchievementRate: targetHires > 0 ? (projectedHires / targetHires) * 100 : 0,
+    monthly,
+    isPastPeriod,
+  };
+}
+
+// =============================================================
 // メインエントリ
 // =============================================================
 
@@ -345,5 +501,7 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     byMonth: calcByMonth(applicants, events, range, statuses),
     byJob: calcByJob(applicants, events, statuses),
     byJobAge: calcByJobAge(applicants, statuses),
+    stepFunnel: calcStepFunnel(applicants, events, statuses),
+    goal: calcGoalProgress(applicants, range, data.recruitmentGoals, statuses),
   };
 }
