@@ -408,9 +408,9 @@ const RecruitmentReportPrint: React.FC = () => {
         </div>
       </PageWrap>
 
-      {/* ===== 各支社×媒体別 ===== */}
-      {byBaseSource.filter(({ rows }) => rows.length > 0).map(({ base, rows }, idx) => (
-        <PageWrap key={base} pageNum={8 + idx} clientName={clientName} range={range}>
+      {/* ===== 各支社×媒体別 (各支社1ページ。表が大きいので統合せず) ===== */}
+      {byBaseSource.filter(({ rows }) => rows.length > 0).map(({ base, rows }) => (
+        <PageWrap key={base} pageNum={null} clientName={clientName} range={range}>
           <h2 className="section-h">【{base}】支社×媒体別</h2>
           <p className="lead">{base}の応募〜採用数は下記となります。<span className="muted">※採用数が多い順</span></p>
           <FunnelMatrix rows={rows} headerLabel="求人媒体" />
@@ -464,12 +464,19 @@ const RecruitmentReportPrint: React.FC = () => {
         <Annotation rows={byAge} entityLabel="全社" />
       </PageWrap>
 
-      {/* 各支社×年代別 */}
-      {byBaseAge.filter(({ rows }) => rows.length > 0).map(({ base, rows }) => (
-        <PageWrap key={base} pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">【{base}】支社×年代別</h2>
-          <AgeFunnelTable rows={rows} />
-          <Annotation rows={rows} entityLabel={base} />
+      {/* 各支社×年代別 (2支社ずつ1ページに統合) */}
+      {chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).map((group, gIdx) => (
+        <PageWrap key={`base-age-${gIdx}`} pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">支社×年代別 {chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).length > 1 ? `(${gIdx + 1}/${chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2).length})` : ''}</h2>
+          <div className="src-age-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+            {group.map(({ base, rows }) => (
+              <div key={base} className="base-age-block">
+                <h3 className="sub-h center">{base}</h3>
+                <AgeFunnelTable rows={rows} />
+                <Annotation rows={rows} entityLabel={base} />
+              </div>
+            ))}
+          </div>
         </PageWrap>
       ))}
 
@@ -488,15 +495,14 @@ const RecruitmentReportPrint: React.FC = () => {
         </div>
       </PageWrap>
 
-      {/* 媒体×年代別（2媒体ペア） */}
-      {chunkPairs(topSourceAge).map((pair, idx) => (
-        <PageWrap key={`pair-${idx}`} pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">【媒体別】年代別に関して</h2>
-          <div className="row-2col">
-            {pair.map(({ source, rows }) => (
+      {/* 媒体×年代別（4媒体グリッド: A4横で1ページに集約） */}
+      {chunkN(topSourceAge, 4).map((group, idx) => (
+        <PageWrap key={`grp-${idx}`} pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">【媒体別】年代別に関して {chunkN(topSourceAge, 4).length > 1 ? `(${idx + 1}/${chunkN(topSourceAge, 4).length})` : ''}</h2>
+          <div className="src-age-grid">
+            {group.map(({ source, rows }) => (
               <SourceAgeBlock key={source} source={source} rows={rows} />
             ))}
-            {pair.length === 1 && <div />}
           </div>
         </PageWrap>
       ))}
@@ -964,9 +970,9 @@ const Annotation: React.FC<{ rows: AgeBreakdown[]; entityLabel: string }> = ({ r
   );
 };
 
-function chunkPairs<T>(arr: T[]): T[][] {
+function chunkN<T>(arr: T[], n: number): T[][] {
   const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += 2) result.push(arr.slice(i, i + 2));
+  for (let i = 0; i < arr.length; i += n) result.push(arr.slice(i, i + n));
   return result;
 }
 
@@ -1307,6 +1313,20 @@ const PrintStyles: React.FC = () => (
 
     /* 媒体×年代ペア */
     .src-age-block { display: flex; flex-direction: column; }
+    .src-age-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4mm;
+    }
+    .src-age-grid .src-age-block .age-table.compact th,
+    .src-age-grid .src-age-block .age-table.compact td {
+      padding: 1mm 1.5mm; font-size: 8pt;
+    }
+    .base-age-block { display: flex; flex-direction: column; }
+    .base-age-block .age-table th,
+    .base-age-block .age-table td { padding: 1.8mm 2.5mm; font-size: 9pt; }
+    .base-age-block .annotation-box { padding: 2.5mm 3mm; margin-top: 3mm; }
+    .base-age-block .annotation-box ul { font-size: 9pt; }
 
     /* 目次 */
     .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; margin-top: 6mm; }
