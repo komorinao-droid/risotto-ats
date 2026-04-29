@@ -52,7 +52,6 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
       { path: '/settings/screening', label: 'AIスクリーニング', icon: null, optionRequired: 'aiScreening' },
       { path: '/reports', label: '採用レポート', icon: null, optionRequired: 'recruitmentReport' },
-      { path: '/media-costs', label: '媒体費用管理', icon: null, optionRequired: 'recruitmentReport' },
       { path: '/settings/account', label: 'アカウント', icon: null },
     ],
   },

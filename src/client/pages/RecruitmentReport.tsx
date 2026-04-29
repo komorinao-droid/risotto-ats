@@ -7,6 +7,7 @@ import { buildReport } from '@/utils/reports/aggregate';
 import { downloadCSV, printReport } from '@/utils/reports/export';
 import { evaluateRow, bgForLevel, fgForLevel } from '@/utils/reports/bottleneck';
 import { storage } from '@/utils/storage';
+import MediaCostManagement from '@/client/pages/settings/MediaCostManagement';
 
 const card: React.CSSProperties = {
   backgroundColor: '#fff',
@@ -65,8 +66,15 @@ const RecruitmentReport: React.FC = () => {
   const { client } = useAuth();
   const [preset, setPreset] = useState<DatePreset>('lastHalf');
   const [customRange, setCustomRange] = useState<DateRange>({ start: '', end: '' });
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost'>('summary');
+  const initialTab = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('tab');
+    if (t === 'cost' || t === 'base' || t === 'source' || t === 'job' || t === 'age' || t === 'step') return t;
+    return 'summary' as const;
+  })();
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost'>(initialTab);
   const [stepAxis, setStepAxis] = useState<'source' | 'base' | 'job'>('source');
+  const [costMode, setCostMode] = useState<'analysis' | 'input'>('analysis');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
   const [compareEnabled, setCompareEnabled] = useState(false);
@@ -657,16 +665,43 @@ const RecruitmentReport: React.FC = () => {
       {/* ===== コスト分析 ===== */}
       {section === 'cost' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {!cost ? (
+          {/* サブタブ: 分析 / 費用入力 */}
+          <div style={{ display: 'flex', gap: '0.375rem', padding: '0.25rem', backgroundColor: '#F3F4F6', borderRadius: '8px', width: 'fit-content' }}>
+            {([['analysis', '費用対効果分析'], ['input', '媒体費用入力']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setCostMode(key)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  border: 'none',
+                  borderRadius: '6px',
+                  backgroundColor: costMode === key ? '#fff' : 'transparent',
+                  color: costMode === key ? '#F97316' : '#6B7280',
+                  fontSize: '0.8125rem',
+                  fontWeight: costMode === key ? 600 : 500,
+                  cursor: 'pointer',
+                  boxShadow: costMode === key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {costMode === 'input' ? (
+            <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+              <MediaCostManagement />
+            </div>
+          ) : !cost ? (
             <div style={{ ...card, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
               <Wallet size={32} color="#F97316" style={{ margin: '0 auto 0.75rem' }} />
               <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem', fontWeight: 700, color: '#111827' }}>媒体費用が未入力です</h3>
               <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: '0 0 1rem', lineHeight: 1.6 }}>
-                サイドバーの「媒体費用管理」から月別の媒体費用を入力すると、<br />
+                上の「媒体費用入力」タブで月別の媒体費用を入力すると、<br />
                 CPA(応募1件あたりコスト)/CPH(採用1名あたりコスト)が自動算出されます。
               </p>
               <button
-                onClick={() => { window.location.href = '/media-costs'; }}
+                onClick={() => setCostMode('input')}
                 style={{ padding: '0.5rem 1rem', border: 'none', borderRadius: '6px', backgroundColor: '#F97316', color: '#fff', fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer' }}
               >
                 媒体費用を入力する

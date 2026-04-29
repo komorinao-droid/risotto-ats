@@ -19,10 +19,16 @@ import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManage
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
-import MediaCostManagement from '@/client/pages/settings/MediaCostManagement';
+// MediaCostManagement は RecruitmentReport 内のサブタブに統合済
 import RecruitmentReport from '@/client/pages/RecruitmentReport';
 import RecruitmentReportPrint from '@/client/pages/RecruitmentReportPrint';
 import { hasActiveOption } from '@/utils/clientOptions';
+
+/** /media-costs にアクセスされた時に /reports?tab=cost にリダイレクト */
+const MediaCostsRedirect: React.FC = () => {
+  React.useEffect(() => { window.location.replace('/reports?tab=cost'); }, []);
+  return <div style={{ padding: '2rem' }}>採用レポート画面のコスト分析タブに移動しました...</div>;
+};
 
 const ReportNotContractedNotice: React.FC<{ feature: string }> = ({ feature }) => (
   <div style={{ padding: '3rem 2rem', textAlign: 'center', maxWidth: '720px', margin: '0 auto' }}>
@@ -78,7 +84,8 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/reports" element={reportEnabled ? <RecruitmentReport /> : <ReportNotContractedNotice feature="採用レポート" />} />
           <Route path="/statuses" element={<StatusManagement />} />
           <Route path="/sources" element={<SourceManagement />} />
-          <Route path="/media-costs" element={reportEnabled ? <MediaCostManagement /> : <ReportNotContractedNotice feature="媒体費用管理" />} />
+          {/* /media-costs は採用レポート画面のサブタブに統合済。直リンク互換のためリダイレクト */}
+          <Route path="/media-costs" element={reportEnabled ? <MediaCostsRedirect /> : <ReportNotContractedNotice feature="媒体費用管理" />} />
           <Route path="/bases" element={<BaseManagement />} />
           <Route path="/jobs" element={<JobManagement />} />
           <Route path="/settings/hearing" element={<HearingManagement />} />
