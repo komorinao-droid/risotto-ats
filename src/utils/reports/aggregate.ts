@@ -92,8 +92,6 @@ export function filterApplicantsByRange(applicants: Applicant[], range: DateRang
 /** ファネル指標を計算 */
 export function calcFunnel(applicants: Applicant[], events: { applicantId: number; date?: string }[] = []): FunnelMetrics {
   const total = applicants.length;
-  const ngCount = applicants.filter((a) => isNg(a.stage) || a.duplicate).length;
-  const valid = total - ngCount;
 
   // 面接設定: 面接イベントが存在する applicant を集計（events をソース）
   const eventApplicantIds = new Set(events.map((e) => e.applicantId));
@@ -109,6 +107,11 @@ export function calcFunnel(applicants: Applicant[], events: { applicantId: numbe
     }
   });
   const interviewScheduled = interviewSet.size;
+
+  // 有効応募: NG だが面接まで進んでいる場合は「面接後にNGになった」扱いで有効に含める。
+  // これにより 面接設定 ≤ 有効応募 が常に成立する。
+  const ngCount = applicants.filter((a) => (isNg(a.stage) || a.duplicate) && !interviewSet.has(a.id)).length;
+  const valid = total - ngCount;
 
   const offered = applicants.filter((a) => isOffered(a.stage)).length;
   const hired = applicants.filter((a) => isHired(a.stage)).length;
@@ -277,8 +280,9 @@ export function calcByMonth(applicants: Applicant[], events: { applicantId: numb
     const b = bucket[m];
     if (!b) return;
     b.applications += 1;
-    if (!isNg(a.stage) && !a.duplicate) b.validApplications += 1;
     const isInterview = eventApplicantIds.has(a.id) || (/面接|内定|採用|稼働|入社|合格/.test(a.stage) && !/不合格（面接前）|不合格（書類）|書類選考/.test(a.stage));
+    // 面接まで進んだ場合は NG でも valid 扱い（面接設定 ≤ 有効を保証）
+    if (isInterview || (!isNg(a.stage) && !a.duplicate)) b.validApplications += 1;
     if (isInterview) b.interviewScheduled += 1;
     if (isOffered(a.stage)) b.offered += 1;
     if (isHired(a.stage)) b.hired += 1;
