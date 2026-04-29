@@ -779,7 +779,7 @@ const AISummarySection: React.FC<{
   onGenerate: () => void;
   compareEnabled: boolean;
 }> = ({ loading, error, summary, onGenerate, compareEnabled }) => (
-  <div style={{ ...card, background: 'linear-gradient(135deg, #FAF5FF 0%, #F0F9FF 100%)', borderColor: '#DDD6FE' }}>
+  <div style={{ borderRadius: '8px', padding: '1.25rem', background: 'linear-gradient(135deg, #FAF5FF 0%, #F0F9FF 100%)', border: '1px solid #DDD6FE' }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
       <h3 style={{ ...sectionTitle, margin: 0 }}>
         <Sparkles size={16} color="#7C3AED" />
@@ -1038,7 +1038,7 @@ const GoalSection: React.FC<{
 
   if (!goal && !editing) {
     return (
-      <div style={{ ...card, background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', borderColor: '#FDE68A' }}>
+      <div style={{ borderRadius: '8px', padding: '1.25rem', background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', border: '1px solid #FDE68A' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Target size={16} color="#D97706" />
