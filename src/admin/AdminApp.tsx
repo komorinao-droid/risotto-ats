@@ -1058,6 +1058,13 @@ const ClientDetail: React.FC<{
       screening: cd?.screeningCriteria,
       screeningRunsTotal: logs.filter((l) => l.action === 'AI評価実行').length,
       screeningRunsThisMonth: logs.filter((l) => l.action === 'AI評価実行' && l.timestamp.startsWith(monthPrefix)).length,
+      // 採用レポート関連
+      recruitmentGoalsCount: cd?.recruitmentGoals ? Object.keys(cd.recruitmentGoals).filter((k) => (cd.recruitmentGoals as any)[k] > 0).length : 0,
+      mediaCostMonthsCount: cd?.mediaCosts ? Object.keys(cd.mediaCosts).filter((m) => Object.values(cd.mediaCosts![m] || {}).some((v) => Number(v) > 0)).length : 0,
+      mediaCostTotal: cd?.mediaCosts ? Object.values(cd.mediaCosts).reduce((sum, monthly) => sum + Object.values(monthly || {}).reduce((s: number, v) => s + (Number(v) || 0), 0), 0) : 0,
+      mediaCostThisMonth: cd?.mediaCosts?.[monthPrefix] ? Object.values(cd.mediaCosts[monthPrefix]).reduce((s: number, v) => s + (Number(v) || 0), 0) : 0,
+      reportPdfDownloadsTotal: logs.filter((l) => l.action === 'PDF生成' || l.action === '納品資料生成' || l.action === 'AI総評付きPDF生成').length,
+      reportAiSummaryRunsTotal: logs.filter((l) => l.action === 'AI総評生成').length,
       _: c, // unused, kept to ensure deps are correct
     };
   }, [client, clientData, dataId]);
@@ -1210,6 +1217,63 @@ const ClientDetail: React.FC<{
               <SummaryTile label="評価実行（累計）" value={stats.screeningRunsTotal} icon={<Sparkles size={18} />} color="#9333EA" />
               <SummaryTile label="評価実行（今月）" value={stats.screeningRunsThisMonth} icon={<Sparkles size={18} />} color="#C026D3" />
             </div>
+          )}
+        </div>
+      )}
+
+      {/* 採用レポート 利用状況（親アカウントのみ・オプション契約中のみ） */}
+      {client.accountType === 'parent' && client.options?.recruitmentReport?.status === 'active' && (
+        <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #F97316' }}>
+          <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+            <FileText size={16} color="#F97316" />
+            採用レポート 利用状況
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+            <SummaryTile
+              label="採用目標 設定"
+              value={stats.recruitmentGoalsCount}
+              sub="ヶ月分"
+              color="#D97706"
+              icon={<FileText size={18} />}
+            />
+            <SummaryTile
+              label="媒体費 入力"
+              value={stats.mediaCostMonthsCount}
+              sub="ヶ月分"
+              color="#F97316"
+              icon={<FileText size={18} />}
+            />
+            <SummaryTile
+              label="媒体費 累計"
+              value={stats.mediaCostTotal > 0 ? `¥${stats.mediaCostTotal.toLocaleString('ja-JP')}` : '¥0'}
+              color="#9A3412"
+              icon={<FileText size={18} />}
+            />
+            <SummaryTile
+              label="今月の媒体費"
+              value={stats.mediaCostThisMonth > 0 ? `¥${stats.mediaCostThisMonth.toLocaleString('ja-JP')}` : '¥0'}
+              color="#EA580C"
+              icon={<FileText size={18} />}
+            />
+            <SummaryTile
+              label="PDF出力（累計）"
+              value={stats.reportPdfDownloadsTotal}
+              sub="回"
+              color="#7C3AED"
+              icon={<FileText size={18} />}
+            />
+            <SummaryTile
+              label="AI総評生成（累計）"
+              value={stats.reportAiSummaryRunsTotal}
+              sub="回"
+              color="#0EA5E9"
+              icon={<Sparkles size={18} />}
+            />
+          </div>
+          {stats.mediaCostMonthsCount === 0 && stats.recruitmentGoalsCount === 0 && (
+            <p style={{ marginTop: '0.875rem', fontSize: '0.75rem', color: '#9CA3AF' }}>
+              ※ クライアント側でまだ目標値・媒体費の入力がされていません。
+            </p>
           )}
         </div>
       )}

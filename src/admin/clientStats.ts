@@ -18,6 +18,13 @@ export interface ClientStats {
   screeningJobOverrides: number;
   screeningRunsTotal: number;
   screeningRunsThisMonth: number;
+  // 採用レポート関連
+  recruitmentGoalsCount: number;     // 目標が設定されている月数
+  mediaCostMonthsCount: number;      // 媒体費が入力されている月数
+  mediaCostTotal: number;            // 全期間の媒体費合計（円）
+  mediaCostThisMonth: number;        // 当月の媒体費（円）
+  reportPdfDownloadsTotal: number;   // 「納品資料(PDF)」「AI総評付きPDF」を開いた回数
+  reportAiSummaryRunsTotal: number;  // AI総評生成回数
   lastLoginAt: string | null;     // ISO timestamp or null
   lastActionAt: string | null;
 }
@@ -58,6 +65,15 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
   const screeningRunsTotal = logs.filter((l) => l.action === 'AI評価実行').length;
   const screeningRunsThisMonth = logs.filter((l) => l.action === 'AI評価実行' && l.timestamp.startsWith(month)).length;
 
+  // 採用レポート系
+  const recruitmentGoalsCount = data?.recruitmentGoals ? Object.keys(data.recruitmentGoals).filter((k) => data.recruitmentGoals![k] > 0).length : 0;
+  const mediaCostsByMonth = data?.mediaCosts || {};
+  const mediaCostMonthsCount = Object.keys(mediaCostsByMonth).filter((m) => Object.values(mediaCostsByMonth[m] || {}).some((v) => Number(v) > 0)).length;
+  const mediaCostTotal = Object.values(mediaCostsByMonth).reduce((sum, monthly) => sum + Object.values(monthly || {}).reduce((s, v) => s + (Number(v) || 0), 0), 0);
+  const mediaCostThisMonth = Object.values(mediaCostsByMonth[month] || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  const reportPdfDownloadsTotal = logs.filter((l) => l.action === 'PDF生成' || l.action === '納品資料生成' || l.action === 'AI総評付きPDF生成').length;
+  const reportAiSummaryRunsTotal = logs.filter((l) => l.action === 'AI総評生成').length;
+
   const lastLogin = logs.find((l) => l.category === 'auth' && l.action === 'ログイン');
   const lastAction = logs[0]; // logs are reverse-chronological in pushClientLog
 
@@ -84,6 +100,12 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
     screeningJobOverrides: screening?.byJob ? Object.keys(screening.byJob).length : 0,
     screeningRunsTotal,
     screeningRunsThisMonth,
+    recruitmentGoalsCount,
+    mediaCostMonthsCount,
+    mediaCostTotal,
+    mediaCostThisMonth,
+    reportPdfDownloadsTotal,
+    reportAiSummaryRunsTotal,
     lastLoginAt: lastLogin?.timestamp || null,
     lastActionAt: lastAction?.timestamp || null,
   };
