@@ -2138,15 +2138,40 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
   const expiryColor = { expired: '#DC2626', warn30: '#D97706', warn60: '#CA8A04', ok: '#059669', none: '#9CA3AF' };
   const expiryLabel = { expired: '期限切れ', warn30: '30日以内', warn60: '60日以内', ok: '正常', none: '未設定' };
 
-  const totalMonthly = parents
-    .filter(c => c.status === 'active')
-    .reduce((sum, c) => sum + PLAN_PRICES[c.plan], 0);
+  /** クライアントの全月額（プラン + 契約中オプション） */
+  const clientMonthlyTotal = (c: Client): { plan: number; options: number; total: number; optionDetails: { key: string; label: string; fee: number }[] } => {
+    const plan = PLAN_PRICES[c.plan];
+    const optionDetails: { key: string; label: string; fee: number }[] = [];
+    let options = 0;
+    if (c.options) {
+      Object.entries(c.options).forEach(([key, opt]) => {
+        if (opt && opt.status === 'active') {
+          const fee = opt.monthlyFee || 0;
+          options += fee;
+          optionDetails.push({ key, label: OPTION_LABELS[key as ClientOptionKey] || key, fee });
+        }
+      });
+    }
+    return { plan, options, total: plan + options, optionDetails };
+  };
+
+  const activeParents = parents.filter(c => c.status === 'active');
+  const totalMonthlyPlan = activeParents.reduce((sum, c) => sum + PLAN_PRICES[c.plan], 0);
+  const totalMonthlyOptions = activeParents.reduce((sum, c) => sum + clientMonthlyTotal(c).options, 0);
+  const totalMonthly = totalMonthlyPlan + totalMonthlyOptions;
 
   const planRevenue = (['trial', 'standard', 'professional', 'enterprise'] as const).map(p => ({
     plan: p,
     count: parents.filter(c => c.plan === p && c.status === 'active').length,
     revenue: parents.filter(c => c.plan === p && c.status === 'active').length * PLAN_PRICES[p],
   }));
+
+  // オプション別売上
+  const optionRevenue = (['aiScreening', 'recruitmentReport'] as ClientOptionKey[]).map(key => {
+    const list = activeParents.filter(c => c.options?.[key]?.status === 'active');
+    const revenue = list.reduce((sum, c) => sum + (c.options?.[key]?.monthlyFee || 0), 0);
+    return { key, label: OPTION_LABELS[key], count: list.length, revenue };
+  });
 
   const sectionTitle: React.CSSProperties = { margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 600, color: '#111827' };
 
@@ -2155,10 +2180,14 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
       <h2 style={{ margin: '0 0 1.5rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>契約・請求管理</h2>
 
       {/* 月次売上サマリー */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-        <div style={{ ...cardStyle, padding: '1.25rem', flex: '1 1 200px' }}>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <div style={{ ...cardStyle, padding: '1.25rem', flex: '1 1 240px' }}>
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>月次売上合計（推定）</div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, color: '#C2570C' }}>¥{totalMonthly.toLocaleString()}</div>
+          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', fontSize: '0.6875rem', color: '#6B7280' }}>
+            <span>プラン: <strong style={{ color: '#374151' }}>¥{totalMonthlyPlan.toLocaleString()}</strong></span>
+            <span>オプション: <strong style={{ color: '#9333EA' }}>¥{totalMonthlyOptions.toLocaleString()}</strong></span>
+          </div>
         </div>
         {planRevenue.map(r => (
           <div key={r.plan} style={{ ...cardStyle, padding: '1.25rem', flex: '1 1 160px', borderLeft: `4px solid ${PLAN_COLORS[r.plan]}` }}>
@@ -2167,6 +2196,21 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
             <div style={{ fontSize: '0.8125rem', color: PLAN_COLORS[r.plan], fontWeight: 600 }}>¥{r.revenue.toLocaleString()}</div>
           </div>
         ))}
+      </div>
+
+      {/* オプション別売上 */}
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', alignSelf: 'center', marginRight: '0.5rem' }}>オプション売上</div>
+        {optionRevenue.map(o => (
+          <div key={o.key} style={{ ...cardStyle, padding: '0.875rem 1.25rem', flex: '0 1 220px', borderLeft: `4px solid #9333EA` }}>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{o.label}</div>
+            <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{o.count}社</div>
+            <div style={{ fontSize: '1rem', color: '#9333EA', fontWeight: 700 }}>¥{o.revenue.toLocaleString()}</div>
+          </div>
+        ))}
+        {optionRevenue.every(o => o.count === 0) && (
+          <div style={{ fontSize: '0.8125rem', color: '#9CA3AF', alignSelf: 'center' }}>契約中のオプションはありません。</div>
+        )}
       </div>
 
       {/* 契約一覧 */}
@@ -2193,7 +2237,26 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
                 <tr key={c.id} style={{ backgroundColor: rowBg, borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>{c.companyName}</td>
                   <td style={{ padding: '0.75rem 1rem' }}><PlanBadge plan={c.plan} /></td>
-                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 600 }}>¥{PLAN_PRICES[c.plan].toLocaleString()}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                    {(() => {
+                      const m = clientMonthlyTotal(c);
+                      return (
+                        <>
+                          <div style={{ fontWeight: 700, color: '#111827' }}>¥{m.total.toLocaleString()}</div>
+                          {m.options > 0 && (
+                            <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginTop: '0.125rem' }}>
+                              プラン ¥{m.plan.toLocaleString()} + オプション ¥{m.options.toLocaleString()}
+                              {m.optionDetails.length > 0 && (
+                                <span style={{ marginLeft: '0.25rem', color: '#9333EA' }}>
+                                  ({m.optionDetails.map(o => o.label).join('・')})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>{c.contractStart || '-'}</td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>{c.contractEnd || '-'}</td>
                   <td style={{ padding: '0.75rem 1rem' }}>
