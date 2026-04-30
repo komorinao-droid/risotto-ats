@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, AlertTriangle, AlertCircle, Info, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Applicant } from '@/types';
+import { detectAlerts } from '@/utils/reports/alerts';
+import { hasActiveOption } from '@/utils/clientOptions';
 
 /* ------------------------------------------------------------------ */
 /*  Helper                                                            */
@@ -161,8 +163,16 @@ const StatusBarChart: React.FC<{ data: { name: string; count: number; color: str
 /* ------------------------------------------------------------------ */
 
 const Dashboard: React.FC = () => {
-  const { clientData } = useAuth();
+  const { client, clientData } = useAuth();
   const navigate = useNavigate();
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+
+  // アラート検出（採用レポートオプション契約中のみ）
+  const reportEnabled = hasActiveOption(client, 'recruitmentReport');
+  const alerts = useMemo(() => {
+    if (!reportEnabled || !clientData) return [];
+    return detectAlerts({ data: clientData }).filter((a) => !dismissedAlerts.has(a.id));
+  }, [reportEnabled, clientData, dismissedAlerts]);
 
   const applicants = clientData?.applicants ?? [];
   const events = clientData?.events ?? [];
@@ -258,6 +268,52 @@ const Dashboard: React.FC = () => {
           })}
         </span>
       </div>
+
+      {/* Alerts (採用レポートオプション契約時) */}
+      {alerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+          {alerts.map((alert) => {
+            const colors = alert.severity === 'critical'
+              ? { bg: '#FEE2E2', border: '#DC2626', icon: '#DC2626', title: '#991B1B' }
+              : alert.severity === 'warning'
+                ? { bg: '#FEF3C7', border: '#F59E0B', icon: '#D97706', title: '#92400E' }
+                : { bg: '#DBEAFE', border: '#3B82F6', icon: '#2563EB', title: '#1E40AF' };
+            const Icon = alert.severity === 'critical' ? AlertCircle : alert.severity === 'warning' ? AlertTriangle : Info;
+            return (
+              <div
+                key={alert.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  backgroundColor: colors.bg,
+                  border: `1px solid ${colors.border}`,
+                  borderLeft: `4px solid ${colors.border}`,
+                  borderRadius: '6px',
+                }}
+              >
+                <Icon size={18} color={colors.icon} style={{ marginTop: '0.125rem', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.875rem', color: colors.title, marginBottom: '0.125rem' }}>
+                    {alert.title}
+                  </div>
+                  <div style={{ fontSize: '0.8125rem', color: '#374151', lineHeight: 1.55 }}>
+                    {alert.detail}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDismissedAlerts((s) => new Set(s).add(alert.id))}
+                  title="このアラートを閉じる"
+                  style={{ flexShrink: 0, padding: '0.25rem', border: 'none', background: 'transparent', cursor: 'pointer', color: colors.icon }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div style={pageStyles.summaryGrid}>

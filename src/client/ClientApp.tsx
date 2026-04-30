@@ -20,6 +20,7 @@ import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
 // MediaCostManagement は RecruitmentReport 内のサブタブに統合済
+import ReportScheduleSettings from '@/client/pages/settings/ReportScheduleSettings';
 import RecruitmentReport from '@/client/pages/RecruitmentReport';
 import RecruitmentReportPrint from '@/client/pages/RecruitmentReportPrint';
 import { hasActiveOption } from '@/utils/clientOptions';
@@ -82,6 +83,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/progress" element={<ProgressBoard />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/reports" element={reportEnabled ? <RecruitmentReport /> : <ReportNotContractedNotice feature="採用レポート" />} />
+          <Route path="/settings/report-schedule" element={reportEnabled ? <ReportScheduleSettings /> : <ReportNotContractedNotice feature="採用レポート 定期配信" />} />
           <Route path="/statuses" element={<StatusManagement />} />
           <Route path="/sources" element={<SourceManagement />} />
           {/* /media-costs は採用レポート画面のサブタブに統合済。直リンク互換のためリダイレクト */}

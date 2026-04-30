@@ -25,6 +25,12 @@ export interface ClientStats {
   mediaCostThisMonth: number;        // 当月の媒体費（円）
   reportPdfDownloadsTotal: number;   // 「納品資料(PDF)」「AI総評付きPDF」を開いた回数
   reportAiSummaryRunsTotal: number;  // AI総評生成回数
+  // 採用パフォーマンス横断比較用
+  thisMonthHired: number;            // 当月採用数
+  thisMonthHireRate: number;         // 当月採用率 (採用/応募)
+  thisMonthCpa: number;              // 当月CPA (媒体費/応募)
+  thisMonthCph: number;              // 当月CPH (媒体費/採用)
+  alertsCount: number;               // アクティブなアラート数
   lastLoginAt: string | null;     // ISO timestamp or null
   lastActionAt: string | null;
 }
@@ -69,10 +75,28 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
   const recruitmentGoalsCount = data?.recruitmentGoals ? Object.keys(data.recruitmentGoals).filter((k) => data.recruitmentGoals![k] > 0).length : 0;
   const mediaCostsByMonth = data?.mediaCosts || {};
   const mediaCostMonthsCount = Object.keys(mediaCostsByMonth).filter((m) => Object.values(mediaCostsByMonth[m] || {}).some((v) => Number(v) > 0)).length;
-  const mediaCostTotal = Object.values(mediaCostsByMonth).reduce((sum, monthly) => sum + Object.values(monthly || {}).reduce((s, v) => s + (Number(v) || 0), 0), 0);
-  const mediaCostThisMonth = Object.values(mediaCostsByMonth[month] || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  const mediaCostTotal = Object.values(mediaCostsByMonth).reduce((sum, monthly) => sum + Object.values(monthly || {}).reduce((s: number, v) => s + (Number(v) || 0), 0), 0);
+  const mediaCostThisMonth = Object.values(mediaCostsByMonth[month] || {}).reduce((s: number, v) => s + (Number(v) || 0), 0);
   const reportPdfDownloadsTotal = logs.filter((l) => l.action === 'PDF生成' || l.action === '納品資料生成' || l.action === 'AI総評付きPDF生成').length;
   const reportAiSummaryRunsTotal = logs.filter((l) => l.action === 'AI総評生成').length;
+
+  // 当月パフォーマンス（横断比較用）
+  const thisMonthApps = applicants.filter((a) => a.date && a.date.startsWith(month));
+  const isHiredStage = (s: string): boolean => /採用|稼働|入社|内定承諾|内定【承諾】|面接合格|研没/.test(s);
+  const thisMonthHired = thisMonthApps.filter((a) => isHiredStage(a.stage)).length;
+  const thisMonthHireRate = thisMonthApps.length > 0 ? (thisMonthHired / thisMonthApps.length) * 100 : 0;
+  const thisMonthCpa = thisMonthApps.length > 0 && mediaCostThisMonth > 0 ? mediaCostThisMonth / thisMonthApps.length : 0;
+  const thisMonthCph = thisMonthHired > 0 && mediaCostThisMonth > 0 ? mediaCostThisMonth / thisMonthHired : 0;
+  // アラート数: 当月応募が前月の半分以下、または採用0
+  const prevMonthYM = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const prevMonthApps = applicants.filter((a) => a.date && a.date.startsWith(prevMonthYM));
+  let alertsCount = 0;
+  if (prevMonthApps.length >= 5 && thisMonthApps.length > 0 && thisMonthApps.length < prevMonthApps.length * 0.5) alertsCount += 1;
+  if (thisMonthApps.length >= 5 && thisMonthHired === 0) alertsCount += 1;
 
   const lastLogin = logs.find((l) => l.category === 'auth' && l.action === 'ログイン');
   const lastAction = logs[0]; // logs are reverse-chronological in pushClientLog
@@ -106,6 +130,11 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
     mediaCostThisMonth,
     reportPdfDownloadsTotal,
     reportAiSummaryRunsTotal,
+    thisMonthHired,
+    thisMonthHireRate,
+    thisMonthCpa,
+    thisMonthCph,
+    alertsCount,
     lastLoginAt: lastLogin?.timestamp || null,
     lastActionAt: lastAction?.timestamp || null,
   };

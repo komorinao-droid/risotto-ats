@@ -113,6 +113,16 @@ export interface Applicant {
   chatAnswers: ChatAnswer[];
   cancelledInterviews?: CancelledInterview[];
   screening?: ScreeningResult;
+  /** ステージ変更履歴（リードタイム分析用）。新しい順または古い順（実装側で時刻順ソート）。 */
+  stageHistory?: StageHistoryEntry[];
+}
+
+/** ステージ変更1件分のスナップショット */
+export interface StageHistoryEntry {
+  /** 変更後のステージ名 (Status.name) */
+  stage: string;
+  /** ISO 8601 タイムスタンプ ("2026-04-30T09:30:00.000Z") */
+  changedAt: string;
 }
 
 // キャンセルされた面接履歴
@@ -447,4 +457,28 @@ export interface ClientData {
   recruitmentGoals?: { [yearMonth: string]: number };
   /** 媒体別月次費用（YYYY-MM → 媒体名 → 費用円）。レポートのCPA/CPH計算に使用。 */
   mediaCosts?: { [yearMonth: string]: { [sourceName: string]: number } };
+  /** レポート定期配信設定 */
+  reportSchedule?: ReportScheduleSetting;
+}
+
+/** レポート定期配信設定 */
+export interface ReportScheduleSetting {
+  enabled: boolean;
+  /** 配信頻度 */
+  frequency: 'monthly' | 'biweekly' | 'weekly';
+  /** 月次配信の場合の日付 (1-28)。週次/隔週は曜日 (0=日, 1=月, ...) */
+  dayOfMonth?: number;
+  dayOfWeek?: number;
+  /** 配信時刻 'HH:MM' */
+  time?: string;
+  /** 配信先メールアドレス（複数可） */
+  recipients: string[];
+  /** 配信時に使う期間プリセット */
+  rangePreset: 'lastMonth' | 'lastQuarter' | 'lastHalf';
+  /** AI総評を含めるか */
+  includeAi: boolean;
+  /** 直近の配信実行履歴 */
+  lastRunAt?: string;        // ISO timestamp
+  lastRunStatus?: 'success' | 'failed';
+  lastRunError?: string;
 }

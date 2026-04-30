@@ -538,6 +538,109 @@ const BarChart: React.FC<{ data: { label: string; value: number; color: string }
 /* ============================================================
    ダッシュボード
    ============================================================ */
+/* ============================================================
+   採用レポート パフォーマンス横断比較
+   ============================================================ */
+const ReportPerformanceCompare: React.FC<{
+  clients: Client[];
+  statsMap: { [id: string]: ClientStats };
+  onNavigate: (view: string, id?: string) => void;
+}> = ({ clients, statsMap, onNavigate }) => {
+  const [sortKey, setSortKey] = useState<'hired' | 'hireRate' | 'cph' | 'alerts'>('alerts');
+
+  // 採用レポートオプション契約中の親アカウントだけ抽出
+  const targets = clients
+    .filter((c) => c.accountType === 'parent' && c.options?.recruitmentReport?.status === 'active')
+    .map((c) => ({ client: c, stats: statsMap[c.id] }))
+    .filter((row) => row.stats);
+
+  if (targets.length === 0) return null;
+
+  const sorted = [...targets].sort((a, b) => {
+    if (sortKey === 'hired') return b.stats.thisMonthHired - a.stats.thisMonthHired;
+    if (sortKey === 'hireRate') return b.stats.thisMonthHireRate - a.stats.thisMonthHireRate;
+    if (sortKey === 'cph') {
+      const av = a.stats.thisMonthCph || Number.POSITIVE_INFINITY;
+      const bv = b.stats.thisMonthCph || Number.POSITIVE_INFINITY;
+      return av - bv;
+    }
+    return b.stats.alertsCount - a.stats.alertsCount;
+  });
+
+  const yen = (n: number) => n > 0 ? `¥${Math.round(n).toLocaleString('ja-JP')}` : '-';
+  const cellStyle: React.CSSProperties = { padding: '0.625rem 0.75rem', borderBottom: '1px solid #F3F4F6', fontSize: '0.8125rem' };
+  const thStyle: React.CSSProperties = { padding: '0.625rem 0.75rem', backgroundColor: '#FFF7ED', color: '#9A3412', fontWeight: 700, fontSize: '0.75rem', textAlign: 'left', borderBottom: '1px solid #FED7AA', cursor: 'pointer' };
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '2rem', borderTop: '3px solid #F97316' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
+        <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+          <FileText size={16} color="#F97316" />
+          採用レポート パフォーマンス横断比較（当月）
+        </h3>
+        <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>
+          {targets.length}社 / アラート総数 {targets.reduce((s, t) => s + t.stats.alertsCount, 0)}件
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={thStyle}>クライアント</th>
+              <th style={thStyle} onClick={() => setSortKey('alerts')}>アラート {sortKey === 'alerts' ? '▼' : ''}</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>当月応募</th>
+              <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => setSortKey('hired')}>当月採用 {sortKey === 'hired' ? '▼' : ''}</th>
+              <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => setSortKey('hireRate')}>採用率 {sortKey === 'hireRate' ? '▼' : ''}</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>当月媒体費</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>CPA</th>
+              <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => setSortKey('cph')}>CPH {sortKey === 'cph' ? '▼' : ''}</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>目標達成率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(({ client, stats }) => {
+              const goalCount = stats.recruitmentGoalsCount;
+              const goalRate = goalCount > 0 && stats.thisMonthHired >= 0 ? '-' : '-';
+              return (
+                <tr
+                  key={client.id}
+                  onClick={() => onNavigate('detail', client.id)}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#FFF7ED')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
+                >
+                  <td style={{ ...cellStyle, fontWeight: 600 }}>{client.companyName}</td>
+                  <td style={cellStyle}>
+                    {stats.alertsCount > 0 ? (
+                      <span style={{ display: 'inline-block', padding: '0.125rem 0.5rem', borderRadius: '999px', backgroundColor: '#FEE2E2', color: '#991B1B', fontSize: '0.75rem', fontWeight: 700 }}>
+                        ⚠ {stats.alertsCount}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#9CA3AF', fontSize: '0.75rem' }}>正常</span>
+                    )}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'right' }}>{stats.thisMonthApplicants}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right', fontWeight: 600, color: '#059669' }}>{stats.thisMonthHired}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right' }}>
+                    {stats.thisMonthApplicants > 0 ? `${stats.thisMonthHireRate.toFixed(1)}%` : '-'}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'right' }}>{yen(stats.mediaCostThisMonth)}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right', color: '#0EA5E9' }}>{yen(stats.thisMonthCpa)}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right', color: '#7C3AED', fontWeight: 600 }}>{yen(stats.thisMonthCph)}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right', color: '#9CA3AF' }}>{goalRate}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ marginTop: '0.75rem', fontSize: '0.6875rem', color: '#9CA3AF' }}>
+        ※ 行クリックでクライアント詳細を開く / カラムヘッダクリックでソート切替
+      </p>
+    </div>
+  );
+};
+
 const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: string) => void; statsMap: { [id: string]: ClientStats } }> = ({ clients, onNavigate, statsMap }) => {
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -623,6 +726,9 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
           )}
         </div>
       </div>
+
+      {/* 採用レポート パフォーマンス横断比較 */}
+      <ReportPerformanceCompare clients={clients} statsMap={statsMap} onNavigate={onNavigate} />
 
       {/* クライアント概要カード（カード一覧） */}
       <div style={{ ...cardStyle, padding: '1.25rem' }}>

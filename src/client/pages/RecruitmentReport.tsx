@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase, Target, AlertTriangle, GitBranch, Wallet } from 'lucide-react';
+import { FileText, BarChart3, ChevronRight, ChevronDown, Calendar, Building2, Megaphone, Users, Download, Printer, Sparkles, TrendingUp, TrendingDown, Minus, ArrowLeftRight, Briefcase, Target, AlertTriangle, GitBranch, Wallet, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { DatePreset, DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn, GoalProgress } from '@/utils/reports/types';
 import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/utils/reports/dateRange';
@@ -69,10 +69,10 @@ const RecruitmentReport: React.FC = () => {
   const initialTab = (() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('tab');
-    if (t === 'cost' || t === 'base' || t === 'source' || t === 'job' || t === 'age' || t === 'step') return t;
+    if (t === 'cost' || t === 'base' || t === 'source' || t === 'job' || t === 'age' || t === 'step' || t === 'leadtime') return t;
     return 'summary' as const;
   })();
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost'>(initialTab);
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost' | 'leadtime'>(initialTab);
   const [stepAxis, setStepAxis] = useState<'source' | 'base' | 'job'>('source');
   const [costMode, setCostMode] = useState<'analysis' | 'input'>('analysis');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
@@ -159,7 +159,7 @@ const RecruitmentReport: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6B7280' }}>データがありません。</div>;
   }
 
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal, cost } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal, cost, leadTime } = report;
   const overallMatrix: MatrixRow = { label: '全体', ...total };
 
   return (
@@ -315,6 +315,7 @@ const RecruitmentReport: React.FC = () => {
           ['job', '職種別', Briefcase],
           ['age', '年代分析', Users],
           ['cost', 'コスト分析', Wallet],
+          ['leadtime', 'リードタイム', Clock],
         ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
@@ -666,6 +667,44 @@ const RecruitmentReport: React.FC = () => {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ===== リードタイム分析 ===== */}
+      {section === 'leadtime' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {leadTime.overall.applicationToHired.count === 0 ? (
+            <div style={{ ...card, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+              <Clock size={32} color="#0EA5E9" style={{ margin: '0 auto 0.75rem' }} />
+              <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem', fontWeight: 700, color: '#111827' }}>リードタイム計測には履歴データが必要です</h3>
+              <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: 0, lineHeight: 1.6 }}>
+                応募者のステータスを変更すると履歴が記録され、<br />
+                応募→面接→内定→採用 までの平均日数が算出されます。<br />
+                （今後ステータス変更を行うことで自動的にデータが蓄積されます）
+              </p>
+            </div>
+          ) : (
+            <>
+              <div style={card}>
+                <h3 style={sectionTitle}>
+                  <Clock size={16} color="#0EA5E9" />
+                  リードタイム（全体）
+                </h3>
+                <p style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: 0 }}>
+                  応募から各ステージ到達までの平均日数。RPO代行の「速度」を可視化する指標。
+                </p>
+                <LeadTimeTiles col={leadTime.overall} />
+              </div>
+              <div style={card}>
+                <h3 style={sectionTitle}>媒体別 リードタイム</h3>
+                <LeadTimeTable rows={leadTime.bySource} />
+              </div>
+              <div style={card}>
+                <h3 style={sectionTitle}>拠点別 リードタイム</h3>
+                <LeadTimeTable rows={leadTime.byBase} />
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1297,6 +1336,65 @@ const Stat: React.FC<{ label: string; value: string; color: string }> = ({ label
     <div style={{ fontSize: '1.125rem', fontWeight: 700, color }}>{value}</div>
   </div>
 );
+
+/* ---- リードタイム関連サブコンポーネント ---- */
+const LeadTimeTiles: React.FC<{ col: import('@/utils/reports/types').LeadTimeColumn }> = ({ col }) => {
+  const tiles: { label: string; stats: import('@/utils/reports/types').LeadTimeStats; color: string }[] = [
+    { label: '応募 → 面接設定', stats: col.applicationToInterview, color: '#3B82F6' },
+    { label: '面接設定 → 内定', stats: col.interviewToOffer, color: '#A855F7' },
+    { label: '内定 → 採用', stats: col.offerToHired, color: '#059669' },
+    { label: '応募 → 採用 (合計)', stats: col.applicationToHired, color: '#F97316' },
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.625rem' }}>
+      {tiles.map(({ label, stats, color }) => (
+        <div key={label} style={{ padding: '0.875rem 1rem', backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '6px', borderLeft: `3px solid ${color}` }}>
+          <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginBottom: '0.25rem' }}>{label}</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', lineHeight: 1.1 }}>
+            {stats.count > 0 ? `${stats.avgDays.toFixed(1)}日` : '-'}
+          </div>
+          {stats.count > 0 && (
+            <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.25rem' }}>
+              中央値 {stats.medianDays}日 / 最速 {stats.minDays}日 / 最遅 {stats.maxDays}日 (n={stats.count})
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const LeadTimeTable: React.FC<{ rows: import('@/utils/reports/types').LeadTimeColumn[] }> = ({ rows }) => {
+  const fmtDays = (s: import('@/utils/reports/types').LeadTimeStats) => s.count > 0 ? `${s.avgDays.toFixed(1)}日 (n=${s.count})` : '-';
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+        <thead>
+          <tr>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>対象</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>応募→面接</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>面接→内定</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>内定→採用</th>
+            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>応募→採用</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={5} style={{ padding: '1rem', textAlign: 'center', color: '#9CA3AF' }}>データなし</td></tr>
+          ) : rows.map((r) => (
+            <tr key={r.label}>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{r.label}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.applicationToInterview)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.interviewToOffer)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.offerToHired)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', fontWeight: 600, color: '#F97316' }}>{fmtDays(r.applicationToHired)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 /* ---- コスト関連サブコンポーネント ---- */
 const CostTile: React.FC<{ label: string; value: string; sub?: string; color: string }> = ({ label, value, sub, color }) => (

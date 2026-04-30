@@ -614,7 +614,16 @@ const InfoTab: React.FC<InfoTabProps> = ({
 
   function handleStatusChange(newStatus: string) {
     const prev = applicant.stage;
-    updateApplicant((a) => ({ ...a, stage: newStatus, subStatus: '' }));
+    if (prev === newStatus) return;
+    updateApplicant((a) => {
+      const history = [...(a.stageHistory || [])];
+      // 初回変更時、応募日 = 初期ステージの設定
+      if (history.length === 0 && a.stage) {
+        history.push({ stage: a.stage, changedAt: new Date(a.date || Date.now()).toISOString() });
+      }
+      history.push({ stage: newStatus, changedAt: new Date().toISOString() });
+      return { ...a, stage: newStatus, subStatus: '', stageHistory: history };
+    });
     logAction('applicant', 'ステータス変更', applicant.name || String(applicant.id), `${prev} → ${newStatus}`);
   }
 

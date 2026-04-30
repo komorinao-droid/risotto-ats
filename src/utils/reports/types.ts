@@ -92,6 +92,36 @@ export interface RecruitmentReport {
   stepFunnel: StepFunnelData;                    // ステップ別到達率/通過率
   goal?: GoalProgress;                           // 採用目標達成率（期間内に該当目標があれば）
   cost?: CostBreakdown;                          // 媒体費用×ROI分析（費用入力済みの場合）
+  leadTime: LeadTimeBreakdown;                   // リードタイム分析（応募→面接→内定→採用）
+}
+
+/** リードタイム分析: 区間ごとの平均/中央値/最速/最遅日数 */
+export interface LeadTimeStats {
+  /** サンプル数（その区間に到達した応募者数） */
+  count: number;
+  /** 平均日数 */
+  avgDays: number;
+  /** 中央値 */
+  medianDays: number;
+  /** 最速 */
+  minDays: number;
+  /** 最遅 */
+  maxDays: number;
+}
+
+export interface LeadTimeColumn {
+  label: string;
+  applicationToInterview: LeadTimeStats;  // 応募 → 面接設定
+  interviewToOffer: LeadTimeStats;        // 面接設定 → 内定
+  offerToHired: LeadTimeStats;            // 内定 → 採用
+  applicationToHired: LeadTimeStats;      // 応募 → 採用（合計）
+}
+
+export interface LeadTimeBreakdown {
+  overall: LeadTimeColumn;
+  bySource: LeadTimeColumn[];
+  byBase: LeadTimeColumn[];
+  byJob: LeadTimeColumn[];
 }
 
 /** 媒体費用×応募/採用 の費用対効果 */

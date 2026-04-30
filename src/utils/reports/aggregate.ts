@@ -29,6 +29,7 @@ import type {
 } from './types';
 import { inRange } from './dateRange';
 import { getStatusCategory } from '@/utils/statusCategory';
+import { calcLeadTimeBreakdown } from './leadTime';
 
 // =============================================================
 // ステータス分類ユーティリティ
@@ -622,5 +623,6 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     stepFunnel: calcStepFunnel(applicants, events, statuses),
     goal: calcGoalProgress(applicants, range, data.recruitmentGoals, statuses),
     cost: calcCostBreakdown(applicants, range, data.mediaCosts, statuses),
+    leadTime: calcLeadTimeBreakdown(applicants, events, statuses),
   };
 }
