@@ -453,20 +453,45 @@ const RecruitmentReportPrint: React.FC = () => {
       )}
 
       {/* 拠点×媒体 コスト分析 */}
-      {cost && cost.byBaseSource.length > 1 && (
-        <PageWrap pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">拠点×媒体 費用対効果</h2>
-          <p className="lead">媒体費は拠点別の応募者比率で按分。拠点ごとの媒体投資効率を比較。</p>
-          <div className="auto-grid lg">
-            {cost.byBaseSource.filter(b => b.rows.length > 0).map(({ base, rows }) => (
-              <div key={base} className="cost-base-block">
-                <h3 className="sub-h center">{base}</h3>
-                <CostMatrixTable rows={rows} compact />
-              </div>
-            ))}
-          </div>
-        </PageWrap>
-      )}
+      {cost && cost.byBaseSource.length > 1 && (() => {
+        const filtered = cost.byBaseSource.filter(b => b.rows.length > 0);
+        // 1ページあたりの拠点数を行数で動的に決定:
+        //   - 行数(媒体数)合計 + 各拠点ヘッダー1 が 1ページの最大行数(=おおよそ12行)に収まるように分割
+        //   - 最低でも2拠点/ページ(2列レイアウト)、最大4拠点/ページ
+        const maxRowsPerPage = 14; // 1ページに収まるテーブル行数の目安
+        const groups: typeof filtered[] = [];
+        let current: typeof filtered = [];
+        let currentRows = 0;
+        filtered.forEach((b) => {
+          const rowsThisBase = b.rows.length + 2; // ヘッダー＋合計行
+          if (current.length > 0 && (currentRows + rowsThisBase > maxRowsPerPage || current.length >= 4)) {
+            groups.push(current);
+            current = [];
+            currentRows = 0;
+          }
+          current.push(b);
+          currentRows += rowsThisBase;
+        });
+        if (current.length > 0) groups.push(current);
+
+        return groups.map((group, gIdx) => (
+          <PageWrap key={`base-cost-${gIdx}`} pageNum={null} clientName={clientName} range={range}>
+            <h2 className="section-h">
+              拠点×媒体 費用対効果
+              {groups.length > 1 ? ` (${gIdx + 1}/${groups.length})` : ''}
+            </h2>
+            <p className="lead">媒体費は拠点別の応募者比率で按分。拠点ごとの媒体投資効率を比較。</p>
+            <div className="auto-grid lg">
+              {group.map(({ base, rows }) => (
+                <div key={base} className="cost-base-block">
+                  <h3 className="sub-h center">{base}</h3>
+                  <CostMatrixTable rows={rows} compact />
+                </div>
+              ))}
+            </div>
+          </PageWrap>
+        ));
+      })()}
 
       {/* ===== 各支社×媒体別 (各支社1ページ。表が大きいので統合せず) ===== */}
       {byBaseSource.filter(({ rows }) => rows.length > 0).map(({ base, rows }) => (
@@ -524,9 +549,9 @@ const RecruitmentReportPrint: React.FC = () => {
         <Annotation rows={byAge} entityLabel="全社" />
       </PageWrap>
 
-      {/* 各支社×年代別 (auto-fit: ブロック幅120mm以上で並べられるだけ並べる) */}
+      {/* 各支社×年代別 (1ページ最大2拠点、表が大きいため固定で2分割) */}
       {(() => {
-        const groups = chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 4);
+        const groups = chunkN(byBaseAge.filter(({ rows }) => rows.length > 0), 2);
         return groups.map((group, gIdx) => (
           <PageWrap key={`base-age-${gIdx}`} pageNum={null} clientName={clientName} range={range}>
             <h2 className="section-h">支社×年代別 {groups.length > 1 ? `(${gIdx + 1}/${groups.length})` : ''}</h2>
@@ -559,7 +584,7 @@ const RecruitmentReportPrint: React.FC = () => {
       </PageWrap>
 
       {/* 媒体×年代別（auto-fit: ブロック幅60mm以上で並べられるだけ並べる） */}
-      {chunkN(topSourceAge, 8).map((group, idx, groups) => (
+      {chunkN(topSourceAge, 4).map((group, idx, groups) => (
         <PageWrap key={`grp-${idx}`} pageNum={null} clientName={clientName} range={range}>
           <h2 className="section-h">【媒体別】年代別に関して {groups.length > 1 ? `(${idx + 1}/${groups.length})` : ''}</h2>
           <div className="auto-grid sm">
