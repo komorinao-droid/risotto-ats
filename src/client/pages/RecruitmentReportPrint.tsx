@@ -966,47 +966,81 @@ const FunnelChart: React.FC<{ total: any }> = ({ total }) => {
   );
 };
 
-const FunnelMatrix: React.FC<{ rows: MatrixRow[]; highlightFirst?: boolean; headerLabel: string }> = ({ rows, highlightFirst, headerLabel }) => (
-  <table className="funnel-matrix">
-    <thead>
-      <tr>
-        <th rowSpan={2} className="label-col">{headerLabel}</th>
-        <th rowSpan={2}>応募数</th>
-        <th rowSpan={2}>有効応募数</th>
-        <th rowSpan={2}>面接設定数</th>
-        <th rowSpan={2}>内定数</th>
-        <th rowSpan={2}>採用数</th>
-        <th rowSpan={2}>稼働数</th>
-        <th colSpan={5} className="rate-group-h">通過率</th>
-      </tr>
-      <tr>
-        <th>応募〜<br />有効応募率</th>
-        <th>有効応募〜<br />面接設定率</th>
-        <th>応募〜<br />内定数</th>
-        <th>応募〜<br />採用率</th>
-        <th>応募〜<br />稼働率</th>
-      </tr>
-    </thead>
-    <tbody>
-      {rows.map((r, i) => (
-        <tr key={r.label} className={highlightFirst && i === 0 ? 'overall-row' : ''}>
-          <td className="label-col">{r.label}</td>
-          <td className="num">{fmt(r.applications)}</td>
-          <td className="num">{fmt(r.validApplications)}</td>
-          <td className="num">{fmt(r.interviewScheduled)}</td>
-          <td className="num">{fmt(r.offered)}</td>
-          <td className="num accent">{fmt(r.hired)}</td>
-          <td className="num">{fmt(r.active)}</td>
-          <td className="num rate">{pct(r.validRate)}</td>
-          <td className="num rate">{pct(r.validToInterviewRate)}</td>
-          <td className="num rate">{pct(r.applications > 0 ? (r.offered / r.applications) * 100 : 0)}</td>
-          <td className="num rate">{pct(r.applicationToHireRate)}</td>
-          <td className="num rate">{pct(r.applicationToActiveRate)}</td>
+const FunnelMatrix: React.FC<{ rows: MatrixRow[]; highlightFirst?: boolean; headerLabel: string }> = ({ rows, highlightFirst, headerLabel }) => {
+  // highlightFirst が true の場合、最初の行が既に「全体」なので合計行は不要
+  // それ以外（媒体別、支社×媒体別など）は合計行を末尾に追加
+  const showTotal = !highlightFirst && rows.length > 0;
+  const totals = showTotal ? rows.reduce(
+    (acc, r) => ({
+      applications: acc.applications + r.applications,
+      validApplications: acc.validApplications + r.validApplications,
+      interviewScheduled: acc.interviewScheduled + r.interviewScheduled,
+      offered: acc.offered + r.offered,
+      hired: acc.hired + r.hired,
+      active: acc.active + r.active,
+    }),
+    { applications: 0, validApplications: 0, interviewScheduled: 0, offered: 0, hired: 0, active: 0 },
+  ) : null;
+  const rate = (n: number, d: number) => d > 0 ? (n / d) * 100 : 0;
+
+  return (
+    <table className="funnel-matrix">
+      <thead>
+        <tr>
+          <th rowSpan={2} className="label-col">{headerLabel}</th>
+          <th rowSpan={2}>応募数</th>
+          <th rowSpan={2}>有効応募数</th>
+          <th rowSpan={2}>面接設定数</th>
+          <th rowSpan={2}>内定数</th>
+          <th rowSpan={2}>採用数</th>
+          <th rowSpan={2}>稼働数</th>
+          <th colSpan={5} className="rate-group-h">通過率</th>
         </tr>
-      ))}
-    </tbody>
-  </table>
-);
+        <tr>
+          <th>応募〜<br />有効応募率</th>
+          <th>有効応募〜<br />面接設定率</th>
+          <th>応募〜<br />内定数</th>
+          <th>応募〜<br />採用率</th>
+          <th>応募〜<br />稼働率</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={r.label} className={highlightFirst && i === 0 ? 'overall-row' : ''}>
+            <td className="label-col">{r.label}</td>
+            <td className="num">{fmt(r.applications)}</td>
+            <td className="num">{fmt(r.validApplications)}</td>
+            <td className="num">{fmt(r.interviewScheduled)}</td>
+            <td className="num">{fmt(r.offered)}</td>
+            <td className="num accent">{fmt(r.hired)}</td>
+            <td className="num">{fmt(r.active)}</td>
+            <td className="num rate">{pct(r.validRate)}</td>
+            <td className="num rate">{pct(r.validToInterviewRate)}</td>
+            <td className="num rate">{pct(r.applications > 0 ? (r.offered / r.applications) * 100 : 0)}</td>
+            <td className="num rate">{pct(r.applicationToHireRate)}</td>
+            <td className="num rate">{pct(r.applicationToActiveRate)}</td>
+          </tr>
+        ))}
+        {totals && (
+          <tr className="overall-row">
+            <td className="label-col">合計</td>
+            <td className="num">{fmt(totals.applications)}</td>
+            <td className="num">{fmt(totals.validApplications)}</td>
+            <td className="num">{fmt(totals.interviewScheduled)}</td>
+            <td className="num">{fmt(totals.offered)}</td>
+            <td className="num accent">{fmt(totals.hired)}</td>
+            <td className="num">{fmt(totals.active)}</td>
+            <td className="num rate">{pct(rate(totals.validApplications, totals.applications))}</td>
+            <td className="num rate">{pct(rate(totals.interviewScheduled, totals.validApplications))}</td>
+            <td className="num rate">{pct(rate(totals.offered, totals.applications))}</td>
+            <td className="num rate">{pct(rate(totals.hired, totals.applications))}</td>
+            <td className="num rate">{pct(rate(totals.active, totals.applications))}</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+};
 
 const AgeFunnelTable: React.FC<{ rows: AgeBreakdown[] }> = ({ rows }) => {
   const totalApps = rows.reduce((s, r) => s + r.applications, 0);

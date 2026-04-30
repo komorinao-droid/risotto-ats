@@ -1080,6 +1080,36 @@ const MatrixTable: React.FC<{ rows: MatrixRow[]; highlightFirst?: boolean; overa
               </tr>
             );
           })}
+          {/* highlightFirst でない場合（媒体別、支社×媒体別 など）は末尾に合計行を追加 */}
+          {!highlightFirst && rows.length > 0 && (() => {
+            const totals = rows.reduce(
+              (acc, r) => ({
+                applications: acc.applications + r.applications,
+                validApplications: acc.validApplications + r.validApplications,
+                interviewScheduled: acc.interviewScheduled + r.interviewScheduled,
+                offered: acc.offered + r.offered,
+                hired: acc.hired + r.hired,
+                active: acc.active + r.active,
+              }),
+              { applications: 0, validApplications: 0, interviewScheduled: 0, offered: 0, hired: 0, active: 0 },
+            );
+            const r = (n: number, d: number) => d > 0 ? (n / d) * 100 : 0;
+            return (
+              <tr style={{ backgroundColor: '#FFF7ED' }}>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#9A3412' }}>合計</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(totals.applications)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(totals.validApplications)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(totals.interviewScheduled)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(totals.offered)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#059669' }}>{fmt(totals.hired)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(totals.active)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#6B7280' }}>{pct(r(totals.validApplications, totals.applications))}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#6B7280' }}>{pct(r(totals.interviewScheduled, totals.validApplications))}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#6B7280' }}>{pct(r(totals.hired, totals.applications))}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#6B7280' }}>{pct(r(totals.active, totals.applications))}</td>
+              </tr>
+            );
+          })()}
         </tbody>
       </table>
       {overall && (
