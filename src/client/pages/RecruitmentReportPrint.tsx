@@ -867,6 +867,12 @@ const RankBlock: React.FC<{ title: string; rows: MatrixRow[]; metricKey: keyof M
 
 const CostMatrixTable: React.FC<{ rows: import('@/utils/reports/types').CostRow[]; compact?: boolean }> = ({ rows, compact }) => {
   const yen = (n: number) => n > 0 ? '¥' + Math.round(n).toLocaleString('ja-JP') : '-';
+  const totals = rows.reduce(
+    (acc, r) => ({ cost: acc.cost + r.cost, applications: acc.applications + r.applications, hired: acc.hired + r.hired }),
+    { cost: 0, applications: 0, hired: 0 },
+  );
+  const totalCpa = totals.applications > 0 ? totals.cost / totals.applications : 0;
+  const totalCph = totals.hired > 0 ? totals.cost / totals.hired : 0;
   return (
     <table className={`cost-matrix ${compact ? 'compact' : ''}`}>
       <thead>
@@ -875,23 +881,35 @@ const CostMatrixTable: React.FC<{ rows: import('@/utils/reports/types').CostRow[
           <th>費用</th>
           <th>応募</th>
           <th>採用</th>
-          <th>CPA</th>
-          <th>CPH</th>
+          <th>CPA<br/><span style={{ fontSize: '7pt', fontWeight: 400, opacity: 0.85 }}>(応募単価)</span></th>
+          <th>CPH<br/><span style={{ fontSize: '7pt', fontWeight: 400, opacity: 0.85 }}>(採用単価)</span></th>
         </tr>
       </thead>
       <tbody>
         {rows.length === 0 ? (
           <tr><td colSpan={6} style={{ textAlign: 'center', color: '#9CA3AF' }}>データなし</td></tr>
-        ) : rows.map((r) => (
-          <tr key={r.source}>
-            <td className="cost-label-col">{r.source}</td>
-            <td className="num cost-amount">{yen(r.cost)}</td>
-            <td className="num">{r.applications}</td>
-            <td className="num accent">{r.hired}</td>
-            <td className="num cost-cpa">{yen(r.cpa)}</td>
-            <td className="num cost-cph">{yen(r.cph)}</td>
-          </tr>
-        ))}
+        ) : (
+          <>
+            {rows.map((r) => (
+              <tr key={r.source}>
+                <td className="cost-label-col">{r.source}</td>
+                <td className="num cost-amount">{yen(r.cost)}</td>
+                <td className="num">{r.applications}</td>
+                <td className="num accent">{r.hired}</td>
+                <td className="num cost-cpa">{yen(r.cpa)}</td>
+                <td className="num cost-cph">{yen(r.cph)}</td>
+              </tr>
+            ))}
+            <tr className="cost-total-row">
+              <td className="cost-label-col">合計</td>
+              <td className="num cost-amount">{yen(totals.cost)}</td>
+              <td className="num">{totals.applications}</td>
+              <td className="num accent">{totals.hired}</td>
+              <td className="num cost-cpa">{yen(totalCpa)}</td>
+              <td className="num cost-cph">{yen(totalCph)}</td>
+            </tr>
+          </>
+        )}
       </tbody>
     </table>
   );
@@ -1576,6 +1594,8 @@ const PrintStyles: React.FC = () => (
     .cost-matrix td.cost-cph { color: #7c3aed; font-weight: 700; }
     .cost-matrix td.cost-label-col { font-weight: 600; }
     .cost-matrix.compact th, .cost-matrix.compact td { padding: 1.5mm 2mm; font-size: 8pt; }
+    .cost-matrix .cost-total-row td { background: #ffedd5; font-weight: 700; }
+    .cost-matrix .cost-total-row td.cost-label-col { color: #9a3412; }
     .cost-base-block { display: flex; flex-direction: column; }
 
     /* AI 総評 */

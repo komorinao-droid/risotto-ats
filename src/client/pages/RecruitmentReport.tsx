@@ -1422,32 +1422,57 @@ const CostTile: React.FC<{ label: string; value: string; sub?: string; color: st
 
 const CostTable: React.FC<{ rows: import('@/utils/reports/types').CostRow[]; compact?: boolean }> = ({ rows, compact }) => {
   const yen = (n: number) => n > 0 ? `¥${Math.round(n).toLocaleString('ja-JP')}` : '-';
+  // 合計を計算
+  const totals = rows.reduce(
+    (acc, r) => ({
+      cost: acc.cost + r.cost,
+      applications: acc.applications + r.applications,
+      hired: acc.hired + r.hired,
+    }),
+    { cost: 0, applications: 0, hired: 0 }
+  );
+  const totalCpa = totals.applications > 0 ? totals.cost / totals.applications : 0;
+  const totalCph = totals.hired > 0 ? totals.cost / totals.hired : 0;
+  const thStyle: React.CSSProperties = { padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' };
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: compact ? '0.75rem' : '0.8125rem' }}>
         <thead>
           <tr>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'left', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>媒体</th>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>費用</th>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>応募</th>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>採用</th>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>CPA(応募単価)</th>
-            <th style={{ padding: '0.5rem 0.625rem', backgroundColor: '#F9FAFB', color: '#6B7280', fontWeight: 600, textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontSize: '0.75rem' }}>CPH(採用単価)</th>
+            <th style={{ ...thStyle, textAlign: 'left' }}>媒体</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>費用</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>応募</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>採用</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>CPA<br /><span style={{ fontSize: '0.6875rem', fontWeight: 400, color: '#9CA3AF' }}>(応募単価)</span></th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>CPH<br /><span style={{ fontSize: '0.6875rem', fontWeight: 400, color: '#9CA3AF' }}>(採用単価)</span></th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr><td colSpan={6} style={{ padding: '1rem', textAlign: 'center', color: '#9CA3AF' }}>データなし</td></tr>
-          ) : rows.map((r) => (
-            <tr key={r.source}>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{r.source}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#9A3412', fontWeight: 600 }}>{yen(r.cost)}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{r.applications}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#059669', fontWeight: 600 }}>{r.hired}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#0EA5E9' }}>{yen(r.cpa)}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#7C3AED', fontWeight: 600 }}>{yen(r.cph)}</td>
-            </tr>
-          ))}
+          ) : (
+            <>
+              {rows.map((r) => (
+                <tr key={r.source}>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{r.source}</td>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#9A3412', fontWeight: 600 }}>{yen(r.cost)}</td>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{r.applications}</td>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#059669', fontWeight: 600 }}>{r.hired}</td>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#0EA5E9' }}>{yen(r.cpa)}</td>
+                  <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', color: '#7C3AED', fontWeight: 600 }}>{yen(r.cph)}</td>
+                </tr>
+              ))}
+              {/* 合計行 */}
+              <tr style={{ backgroundColor: '#FFF7ED' }}>
+                <td style={{ padding: '0.5rem 0.625rem', fontWeight: 700, color: '#9A3412' }}>合計</td>
+                <td style={{ padding: '0.5rem 0.625rem', textAlign: 'right', fontWeight: 700, color: '#9A3412' }}>{yen(totals.cost)}</td>
+                <td style={{ padding: '0.5rem 0.625rem', textAlign: 'right', fontWeight: 700, color: '#1F2937' }}>{totals.applications}</td>
+                <td style={{ padding: '0.5rem 0.625rem', textAlign: 'right', fontWeight: 700, color: '#059669' }}>{totals.hired}</td>
+                <td style={{ padding: '0.5rem 0.625rem', textAlign: 'right', fontWeight: 700, color: '#0EA5E9' }}>{yen(totalCpa)}</td>
+                <td style={{ padding: '0.5rem 0.625rem', textAlign: 'right', fontWeight: 700, color: '#7C3AED' }}>{yen(totalCph)}</td>
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
     </div>
