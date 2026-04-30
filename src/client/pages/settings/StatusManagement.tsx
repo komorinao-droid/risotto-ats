@@ -126,9 +126,19 @@ const StatusManagement: React.FC = () => {
     updateClientData((data) => ({
       ...data,
       statuses: data.statuses.filter((s) => s.id !== id),
-      applicants: data.applicants.map((a) =>
-        a.stage === status.name ? { ...a, stage: '', subStatus: '' } : a
-      ),
+      applicants: data.applicants.map((a) => {
+        const isMatchedStage = a.stage === status.name;
+        // stageHistory からも削除されたステータスのエントリを除去（孤立参照防止）
+        const cleanedHistory = a.stageHistory && a.stageHistory.length > 0
+          ? a.stageHistory.filter((h) => h.stage !== status.name)
+          : a.stageHistory;
+        if (!isMatchedStage && cleanedHistory === a.stageHistory) return a;
+        return {
+          ...a,
+          ...(isMatchedStage ? { stage: '', subStatus: '' } : {}),
+          stageHistory: cleanedHistory,
+        };
+      }),
     }));
   };
 

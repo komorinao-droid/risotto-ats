@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { storage } from '@/utils/storage';
 import type { Base } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
@@ -225,8 +226,15 @@ const BaseManagement: React.FC = () => {
     // 関連データの件数を確認
     const relatedApplicants = clientData?.applicants.filter((a) => a.base === base.name).length || 0;
     const relatedEvents = clientData?.events.filter((e) => e.base === base.name).length || 0;
-    const warning = relatedApplicants || relatedEvents
-      ? `\n\n⚠ 関連データもクリアされます:\n・応募者の拠点指定: ${relatedApplicants}件\n・面接予定: ${relatedEvents}件\n（応募者・面接イベント自体は削除されず、拠点情報のみクリアされます）`
+    // この拠点専用の子アカウント数
+    const relatedChildAccounts = (() => {
+      if (!client) return 0;
+      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const all = storage.getClients();
+      return all.filter((c) => c.accountType === 'child' && c.parentId === ownerId && c.baseName === base.name).length;
+    })();
+    const warning = relatedApplicants || relatedEvents || relatedChildAccounts
+      ? `\n\n⚠ 関連データもクリアされます:\n・応募者の拠点指定: ${relatedApplicants}件\n・面接予定: ${relatedEvents}件${relatedChildAccounts ? `\n・子アカウント: ${relatedChildAccounts}件（拠点指定が外れます。アカウント自体は残ります）` : ''}\n（応募者・面接イベント自体は削除されず、拠点情報のみクリアされます）`
       : '';
     if (!window.confirm(`"${base.name}" を削除しますか？${warning}`)) return;
     updateClientData((data) => {
@@ -255,7 +263,18 @@ const BaseManagement: React.FC = () => {
         filterConditions: nextFilterConditions,
       };
     });
-    logAction('setting', '拠点削除', base.name, `応募者${relatedApplicants}件・面接${relatedEvents}件もクリア`);
+    // 該当拠点の子アカウントの baseName をクリア（無効な拠点を参照させない）
+    if (relatedChildAccounts > 0 && client) {
+      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const all = storage.getClients();
+      const updated = all.map((c) =>
+        (c.accountType === 'child' && c.parentId === ownerId && c.baseName === base.name)
+          ? { ...c, baseName: undefined }
+          : c
+      );
+      storage.saveClients(updated);
+    }
+    logAction('setting', '拠点削除', base.name, `応募者${relatedApplicants}件・面接${relatedEvents}件・子アカ${relatedChildAccounts}件のbase指定もクリア`);
     if (selectedBaseId === id) goList();
   };
 

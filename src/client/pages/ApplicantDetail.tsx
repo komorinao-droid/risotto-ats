@@ -183,8 +183,12 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
     if (!applicant) return;
     updateClientData((data) => ({
       ...data,
+      // 応募者本体を削除（screening/files/stageHistory/chatAnswers などはオブジェクト内なので一緒に消える）
       applicants: data.applicants.filter((a) => a.id !== applicant.id),
+      // 関連する面接イベント
       events: data.events.filter((e) => e.applicantId !== applicant.id),
+      // 除外リストの参照(applicantIdベース) があればクリア
+      exclusionList: (data.exclusionList || []).filter((ex: any) => ex?.applicantId !== applicant.id),
     }));
     logAction('applicant', '応募者削除', applicant.name || String(applicant.id));
     setDeleteConfirm(false);

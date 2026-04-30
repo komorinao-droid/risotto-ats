@@ -445,6 +445,11 @@ const BookingModal: React.FC<{
 
   const handleBook = () => {
     if (!title.trim()) return;
+    // 応募者未選択を防止（ID=0 のままだと孤立イベントが作られる）
+    if (!applicantId || applicantId <= 0) {
+      window.alert('応募者を選択してください。');
+      return;
+    }
     // 重複予約の二重ガード（UIのdisabledが効かない場合の防御）
     if (overlapping.length > 0 && !forceBook) {
       window.alert('この時間帯には既に予約があります。「重複しても予約する」にチェックを入れてください。');
@@ -538,7 +543,7 @@ const BookingModal: React.FC<{
 
       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={btnStyle}>キャンセル</button>
-        <button onClick={handleBook} disabled={!title.trim() || (overlapping.length > 0 && !forceBook)}
+        <button onClick={handleBook} disabled={!title.trim() || !applicantId || applicantId <= 0 || (overlapping.length > 0 && !forceBook)}
           style={{
             ...btnPrimary,
             opacity: (!title.trim() || (overlapping.length > 0 && !forceBook)) ? 0.5 : 1,
