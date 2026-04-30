@@ -64,7 +64,7 @@ export function isInterviewOrLater(stage: string, statuses?: Status[]): boolean 
 }
 
 /** NG理由のカテゴリ判定（SPD準拠の4分類 + その他）。statuses 引数は後方互換のためオプション。 */
-export function ngReason(stage: string, age?: number | string, _statuses?: Status[]): NgBreakdown['byReason'] extends infer R ? keyof R : never {
+export function ngReason(stage: string, age?: number | string, _statuses?: Status[]): 'age' | 'condition' | 'duplicate' | 'personality' | 'other' {
   const ageNum = typeof age === 'number' ? age : age ? parseInt(String(age), 10) : NaN;
   if (!isNaN(ageNum) && (ageNum < 18 || ageNum >= 75)) {
     // 年齢NG（フィルタ条件は別途あるが、簡易判定）
@@ -147,37 +147,53 @@ export function calcFunnel(applicants: Applicant[], events: { applicantId: numbe
 /** 選考NG内訳 */
 export function calcNgBreakdown(applicants: Applicant[], statuses?: Status[]): NgBreakdown {
   const ngs = applicants.filter((a) => isNg(a.stage, statuses) || a.duplicate);
-  const byReason: NgBreakdown['byReason'] = { age: 0, condition: 0, duplicate: 0, personality: 0, other: 0 };
-  // ステータス × サブステータス で集計
-  const stageSubMap = new Map<string, number>(); // key: stage|||subStatus
+  const total = ngs.length;
+
+  type Key = 'age' | 'condition' | 'duplicate' | 'personality' | 'other';
+  const labels: Record<Key, string> = {
+    age: '年齢NG',
+    condition: '条件不一致',
+    duplicate: '重複応募',
+    personality: '人物不適合',
+    other: 'その他',
+  };
+
+  // 理由 → 件数, 理由 → (サブ → 件数)
+  const reasonCount: Record<Key, number> = { age: 0, condition: 0, duplicate: 0, personality: 0, other: 0 };
+  const reasonSubMap: Record<Key, Map<string, number>> = {
+    age: new Map(), condition: new Map(), duplicate: new Map(), personality: new Map(), other: new Map(),
+  };
+
   ngs.forEach((a) => {
-    if (a.duplicate) {
-      byReason.duplicate += 1;
-    } else {
-      const r = ngReason(a.stage, a.age);
-      byReason[r] += 1;
-    }
-    // ステータス×サブの内訳もカウント (NGカテゴリのステータスだけ。重複応募は除外)
-    if (!a.duplicate && a.stage) {
-      const sub = (a.subStatus || '').trim() || '(未設定)';
-      const key = `${a.stage}|||${sub}`;
-      stageSubMap.set(key, (stageSubMap.get(key) || 0) + 1);
+    const key: Key = a.duplicate ? 'duplicate' : (ngReason(a.stage, a.age) as Key);
+    reasonCount[key] += 1;
+    const sub = (a.subStatus || '').trim();
+    if (sub) {
+      const m = reasonSubMap[key];
+      m.set(sub, (m.get(sub) || 0) + 1);
     }
   });
 
-  const total = ngs.length;
-  const byStageSub: { stage: string; subStatus: string; count: number; rate: number }[] = Array.from(stageSubMap.entries())
-    .map(([key, count]) => {
-      const [stage, subStatus] = key.split('|||');
-      return { stage, subStatus, count, rate: total > 0 ? (count / total) * 100 : 0 };
-    })
-    .sort((a, b) => {
-      // ステータス名でグルーピング、その中で件数の多い順
-      if (a.stage !== b.stage) return a.stage.localeCompare(b.stage);
-      return b.count - a.count;
+  const order: Key[] = ['age', 'condition', 'duplicate', 'personality', 'other'];
+  const reasons: NgBreakdown['reasons'] = order
+    .filter((k) => reasonCount[k] > 0)
+    .map((k) => {
+      const subRows = Array.from(reasonSubMap[k].entries())
+        .map(([subStatus, count]) => ({
+          subStatus,
+          count,
+          rate: total > 0 ? (count / total) * 100 : 0,
+        }))
+        .sort((a, b) => b.count - a.count);
+      return {
+        key: k,
+        label: labels[k],
+        count: reasonCount[k],
+        subRows,
+      };
     });
 
-  return { total, byReason, byStageSub };
+  return { total, reasons };
 }
 
 /** NG中の年代別内訳 */

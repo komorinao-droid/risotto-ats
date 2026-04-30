@@ -346,21 +346,29 @@ const RecruitmentReportPrint: React.FC = () => {
           </div>
           <table className="ng-table">
             <thead>
-              <tr><th>要因</th><th>人数</th><th>割合</th></tr>
+              <tr><th>要因 / サブステータス</th><th>人数</th><th>割合</th></tr>
             </thead>
             <tbody>
-              {[
-                ['年齢NG', ngBreakdown.byReason.age],
-                ['条件不一致', ngBreakdown.byReason.condition],
-                ['重複応募', ngBreakdown.byReason.duplicate],
-                ['人物不適合', ngBreakdown.byReason.personality],
-                ['その他', ngBreakdown.byReason.other],
-              ].filter(([, v]) => (v as number) > 0).map(([label, count]) => (
-                <tr key={label as string}>
-                  <td>{label}</td>
-                  <td className="num">{fmt(count as number)}名</td>
-                  <td className="num">{ngBreakdown.total > 0 ? `${(((count as number) / ngBreakdown.total) * 100).toFixed(0)}%` : '-'}</td>
-                </tr>
+              {ngBreakdown.reasons.map((row) => (
+                <React.Fragment key={row.key}>
+                  <tr>
+                    <td style={{ fontWeight: 600 }}>{row.label}</td>
+                    <td className="num">{fmt(row.count)}名</td>
+                    <td className="num">{ngBreakdown.total > 0 ? `${((row.count / ngBreakdown.total) * 100).toFixed(0)}%` : '-'}</td>
+                  </tr>
+                  {row.subRows.map((sub) => (
+                    <tr key={`${row.key}-${sub.subStatus}`}>
+                      <td style={{ paddingLeft: '7mm', color: '#6b7280' }}>
+                        <span style={{ color: '#d1d5db', marginRight: '1mm' }}>└</span>
+                        <span style={{ display: 'inline-block', padding: '0.5mm 2mm', borderRadius: '999px', fontSize: '8pt', backgroundColor: '#fef3c7', color: '#92400e' }}>
+                          {sub.subStatus}
+                        </span>
+                      </td>
+                      <td className="num">{fmt(sub.count)}名</td>
+                      <td className="num" style={{ color: '#9ca3af' }}>{sub.rate.toFixed(1)}%</td>
+                    </tr>
+                  ))}
+                </React.Fragment>
               ))}
               <tr className="total-row">
                 <td>合計</td>
@@ -370,50 +378,10 @@ const RecruitmentReportPrint: React.FC = () => {
             </tbody>
           </table>
         </div>
-        {ngBreakdown.byReason.age > 0 && (
+        {ngBreakdown.reasons.find((r) => r.key === 'age' && r.count > 0) && (
           <p className="annotation">最も割合の多い「年齢NG」の詳細は後半ページに記載しました。</p>
         )}
       </PageWrap>
-
-      {/* 選考NG ステータス×サブ詳細 (サブ設定ありの場合のみ) */}
-      {ngBreakdown.byStageSub.some((r) => r.subStatus !== '(未設定)') && (
-        <PageWrap pageNum={null} clientName={clientName} range={range}>
-          <h2 className="section-h">選考NG ステータス×サブステータス別 詳細</h2>
-          <p className="lead">
-            「ステータス管理」で設定したサブステータス単位での内訳。NG理由の傾向を細かく把握できます。
-          </p>
-          <table className="ng-substatus-table">
-            <thead>
-              <tr>
-                <th>ステータス</th>
-                <th>サブステータス</th>
-                <th>人数</th>
-                <th>NG総数比</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ngBreakdown.byStageSub.map((row, i) => {
-                const prevStage = i > 0 ? ngBreakdown.byStageSub[i - 1].stage : null;
-                const isFirstOfStage = prevStage !== row.stage;
-                return (
-                  <tr key={`${row.stage}|||${row.subStatus}`}>
-                    <td className={isFirstOfStage ? 'stage-first' : 'stage-cont'}>
-                      {isFirstOfStage ? row.stage : ''}
-                    </td>
-                    <td>
-                      <span className={`sub-badge ${row.subStatus === '(未設定)' ? 'sub-empty' : ''}`}>
-                        {row.subStatus}
-                      </span>
-                    </td>
-                    <td className="num">{fmt(row.count)}名</td>
-                    <td className="num">{row.rate.toFixed(1)}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </PageWrap>
-      )}
 
       {/* ===== p.6 支社別ファネル ===== */}
       <PageWrap pageNum={6} clientName={clientName} range={range}>
@@ -652,11 +620,12 @@ const RecruitmentReportPrint: React.FC = () => {
             color="#F59E0B"
             title="NG要因の根本対策"
             body={(() => {
-              const reasons = ngBreakdown.byReason;
-              const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
-              const labelMap: Record<string, string> = { age: '年齢NG', condition: '条件不一致', duplicate: '重複応募', personality: '人物不適合', other: 'その他' };
-              if (!top || top[1] === 0) return 'NG件数は限定的です。継続して水準を維持してください。';
-              return `NG要因の最多は「${labelMap[top[0]] || top[0]}」が${top[1]}名（${ngBreakdown.total > 0 ? Math.round((top[1] / ngBreakdown.total) * 100) : 0}%）。求人原稿/媒体選定/事前スクリーニング設定の見直しで、応募の質を上流から改善。`;
+              const top = ngBreakdown.reasons[0];
+              if (!top || top.count === 0) return 'NG件数は限定的です。継続して水準を維持してください。';
+              const subDetail = top.subRows.length > 0
+                ? `（うち${top.subRows[0].subStatus}が${top.subRows[0].count}名）`
+                : '';
+              return `NG要因の最多は「${top.label}」が${top.count}名${subDetail}（${ngBreakdown.total > 0 ? Math.round((top.count / ngBreakdown.total) * 100) : 0}%）。求人原稿/媒体選定/事前スクリーニング設定の見直しで、応募の質を上流から改善。`;
             })()}
           />
           <ActionCard
@@ -1352,26 +1321,6 @@ const PrintStyles: React.FC = () => (
     .ng-table th { background: #f97316; color: #fff; font-weight: 600; }
     .ng-table td.num { text-align: right; }
     .ng-table .total-row td { background: #ffedd5; font-weight: 700; }
-
-    /* NG ステータス×サブ詳細テーブル */
-    .ng-substatus-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: 4mm; }
-    .ng-substatus-table th {
-      background: #f97316; color: #fff; padding: 2.5mm 3mm;
-      border: 1px solid #ea580c; text-align: center; font-weight: 600; font-size: 8.5pt;
-    }
-    .ng-substatus-table td {
-      padding: 2mm 3mm; border: 1px solid #fed7aa;
-    }
-    .ng-substatus-table td.num { text-align: right; }
-    .ng-substatus-table td.stage-first { font-weight: 600; color: #1f2937; background: #fff7ed; }
-    .ng-substatus-table td.stage-cont { color: #d1d5db; background: #fffbf5; border-top-style: dashed; }
-    .ng-substatus-table .sub-badge {
-      display: inline-block; padding: 0.5mm 2mm; border-radius: 999px;
-      background: #fef3c7; color: #92400e; font-size: 8pt; font-weight: 500;
-    }
-    .ng-substatus-table .sub-badge.sub-empty {
-      background: #f3f4f6; color: #9ca3af;
-    }
 
     /* ファネルマトリクス */
     .funnel-matrix {

@@ -66,12 +66,13 @@ export function reportToCSV(report: RecruitmentReport): string {
   lines.push('');
 
   lines.push('# 選考NG内訳');
-  lines.push('理由,人数');
-  lines.push(`年齢NG,${report.ngBreakdown.byReason.age}`);
-  lines.push(`条件不一致,${report.ngBreakdown.byReason.condition}`);
-  lines.push(`重複応募,${report.ngBreakdown.byReason.duplicate}`);
-  lines.push(`人物不適合,${report.ngBreakdown.byReason.personality}`);
-  lines.push(`その他,${report.ngBreakdown.byReason.other}`);
+  lines.push('理由 / サブステータス,人数');
+  report.ngBreakdown.reasons.forEach((row) => {
+    lines.push(`${row.label},${row.count}`);
+    row.subRows.forEach((sub) => {
+      lines.push(`  └ ${csvCell(sub.subStatus)},${sub.count}`);
+    });
+  });
   lines.push(`合計,${report.ngBreakdown.total}`);
   lines.push('');
 

@@ -40,23 +40,20 @@ export interface FunnelMetrics {
 /** 選考NG内訳 */
 export interface NgBreakdown {
   total: number;
-  byReason: {
-    age: number;          // 年齢NG
-    condition: number;    // 条件不一致
-    duplicate: number;    // 重複応募
-    personality: number;  // 人物不適合
-    other: number;
-  };
-  /** ステータス×サブステータス別の詳細内訳（NGカテゴリのステータスのみ） */
-  byStageSub: NgStageSubRow[];
+  /** NG理由カテゴリごとの件数とサブ内訳 */
+  reasons: NgReasonRow[];
 }
 
-/** NGステータス×サブの内訳1行 */
-export interface NgStageSubRow {
-  stage: string;        // ステータス名 (例: "不合格（面接前）")
-  subStatus: string;    // サブステータス (例: "条件不一致")。空文字の場合 '(未設定)'
+/** NG理由1行（理由名 + 件数 + サブ内訳） */
+export interface NgReasonRow {
+  /** 理由カテゴリキー: age/condition/duplicate/personality/other */
+  key: 'age' | 'condition' | 'duplicate' | 'personality' | 'other';
+  /** 表示ラベル: 年齢NG / 条件不一致 等 */
+  label: string;
+  /** 件数 */
   count: number;
-  rate: number;         // NG総数比 (%)
+  /** サブステータス内訳（サブが複数ある場合のみ）。サブ未設定/単一の場合は空配列 */
+  subRows: { subStatus: string; count: number; rate: number }[];
 }
 
 /** 年代別集計 */

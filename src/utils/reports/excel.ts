@@ -210,17 +210,14 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: RecruitmentReport) {
   addDataRow(sheet, '稼働数', [t.active, rate(t.applicationToActiveRate)], { rateColumns: [3] });
 
   addSection(sheet, '選考NG内訳', 3);
-  addHeaderRow(sheet, ['理由', '人数', '割合']);
+  addHeaderRow(sheet, ['理由 / サブステータス', '人数', '割合']);
   const ng = report.ngBreakdown;
   const totalNg = ng.total || 1;
-  [
-    ['年齢NG', ng.byReason.age],
-    ['条件不一致', ng.byReason.condition],
-    ['重複応募', ng.byReason.duplicate],
-    ['人物不適合', ng.byReason.personality],
-    ['その他', ng.byReason.other],
-  ].forEach(([label, count]) => {
-    addDataRow(sheet, label as string, [count as number, (count as number) / totalNg], { rateColumns: [3] });
+  ng.reasons.forEach((row) => {
+    addDataRow(sheet, row.label, [row.count, row.count / totalNg], { rateColumns: [3] });
+    row.subRows.forEach((sub) => {
+      addDataRow(sheet, `  └ ${sub.subStatus}`, [sub.count, sub.count / totalNg], { rateColumns: [3] });
+    });
   });
   addDataRow(sheet, '合計', [ng.total, ''], { isOverall: true });
 }
