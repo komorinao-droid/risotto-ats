@@ -616,6 +616,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
     const prev = applicant.stage;
     if (prev === newStatus) return;
     updateApplicant((a) => {
+      // 二重チェック: race condition で同じステージへの遷移なら何もしない
+      if (a.stage === newStatus) return a;
       const history = [...(a.stageHistory || [])];
       // 初回変更時、応募日 = 初期ステージの設定
       if (history.length === 0 && a.stage) {
@@ -687,7 +689,7 @@ const InfoTab: React.FC<InfoTabProps> = ({
   // Status
   const currentStatus = clientData.statuses.find((s) => s.name === applicant.stage);
   const statusOptions = clientData.statuses.map((s) => ({ value: s.name, label: s.name }));
-  const hasSubStatuses = currentStatus && currentStatus.subStatuses.length > 0;
+  const hasSubStatuses = !!(currentStatus && currentStatus.subStatuses && currentStatus.subStatuses.length > 0);
 
   // 応募者の拠点スコープで sources / jobs を解決（拠点別オーバーライド対応）
   const scopedSources = resolveSources(clientData, applicant.base);

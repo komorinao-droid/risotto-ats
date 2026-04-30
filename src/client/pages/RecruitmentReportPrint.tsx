@@ -53,19 +53,30 @@ const RecruitmentReportPrint: React.FC = () => {
     let cancelled = false;
     setAiLoading(true);
     setAiError(null);
+    // 30秒で強制タイムアウト（自動印刷時のフリーズ防止）
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     fetch('/api/report-summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ report, prevReport }),
+      signal: controller.signal,
     })
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
         return r.json();
       })
       .then((data) => { if (!cancelled) setAiSummary(data); })
-      .catch((e) => { if (!cancelled) setAiError(e.message || 'AI要約の生成に失敗'); })
-      .finally(() => { if (!cancelled) setAiLoading(false); });
-    return () => { cancelled = true; };
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = e.name === 'AbortError' ? '生成がタイムアウトしました(30秒)' : (e.message || 'AI要約の生成に失敗');
+        setAiError(msg);
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+        if (!cancelled) setAiLoading(false);
+      });
+    return () => { cancelled = true; clearTimeout(timeoutId); controller.abort(); };
   }, [wantAI, report, prevReport]);
 
   // ?print=1 で自動印刷。?ai=1 の場合は AI 取得完了を待つ。

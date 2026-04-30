@@ -63,16 +63,37 @@ const MediaCostManagement: React.FC = () => {
 
   const hasUnsaved = Object.keys(draft).length > 0;
 
+  /** 全角数字→半角、カンマ/空白除去、上限値で正規化 */
+  const parseAmount = (raw: string): number | null => {
+    if (!raw) return null;
+    // 全角数字を半角に変換
+    const halfWidth = raw.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+    const cleaned = halfWidth.replace(/[,\s]/g, '');
+    const num = parseInt(cleaned, 10);
+    if (!Number.isFinite(num)) return null;
+    if (num <= 0) return null;
+    // 1億円以上は誤入力扱い（現実的にあり得ない月次媒体費）
+    if (num > 100_000_000) return null;
+    return num;
+  };
+
   const save = () => {
+    let invalidCount = 0;
     updateClientData((data) => {
       const newCosts = { ...(data.mediaCosts || {}) };
       Object.entries(draft).forEach(([ym, monthly]) => {
         const target = { ...(newCosts[ym] || {}) };
         Object.entries(monthly).forEach(([src, raw]) => {
-          const num = parseInt(raw.replace(/[,\s]/g, ''), 10);
-          if (Number.isFinite(num) && num > 0) {
+          const trimmed = raw.trim();
+          if (trimmed === '') {
+            delete target[src];
+            return;
+          }
+          const num = parseAmount(trimmed);
+          if (num !== null) {
             target[src] = num;
           } else {
+            invalidCount += 1;
             delete target[src];
           }
         });
@@ -82,6 +103,9 @@ const MediaCostManagement: React.FC = () => {
       return { ...data, mediaCosts: newCosts };
     });
     setDraft({});
+    if (invalidCount > 0) {
+      alert(`${invalidCount} 件の不正値（負数 / 0 / 1億円超 / 数字以外）はスキップして保存しました。`);
+    }
   };
 
   const addSource = () => {

@@ -62,11 +62,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch { /* ignore */ }
   }, [client]);
 
-  // 復元された client がある場合、データを再ロード
+  // 復元された client がある場合、データを再ロード + 最新の Client(オプション含む) を反映
   useEffect(() => {
     if (client && !clientData) {
       const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
       try {
+        // 最新の Client (権限/オプション) を storage から取り直す
+        const all = storage.getClients();
+        const fresh = all.find((c) => c.id === client.id);
+        if (fresh) {
+          let effective: Client = fresh;
+          // 子アカは親のオプションを継承
+          if (fresh.accountType === 'child' && fresh.parentId) {
+            const parent = all.find((c) => c.id === fresh.parentId);
+            if (parent?.options) {
+              effective = { ...fresh, options: parent.options };
+            }
+          }
+          // sessionStorage と state を最新化
+          if (JSON.stringify(effective) !== JSON.stringify(client)) {
+            setClient(effective);
+          }
+        }
         let data = storage.getClientData(dataId);
         if (client.accountType === 'child' && client.baseName) {
           data = filterDataByBase(data, client.baseName);
@@ -163,13 +180,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!client) return;
       const dataId = resolveClientId(client);
       const current = storage.getClientData(dataId);
-      const updated = updater(current);
-      storage.saveClientData(dataId, updated);
 
-      // 子アカウントの場合、フィルタした結果をstateに
+      // 子アカウントの場合、updater にはフィルタ済みデータを渡す
+      // 結果から「自拠点のレコード」だけを取り出し、他拠点のデータと合算して保存
       if (client.accountType === 'child' && client.baseName) {
-        setClientData(filterDataByBase(updated, client.baseName));
+        const myBase = client.baseName;
+        const filteredCurrent = filterDataByBase(current, myBase);
+        const filteredUpdated = updater(filteredCurrent);
+        // 他拠点のレコードはそのまま維持
+        const othersApplicants = current.applicants.filter((a) => a.base !== myBase);
+        const othersEvents = current.events.filter((e) => e.base !== myBase);
+        // 自拠点として更新されたレコードのうち、base が他拠点に変わってしまったものは弾く（権限逸脱防止）
+        const myApplicants = filteredUpdated.applicants.filter((a) => !a.base || a.base === myBase);
+        const myEvents = filteredUpdated.events.filter((e) => !e.base || e.base === myBase);
+        const merged: ClientData = {
+          ...current, // 他拠点限定の設定（statuses など）はそのまま維持
+          ...filteredUpdated, // 子が更新した設定群を反映（メールテンプレ等は子も触れる）
+          applicants: [...othersApplicants, ...myApplicants],
+          events: [...othersEvents, ...myEvents],
+          // slotSettings は filterDataByBase で自拠点だけに絞られているので、他拠点の slotSettings をマージ
+          slotSettings: { ...(current.slotSettings || {}), ...(filteredUpdated.slotSettings || {}) },
+        };
+        storage.saveClientData(dataId, merged);
+        setClientData(filterDataByBase(merged, myBase));
       } else {
+        const updated = updater(current);
+        storage.saveClientData(dataId, updated);
         setClientData(updated);
       }
     },

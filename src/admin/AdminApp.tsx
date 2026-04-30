@@ -3357,6 +3357,15 @@ const AdminApp: React.FC = () => {
         const idsToDelete = new Set([id, ...children.map(ch => ch.id)]);
         const updated = clients.filter(cl => !idsToDelete.has(cl.id));
         saveAndReload(updated);
+        // 親アカウントの ClientData と操作ログも削除（孤立データ防止）
+        if (c.accountType === 'parent') {
+          try {
+            storage.deleteClientData(c.id);
+            // 子アカは親IDのデータを参照するので個別削除不要
+            // 操作ログも削除
+            localStorage.removeItem(`hireflow:client:${c.id}:logs`);
+          } catch { /* ignore */ }
+        }
         setConfirmDialog(null);
         if (selectedClientId && idsToDelete.has(selectedClientId)) {
           setCurrentView('clients');

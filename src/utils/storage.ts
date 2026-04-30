@@ -409,6 +409,11 @@ class StorageService {
     }
   }
 
+  /** クライアントデータを完全削除（運営側のクライアント削除時に使用） */
+  deleteClientData(clientId: string): void {
+    try { localStorage.removeItem(clientDataKey(clientId)); } catch { /* ignore */ }
+  }
+
   getClients(): Client[] {
     try {
       const raw = localStorage.getItem(CLIENTS_KEY);
