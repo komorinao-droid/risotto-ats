@@ -192,13 +192,27 @@ const ApplicantList: React.FC = () => {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportMode, setExportMode] = useState<'filtered' | 'all' | 'selected'>('filtered');
 
-  if (!clientData) return null;
+  // Filter drafts (committed only via 検索 button) — keep at end of useState group to preserve hooks order
+  const [draftSearchText, setDraftSearchText] = useState('');
+  const [draftFilterSource, setDraftFilterSource] = useState('');
+  const [draftFilterStatus, setDraftFilterStatus] = useState('');
+  const [draftFilterBase, setDraftFilterBase] = useState('');
+  const [draftFilterDateFrom, setDraftFilterDateFrom] = useState('');
+  const [draftFilterDateTo, setDraftFilterDateTo] = useState('');
+  const [draftFilterIntDateFrom, setDraftFilterIntDateFrom] = useState('');
+  const [draftFilterIntDateTo, setDraftFilterIntDateTo] = useState('');
+  const [draftFilterNeedsAction, setDraftFilterNeedsAction] = useState(false);
 
-  const { applicants, events, statuses, bases } = clientData;
+  // clientData は null の可能性があるが、Hooks order を維持するため早期 return せず、
+  // 全 hook 呼び出し後にレンダー側で null チェックする。各派生値は null 安全に。
+  const applicants = clientData?.applicants ?? [];
+  const events = clientData?.events ?? [];
+  const statuses = clientData?.statuses ?? [];
+  const bases = clientData?.bases ?? [];
   // 子アカウントは自拠点のオーバーライド（あれば）を反映
-  const sources = client?.accountType === 'child' && client.baseName && clientData.sourcesByBase?.[client.baseName]
+  const sources = client?.accountType === 'child' && client.baseName && clientData?.sourcesByBase?.[client.baseName]
     ? clientData.sourcesByBase[client.baseName]
-    : clientData.sources;
+    : (clientData?.sources ?? []);
 
   // ─── Duplicate detection ───
   const duplicateMap = useMemo(() => detectDuplicates(applicants), [applicants]);
@@ -206,15 +220,15 @@ const ApplicantList: React.FC = () => {
   // ─── Flag ages (per-base with fallback to legacy global) ───
   const flagAgesByBase = useMemo(() => {
     const map: { [base: string]: Set<number> } = {};
-    const fcs = clientData.filterConditions || {};
+    const fcs = clientData?.filterConditions || {};
     Object.keys(fcs).forEach(base => {
       map[base] = new Set(fcs[base].flagAges || []);
     });
     return map;
-  }, [clientData.filterConditions]);
+  }, [clientData?.filterConditions]);
   const legacyFlagAges = useMemo(
-    () => new Set(clientData.filterCondition?.flagAges || []),
-    [clientData.filterCondition?.flagAges]
+    () => new Set(clientData?.filterCondition?.flagAges || []),
+    [clientData?.filterCondition?.flagAges]
   );
   const getFlagAgeSet = (baseName: string): Set<number> => {
     return flagAgesByBase[baseName] || legacyFlagAges;
@@ -346,19 +360,44 @@ const ApplicantList: React.FC = () => {
     [updateClientData, logAction]
   );
 
-  // ─── Reset filters ───
-  const resetFilters = () => {
-    setSearchText('');
-    setFilterSource('');
-    setFilterStatus('');
-    setFilterBase('');
-    setFilterDateFrom('');
-    setFilterDateTo('');
-    setFilterIntDateFrom('');
-    setFilterIntDateTo('');
-    setFilterNeedsAction(false);
+  // ─── Apply / Reset filters ───
+  const applyFilters = () => {
+    setSearchText(draftSearchText);
+    setFilterSource(draftFilterSource);
+    setFilterStatus(draftFilterStatus);
+    setFilterBase(draftFilterBase);
+    setFilterDateFrom(draftFilterDateFrom);
+    setFilterDateTo(draftFilterDateTo);
+    setFilterIntDateFrom(draftFilterIntDateFrom);
+    setFilterIntDateTo(draftFilterIntDateTo);
+    setFilterNeedsAction(draftFilterNeedsAction);
     setPage(1);
   };
+
+  const resetFilters = () => {
+    setDraftSearchText(''); setSearchText('');
+    setDraftFilterSource(''); setFilterSource('');
+    setDraftFilterStatus(''); setFilterStatus('');
+    setDraftFilterBase(''); setFilterBase('');
+    setDraftFilterDateFrom(''); setFilterDateFrom('');
+    setDraftFilterDateTo(''); setFilterDateTo('');
+    setDraftFilterIntDateFrom(''); setFilterIntDateFrom('');
+    setDraftFilterIntDateTo(''); setFilterIntDateTo('');
+    setDraftFilterNeedsAction(false); setFilterNeedsAction(false);
+    setPage(1);
+  };
+
+  // 未適用差分（バッジ表示用）
+  const hasPendingChanges =
+    draftSearchText !== searchText ||
+    draftFilterSource !== filterSource ||
+    draftFilterStatus !== filterStatus ||
+    draftFilterBase !== filterBase ||
+    draftFilterDateFrom !== filterDateFrom ||
+    draftFilterDateTo !== filterDateTo ||
+    draftFilterIntDateFrom !== filterIntDateFrom ||
+    draftFilterIntDateTo !== filterIntDateTo ||
+    draftFilterNeedsAction !== filterNeedsAction;
 
   // ─── CSV Export ───
   const doExport = () => {
@@ -416,7 +455,7 @@ const ApplicantList: React.FC = () => {
   };
 
   const doImport = () => {
-    const maxId = clientData.applicants.reduce((max, a) => Math.max(max, a.id), 0);
+    const maxId = applicants.reduce((max, a) => Math.max(max, a.id), 0);
     const newApplicants: Applicant[] = [];
 
     importRows.forEach((row, idx) => {
@@ -487,6 +526,9 @@ const ApplicantList: React.FC = () => {
     [bases]
   );
 
+  // すべての Hook を呼び終えてから早期 return（Hooks order を保つ）
+  if (!clientData) return null;
+
   // ─── Shared styles ───
   const btnStyle: React.CSSProperties = {
     padding: '0.4375rem 0.875rem',
@@ -539,7 +581,25 @@ const ApplicantList: React.FC = () => {
       >
         <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>応募者管理</h2>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button style={btnStyle} onClick={() => setFilterOpen(!filterOpen)}>
+          <button
+            style={btnStyle}
+            onClick={() => {
+              const next = !filterOpen;
+              if (next) {
+                // 開く瞬間に draft を applied と一致させる（前回未適用の値を残さない）
+                setDraftSearchText(searchText);
+                setDraftFilterSource(filterSource);
+                setDraftFilterStatus(filterStatus);
+                setDraftFilterBase(filterBase);
+                setDraftFilterDateFrom(filterDateFrom);
+                setDraftFilterDateTo(filterDateTo);
+                setDraftFilterIntDateFrom(filterIntDateFrom);
+                setDraftFilterIntDateTo(filterIntDateTo);
+                setDraftFilterNeedsAction(filterNeedsAction);
+              }
+              setFilterOpen(next);
+            }}
+          >
             {filterOpen ? '検索を閉じる' : '検索・フィルタ'}
           </button>
           <button style={btnStyle} onClick={() => setExportModalOpen(true)}>
@@ -607,8 +667,14 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>テキスト検索</label>
               <input
                 type="text"
-                value={searchText}
-                onChange={(e) => { setSearchText(e.target.value); setPage(1); }}
+                value={draftSearchText}
+                onChange={(e) => setDraftSearchText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    applyFilters();
+                  }
+                }}
                 placeholder="氏名・メール・電話・拠点"
                 style={filterInputStyle}
               />
@@ -618,8 +684,8 @@ const ApplicantList: React.FC = () => {
             <div>
               <label style={filterLabelStyle}>応募媒体</label>
               <select
-                value={filterSource}
-                onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}
+                value={draftFilterSource}
+                onChange={(e) => setDraftFilterSource(e.target.value)}
                 style={filterInputStyle}
               >
                 <option value="">すべて</option>
@@ -633,8 +699,8 @@ const ApplicantList: React.FC = () => {
             <div>
               <label style={filterLabelStyle}>ステータス</label>
               <select
-                value={filterStatus}
-                onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+                value={draftFilterStatus}
+                onChange={(e) => setDraftFilterStatus(e.target.value)}
                 style={filterInputStyle}
               >
                 <option value="">すべて</option>
@@ -649,8 +715,8 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>拠点</label>
               <SearchableSelect
                 options={baseOptions}
-                value={filterBase}
-                onChange={(v) => { setFilterBase(v); setPage(1); }}
+                value={draftFilterBase}
+                onChange={(v) => setDraftFilterBase(v)}
                 placeholder="すべて"
                 allLabel="すべて"
               />
@@ -661,8 +727,8 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>応募日FROM</label>
               <input
                 type="date"
-                value={filterDateFrom}
-                onChange={(e) => { setFilterDateFrom(e.target.value); setPage(1); }}
+                value={draftFilterDateFrom}
+                onChange={(e) => setDraftFilterDateFrom(e.target.value)}
                 style={filterInputStyle}
               />
             </div>
@@ -670,8 +736,8 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>応募日TO</label>
               <input
                 type="date"
-                value={filterDateTo}
-                onChange={(e) => { setFilterDateTo(e.target.value); setPage(1); }}
+                value={draftFilterDateTo}
+                onChange={(e) => setDraftFilterDateTo(e.target.value)}
                 style={filterInputStyle}
               />
             </div>
@@ -681,8 +747,8 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>面接日FROM</label>
               <input
                 type="date"
-                value={filterIntDateFrom}
-                onChange={(e) => { setFilterIntDateFrom(e.target.value); setPage(1); }}
+                value={draftFilterIntDateFrom}
+                onChange={(e) => setDraftFilterIntDateFrom(e.target.value)}
                 style={filterInputStyle}
               />
             </div>
@@ -690,8 +756,8 @@ const ApplicantList: React.FC = () => {
               <label style={filterLabelStyle}>面接日TO</label>
               <input
                 type="date"
-                value={filterIntDateTo}
-                onChange={(e) => { setFilterIntDateTo(e.target.value); setPage(1); }}
+                value={draftFilterIntDateTo}
+                onChange={(e) => setDraftFilterIntDateTo(e.target.value)}
                 style={filterInputStyle}
               />
             </div>
@@ -709,15 +775,15 @@ const ApplicantList: React.FC = () => {
               >
                 <input
                   type="checkbox"
-                  checked={filterNeedsAction}
-                  onChange={(e) => { setFilterNeedsAction(e.target.checked); setPage(1); }}
+                  checked={draftFilterNeedsAction}
+                  onChange={(e) => setDraftFilterNeedsAction(e.target.checked)}
                 />
                 要対応のみ
               </label>
             </div>
           </div>
 
-          <div style={{ marginTop: '0.75rem', textAlign: 'right' }}>
+          <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
             <button
               onClick={resetFilters}
               style={{
@@ -726,7 +792,33 @@ const ApplicantList: React.FC = () => {
                 fontSize: '0.75rem',
               }}
             >
-              リセット
+              クリア
+            </button>
+            <button
+              onClick={applyFilters}
+              style={{
+                ...primaryBtnStyle,
+                position: 'relative',
+                padding: '0.4375rem 1.25rem',
+              }}
+            >
+              検索
+              {hasPendingChanges && (
+                <span
+                  aria-label="未適用の変更あり"
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: '#EF4444',
+                    border: '2px solid #fff',
+                    boxSizing: 'content-box',
+                  }}
+                />
+              )}
             </button>
           </div>
         </div>

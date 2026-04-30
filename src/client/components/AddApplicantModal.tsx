@@ -6,7 +6,7 @@ import { warekiToDate } from '@/utils/wareki';
 import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
 import { resolveJobs, resolveSources } from '@/utils/baseScope';
-import type { Applicant, ClientData, PrefDateTime } from '@/types';
+import type { Applicant, ClientData } from '@/types';
 
 interface AddApplicantModalProps {
   isOpen: boolean;
@@ -65,9 +65,6 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
   const [stage, setStage] = useState('');
   const [base, setBase] = useState('');
   const [note, setNote] = useState('');
-  const [prefDates, setPrefDates] = useState<PrefDateTime[]>([]);
-  const [prefDateInput, setPrefDateInput] = useState('');
-  const [prefTimeInput, setPrefTimeInput] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [exclusionAlert, setExclusionAlert] = useState('');
 
@@ -89,9 +86,6 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       setStage(clientData?.statuses?.[0]?.name || '');
       setBase(lockedBaseName);
       setNote('');
-      setPrefDates([]);
-      setPrefDateInput('');
-      setPrefTimeInput('');
       setErrors({});
       setExclusionAlert('');
     }
@@ -266,7 +260,7 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       actionDate: '',
       actionTime: '',
       actionMemo: '',
-      prefDates: [...prefDates],
+      prefDates: [],
       intResult: '',
       intMethod: '',
       active: true,
@@ -552,88 +546,6 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
           )}
           {errors.base && <div style={{ color: '#EF4444', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.base}</div>}
         </div>
-      </div>
-
-      {/* Preferred dates */}
-      <div style={fieldStyle}>
-        <label style={labelStyle}>面接希望日時</label>
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-          <input
-            type="date"
-            value={prefDateInput}
-            onChange={(e) => setPrefDateInput(e.target.value)}
-            style={{ ...inputStyle, flex: '1 1 140px' }}
-          />
-          <input
-            type="time"
-            value={prefTimeInput}
-            onChange={(e) => setPrefTimeInput(e.target.value)}
-            placeholder="時間（任意）"
-            style={{ ...inputStyle, flex: '0 0 120px' }}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (prefDateInput) {
-                const entry: PrefDateTime = { date: prefDateInput, time: prefTimeInput };
-                const isDup = prefDates.some(p => p.date === entry.date && p.time === entry.time);
-                if (!isDup) {
-                  setPrefDates((prev) => [...prev, entry]);
-                  setPrefDateInput('');
-                  setPrefTimeInput('');
-                }
-              }
-            }}
-            style={{
-              padding: '0.5rem 1rem',
-              border: 'none',
-              borderRadius: '6px',
-              backgroundColor: 'var(--color-primary, #3B82F6)',
-              color: '#fff',
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            追加
-          </button>
-        </div>
-        {prefDates.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
-            {prefDates.map((d, i) => (
-              <span
-                key={i}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.375rem',
-                  padding: '0.25rem 0.625rem',
-                  backgroundColor: '#EFF6FF',
-                  color: '#1D4ED8',
-                  borderRadius: '9999px',
-                  fontSize: '0.8125rem',
-                }}
-              >
-                {d.date}{d.time ? ` ${d.time}` : ''}
-                <button
-                  type="button"
-                  onClick={() => setPrefDates((prev) => prev.filter((_, idx) => idx !== i))}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#1D4ED8',
-                    fontSize: '0.875rem',
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  &times;
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Note */}
