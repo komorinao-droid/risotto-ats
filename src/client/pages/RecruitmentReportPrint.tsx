@@ -89,7 +89,7 @@ const RecruitmentReportPrint: React.FC = () => {
   }
 
   const clientName = client.companyName || 'クライアント名未設定';
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge, byJob, byMonth, stepFunnel, cost } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, ngAgeBreakdown, bySourceAge, byJob, byBaseJob, byMonth, stepFunnel, cost } = report;
   const overall: MatrixRow = { label: '全体', ...total };
 
   // 採用数上位10媒体（媒体×年代用）
@@ -507,6 +507,15 @@ const RecruitmentReportPrint: React.FC = () => {
           <h2 className="section-h">【{base}】支社×媒体別</h2>
           <p className="lead">{base}の応募〜採用数は下記となります。<span className="muted">※採用数が多い順</span></p>
           <FunnelMatrix rows={rows} headerLabel="求人媒体" />
+        </PageWrap>
+      ))}
+
+      {/* ===== 各支社×職種別 (各支社1ページ) ===== */}
+      {byBaseJob.filter(({ rows }) => rows.length > 0).map(({ base, rows }) => (
+        <PageWrap key={`bj-${base}`} pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">【{base}】支社×職種別</h2>
+          <p className="lead">{base}における職種ごとの応募〜採用数。<span className="muted">※採用数が多い順</span></p>
+          <FunnelMatrix rows={rows} headerLabel="職種" />
         </PageWrap>
       ))}
 

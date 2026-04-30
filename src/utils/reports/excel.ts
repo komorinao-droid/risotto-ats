@@ -379,6 +379,12 @@ export async function downloadExcel(report: RecruitmentReport, clientName: strin
   buildMatrixSheet(wb, '媒体別', '媒体別 ファネル', report.bySource, overall);
   buildMatrixSheet(wb, '職種別', '職種別 ファネル', report.byJob, overall);
 
+  // 拠点×職種：拠点ごとに1シート
+  report.byBaseJob.forEach(({ base, rows }) => {
+    if (rows.length === 0) return;
+    buildMatrixSheet(wb, `拠点×職種 ${base}`, `【${base}】 職種別 ファネル`, rows, overall);
+  });
+
   buildAgeSheet(wb, report);
   buildGoalSheet(wb, report);
 
