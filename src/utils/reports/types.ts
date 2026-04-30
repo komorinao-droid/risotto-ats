@@ -47,6 +47,16 @@ export interface NgBreakdown {
     personality: number;  // 人物不適合
     other: number;
   };
+  /** ステータス×サブステータス別の詳細内訳（NGカテゴリのステータスのみ） */
+  byStageSub: NgStageSubRow[];
+}
+
+/** NGステータス×サブの内訳1行 */
+export interface NgStageSubRow {
+  stage: string;        // ステータス名 (例: "不合格（面接前）")
+  subStatus: string;    // サブステータス (例: "条件不一致")。空文字の場合 '(未設定)'
+  count: number;
+  rate: number;         // NG総数比 (%)
 }
 
 /** 年代別集計 */

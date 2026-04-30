@@ -375,6 +375,46 @@ const RecruitmentReportPrint: React.FC = () => {
         )}
       </PageWrap>
 
+      {/* 選考NG ステータス×サブ詳細 (サブ設定ありの場合のみ) */}
+      {ngBreakdown.byStageSub.some((r) => r.subStatus !== '(未設定)') && (
+        <PageWrap pageNum={null} clientName={clientName} range={range}>
+          <h2 className="section-h">選考NG ステータス×サブステータス別 詳細</h2>
+          <p className="lead">
+            「ステータス管理」で設定したサブステータス単位での内訳。NG理由の傾向を細かく把握できます。
+          </p>
+          <table className="ng-substatus-table">
+            <thead>
+              <tr>
+                <th>ステータス</th>
+                <th>サブステータス</th>
+                <th>人数</th>
+                <th>NG総数比</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ngBreakdown.byStageSub.map((row, i) => {
+                const prevStage = i > 0 ? ngBreakdown.byStageSub[i - 1].stage : null;
+                const isFirstOfStage = prevStage !== row.stage;
+                return (
+                  <tr key={`${row.stage}|||${row.subStatus}`}>
+                    <td className={isFirstOfStage ? 'stage-first' : 'stage-cont'}>
+                      {isFirstOfStage ? row.stage : ''}
+                    </td>
+                    <td>
+                      <span className={`sub-badge ${row.subStatus === '(未設定)' ? 'sub-empty' : ''}`}>
+                        {row.subStatus}
+                      </span>
+                    </td>
+                    <td className="num">{fmt(row.count)}名</td>
+                    <td className="num">{row.rate.toFixed(1)}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </PageWrap>
+      )}
+
       {/* ===== p.6 支社別ファネル ===== */}
       <PageWrap pageNum={6} clientName={clientName} range={range}>
         <h2 className="section-h">{formatRange(range)}：支社別</h2>
@@ -1312,6 +1352,26 @@ const PrintStyles: React.FC = () => (
     .ng-table th { background: #f97316; color: #fff; font-weight: 600; }
     .ng-table td.num { text-align: right; }
     .ng-table .total-row td { background: #ffedd5; font-weight: 700; }
+
+    /* NG ステータス×サブ詳細テーブル */
+    .ng-substatus-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: 4mm; }
+    .ng-substatus-table th {
+      background: #f97316; color: #fff; padding: 2.5mm 3mm;
+      border: 1px solid #ea580c; text-align: center; font-weight: 600; font-size: 8.5pt;
+    }
+    .ng-substatus-table td {
+      padding: 2mm 3mm; border: 1px solid #fed7aa;
+    }
+    .ng-substatus-table td.num { text-align: right; }
+    .ng-substatus-table td.stage-first { font-weight: 600; color: #1f2937; background: #fff7ed; }
+    .ng-substatus-table td.stage-cont { color: #d1d5db; background: #fffbf5; border-top-style: dashed; }
+    .ng-substatus-table .sub-badge {
+      display: inline-block; padding: 0.5mm 2mm; border-radius: 999px;
+      background: #fef3c7; color: #92400e; font-size: 8pt; font-weight: 500;
+    }
+    .ng-substatus-table .sub-badge.sub-empty {
+      background: #f3f4f6; color: #9ca3af;
+    }
 
     /* ファネルマトリクス */
     .funnel-matrix {

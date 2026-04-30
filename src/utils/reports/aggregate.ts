@@ -148,15 +148,36 @@ export function calcFunnel(applicants: Applicant[], events: { applicantId: numbe
 export function calcNgBreakdown(applicants: Applicant[], statuses?: Status[]): NgBreakdown {
   const ngs = applicants.filter((a) => isNg(a.stage, statuses) || a.duplicate);
   const byReason: NgBreakdown['byReason'] = { age: 0, condition: 0, duplicate: 0, personality: 0, other: 0 };
+  // ステータス × サブステータス で集計
+  const stageSubMap = new Map<string, number>(); // key: stage|||subStatus
   ngs.forEach((a) => {
     if (a.duplicate) {
       byReason.duplicate += 1;
-      return;
+    } else {
+      const r = ngReason(a.stage, a.age);
+      byReason[r] += 1;
     }
-    const r = ngReason(a.stage, a.age);
-    byReason[r] += 1;
+    // ステータス×サブの内訳もカウント (NGカテゴリのステータスだけ。重複応募は除外)
+    if (!a.duplicate && a.stage) {
+      const sub = (a.subStatus || '').trim() || '(未設定)';
+      const key = `${a.stage}|||${sub}`;
+      stageSubMap.set(key, (stageSubMap.get(key) || 0) + 1);
+    }
   });
-  return { total: ngs.length, byReason };
+
+  const total = ngs.length;
+  const byStageSub: { stage: string; subStatus: string; count: number; rate: number }[] = Array.from(stageSubMap.entries())
+    .map(([key, count]) => {
+      const [stage, subStatus] = key.split('|||');
+      return { stage, subStatus, count, rate: total > 0 ? (count / total) * 100 : 0 };
+    })
+    .sort((a, b) => {
+      // ステータス名でグルーピング、その中で件数の多い順
+      if (a.stage !== b.stage) return a.stage.localeCompare(b.stage);
+      return b.count - a.count;
+    });
+
+  return { total, byReason, byStageSub };
 }
 
 /** NG中の年代別内訳 */

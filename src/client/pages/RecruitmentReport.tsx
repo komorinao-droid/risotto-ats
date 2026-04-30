@@ -443,6 +443,46 @@ const RecruitmentReport: React.FC = () => {
                 </table>
               </div>
             </div>
+
+            {/* ステータス×サブステータス別の詳細 */}
+            {ngBreakdown.byStageSub.length > 0 && (
+              <div style={{ marginTop: '1.25rem' }}>
+                <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.8125rem', fontWeight: 700, color: '#374151' }}>ステータス × サブステータス別 詳細</h4>
+                <p style={{ margin: '0 0 0.5rem', fontSize: '0.6875rem', color: '#9CA3AF' }}>
+                  「ステータス管理」で設定したサブステータス単位での内訳。NG理由の詳細傾向を把握できます。
+                </p>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>ステータス</th>
+                      <th style={thStyle}>サブステータス</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>人数</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>NG総数比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ngBreakdown.byStageSub.map((row, i) => {
+                      const prevStage = i > 0 ? ngBreakdown.byStageSub[i - 1].stage : null;
+                      const isFirstOfStage = prevStage !== row.stage;
+                      return (
+                        <tr key={`${row.stage}|||${row.subStatus}`}>
+                          <td style={{ ...tdStyle, fontWeight: isFirstOfStage ? 600 : 400, color: isFirstOfStage ? '#374151' : '#9CA3AF' }}>
+                            {isFirstOfStage ? row.stage : ''}
+                          </td>
+                          <td style={tdStyle}>
+                            <span style={{ display: 'inline-block', padding: '0.0625rem 0.5rem', borderRadius: '999px', fontSize: '0.6875rem', backgroundColor: row.subStatus === '(未設定)' ? '#F3F4F6' : '#FEF3C7', color: row.subStatus === '(未設定)' ? '#9CA3AF' : '#92400E' }}>
+                              {row.subStatus}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(row.count)}名</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: '#6B7280' }}>{row.rate.toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
