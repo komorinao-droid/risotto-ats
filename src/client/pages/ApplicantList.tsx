@@ -783,13 +783,15 @@ const ApplicantList: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
             <button
               onClick={resetFilters}
               style={{
                 ...btnStyle,
-                color: '#6b7280',
-                fontSize: '0.75rem',
+                width: '160px',
+                padding: '0.5rem 1rem',
+                color: '#374151',
+                fontSize: '0.875rem',
               }}
             >
               クリア
@@ -799,7 +801,9 @@ const ApplicantList: React.FC = () => {
               style={{
                 ...primaryBtnStyle,
                 position: 'relative',
-                padding: '0.4375rem 1.25rem',
+                width: '160px',
+                padding: '0.625rem 1rem',
+                fontSize: '0.9375rem',
               }}
             >
               検索
