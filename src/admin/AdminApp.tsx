@@ -34,7 +34,9 @@ import {
   Briefcase,
   Megaphone,
   KeyRound,
+  MessageSquare,
 } from 'lucide-react';
+import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
@@ -688,6 +690,16 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
         <StatCard label="AIスクリーニング有効" value={`${aggregates.enabledScreening} / ${aggregates.parentCount}`} color="#7C3AED" icon={<ShieldCheck size={22} />} />
       </div>
 
+      {/* 統計カード - SMS送信 */}
+      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>SMS送信</div>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+        <StatCard label="SMS送信（今月）" value={aggregates.smsSentThisMonth} color="#0EA5E9" icon={<MessageSquare size={22} />} />
+        <StatCard label="送信失敗（今月）" value={aggregates.smsFailedThisMonth} color="#DC2626" icon={<AlertTriangle size={22} />} />
+        <StatCard label="超過送信数（今月）" value={aggregates.smsOverageThisMonth} color="#F59E0B" icon={<MessageSquare size={22} />} />
+        <StatCard label="超過課金額（今月）" value={`¥${aggregates.smsOverageChargeThisMonth.toLocaleString()}`} color="#9A3412" icon={<MessageSquare size={22} />} />
+        <StatCard label="超過クライアント" value={`${aggregates.smsClientsOver} / ${aggregates.parentCount}`} color="#EA580C" icon={<MessageSquare size={22} />} />
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(360px, 1.4fr)', gap: '1rem', marginBottom: '2rem' }}>
         {/* プラン別グラフ */}
         <div style={{ ...cardStyle, padding: '1.25rem' }}>
@@ -1171,6 +1183,21 @@ const ClientDetail: React.FC<{
       mediaCostThisMonth: cd?.mediaCosts?.[monthPrefix] ? Object.values(cd.mediaCosts[monthPrefix]).reduce((s: number, v) => s + (Number(v) || 0), 0) : 0,
       reportPdfDownloadsTotal: logs.filter((l) => l.action === 'PDF生成' || l.action === '納品資料生成' || l.action === 'AI総評付きPDF生成').length,
       reportAiSummaryRunsTotal: logs.filter((l) => l.action === 'AI総評生成').length,
+      // SMS関連
+      smsSentTotal: (cd?.smsLogs || []).filter((l) => l.status === 'success').length,
+      smsSentThisMonth: (cd?.smsLogs || []).filter((l) => l.status === 'success' && l.sentAt.startsWith(monthPrefix)).length,
+      smsFailedThisMonth: (cd?.smsLogs || []).filter((l) => l.status === 'failed' && l.sentAt.startsWith(monthPrefix)).length,
+      smsOverageThisMonth: (() => {
+        const sent = (cd?.smsLogs || []).filter((l) => l.status === 'success' && l.sentAt.startsWith(monthPrefix)).length;
+        const limit = SMS_MONTHLY_LIMIT[c.plan];
+        return limit < 0 ? 0 : Math.max(0, sent - limit);
+      })(),
+      smsOverageChargeThisMonth: (() => {
+        const sent = (cd?.smsLogs || []).filter((l) => l.status === 'success' && l.sentAt.startsWith(monthPrefix)).length;
+        const limit = SMS_MONTHLY_LIMIT[c.plan];
+        const overage = limit < 0 ? 0 : Math.max(0, sent - limit);
+        return overage * SMS_OVERAGE_UNIT_PRICE;
+      })(),
       _: c, // unused, kept to ensure deps are correct
     };
   }, [client, clientData, dataId]);
@@ -1383,6 +1410,84 @@ const ClientDetail: React.FC<{
           )}
         </div>
       )}
+
+      {/* SMS送信 利用状況（親アカウントのみ） */}
+      {client.accountType === 'parent' && (() => {
+        const smsLimit = SMS_MONTHLY_LIMIT[client.plan];
+        const sentThisMonth = stats.smsSentThisMonth;
+        const overage = stats.smsOverageThisMonth;
+        const overageCharge = stats.smsOverageChargeThisMonth;
+        const usageRate = smsLimit > 0 ? Math.min(100, (sentThisMonth / smsLimit) * 100) : 0;
+        const barColor = overage > 0 ? '#EA580C' : usageRate > 80 ? '#F59E0B' : '#0EA5E9';
+        return (
+          <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #0EA5E9' }}>
+            <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+              <MessageSquare size={16} color="#0EA5E9" />
+              SMS送信 利用状況
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '0.875rem' }}>
+              <SummaryTile
+                label="今月の送信"
+                value={sentThisMonth}
+                sub={`上限 ${smsLimitLabel(client.plan)}`}
+                color="#0EA5E9"
+                icon={<MessageSquare size={18} />}
+              />
+              <SummaryTile
+                label="送信失敗（今月）"
+                value={stats.smsFailedThisMonth}
+                color="#DC2626"
+                icon={<AlertTriangle size={18} />}
+              />
+              <SummaryTile
+                label="超過送信数（今月）"
+                value={overage}
+                sub={`@ ¥${SMS_OVERAGE_UNIT_PRICE}/通`}
+                color="#F59E0B"
+                icon={<MessageSquare size={18} />}
+              />
+              <SummaryTile
+                label="超過課金額（今月）"
+                value={`¥${overageCharge.toLocaleString()}`}
+                color="#9A3412"
+                icon={<MessageSquare size={18} />}
+              />
+              <SummaryTile
+                label="累計送信数"
+                value={stats.smsSentTotal}
+                color="#6B7280"
+                icon={<MessageSquare size={18} />}
+              />
+            </div>
+            {/* 使用率バー */}
+            {smsLimit > 0 && (
+              <div>
+                <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '0.25rem' }}>
+                  上限使用率: {sentThisMonth} / {smsLimit.toLocaleString()}通 ({usageRate.toFixed(1)}%)
+                </div>
+                <div style={{ width: '100%', height: '8px', backgroundColor: '#F3F4F6', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ width: `${usageRate}%`, height: '100%', backgroundColor: barColor, transition: 'width 0.3s' }} />
+                </div>
+                {overage > 0 && (
+                  <p style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', backgroundColor: '#FEF3C7', borderLeft: '3px solid #F59E0B', borderRadius: '4px', fontSize: '0.75rem', color: '#92400E' }}>
+                    <strong>上限超過:</strong> {overage}通 × ¥{SMS_OVERAGE_UNIT_PRICE} = ¥{overageCharge.toLocaleString()} を当月の請求に追加加算します。
+                  </p>
+                )}
+              </div>
+            )}
+            {smsLimit < 0 && (
+              <p style={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                エンタープライズプランは送信数無制限です。
+              </p>
+            )}
+            {sentThisMonth === 0 && (
+              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#9CA3AF' }}>
+                ※ 今月のSMS送信実績はありません。
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 子アカウント（親の場合） */}
       {client.accountType === 'parent' && (
@@ -2117,7 +2222,7 @@ const ClientFormModal: React.FC<{
 /* ============================================================
    契約・請求管理
    ============================================================ */
-const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
+const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: ClientStats } }> = ({ clients, statsMap }) => {
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
   const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
@@ -2138,8 +2243,8 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
   const expiryColor = { expired: '#DC2626', warn30: '#D97706', warn60: '#CA8A04', ok: '#059669', none: '#9CA3AF' };
   const expiryLabel = { expired: '期限切れ', warn30: '30日以内', warn60: '60日以内', ok: '正常', none: '未設定' };
 
-  /** クライアントの全月額（プラン + 契約中オプション） */
-  const clientMonthlyTotal = (c: Client): { plan: number; options: number; total: number; optionDetails: { key: string; label: string; fee: number }[] } => {
+  /** クライアントの全月額（プラン + 契約中オプション + SMS超過課金） */
+  const clientMonthlyTotal = (c: Client): { plan: number; options: number; smsOverage: number; total: number; optionDetails: { key: string; label: string; fee: number }[] } => {
     const plan = PLAN_PRICES[c.plan];
     const optionDetails: { key: string; label: string; fee: number }[] = [];
     let options = 0;
@@ -2152,13 +2257,15 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
         }
       });
     }
-    return { plan, options, total: plan + options, optionDetails };
+    const smsOverage = statsMap[c.id]?.smsOverageChargeThisMonth || 0;
+    return { plan, options, smsOverage, total: plan + options + smsOverage, optionDetails };
   };
 
   const activeParents = parents.filter(c => c.status === 'active');
   const totalMonthlyPlan = activeParents.reduce((sum, c) => sum + PLAN_PRICES[c.plan], 0);
   const totalMonthlyOptions = activeParents.reduce((sum, c) => sum + clientMonthlyTotal(c).options, 0);
-  const totalMonthly = totalMonthlyPlan + totalMonthlyOptions;
+  const totalMonthlySmsOverage = activeParents.reduce((sum, c) => sum + clientMonthlyTotal(c).smsOverage, 0);
+  const totalMonthly = totalMonthlyPlan + totalMonthlyOptions + totalMonthlySmsOverage;
 
   const planRevenue = (['trial', 'standard', 'professional', 'enterprise'] as const).map(p => ({
     plan: p,
@@ -2184,9 +2291,10 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
         <div style={{ ...cardStyle, padding: '1.25rem', flex: '1 1 240px' }}>
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>月次売上合計（推定）</div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, color: '#C2570C' }}>¥{totalMonthly.toLocaleString()}</div>
-          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', fontSize: '0.6875rem', color: '#6B7280' }}>
+          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', fontSize: '0.6875rem', color: '#6B7280', flexWrap: 'wrap' }}>
             <span>プラン: <strong style={{ color: '#374151' }}>¥{totalMonthlyPlan.toLocaleString()}</strong></span>
             <span>オプション: <strong style={{ color: '#9333EA' }}>¥{totalMonthlyOptions.toLocaleString()}</strong></span>
+            <span>SMS超過: <strong style={{ color: '#EA580C' }}>¥{totalMonthlySmsOverage.toLocaleString()}</strong></span>
           </div>
         </div>
         {planRevenue.map(r => (
@@ -2240,15 +2348,29 @@ const ContractPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
                     {(() => {
                       const m = clientMonthlyTotal(c);
+                      const hasExtras = m.options > 0 || m.smsOverage > 0;
                       return (
                         <>
                           <div style={{ fontWeight: 700, color: '#111827' }}>¥{m.total.toLocaleString()}</div>
-                          {m.options > 0 && (
+                          {hasExtras && (
                             <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginTop: '0.125rem' }}>
-                              プラン ¥{m.plan.toLocaleString()} + オプション ¥{m.options.toLocaleString()}
-                              {m.optionDetails.length > 0 && (
-                                <span style={{ marginLeft: '0.25rem', color: '#9333EA' }}>
-                                  ({m.optionDetails.map(o => o.label).join('・')})
+                              プラン ¥{m.plan.toLocaleString()}
+                              {m.options > 0 && (
+                                <>
+                                  {' + オプション ¥'}{m.options.toLocaleString()}
+                                  {m.optionDetails.length > 0 && (
+                                    <span style={{ marginLeft: '0.25rem', color: '#9333EA' }}>
+                                      ({m.optionDetails.map(o => o.label).join('・')})
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                              {m.smsOverage > 0 && (
+                                <span style={{ color: '#EA580C' }}>
+                                  {' + SMS超過 ¥'}{m.smsOverage.toLocaleString()}
+                                  <span style={{ marginLeft: '0.25rem' }}>
+                                    ({statsMap[c.id]?.smsOverageThisMonth || 0}通×¥{SMS_OVERAGE_UNIT_PRICE})
+                                  </span>
                                 </span>
                               )}
                             </div>
@@ -3368,7 +3490,7 @@ const AdminApp: React.FC = () => {
           />
         )}
         {currentView === 'contracts' && (
-          <ContractPage clients={clients} />
+          <ContractPage clients={clients} statsMap={statsMap} />
         )}
         {currentView === 'initdata' && (
           <InitDataPage clients={clients} />

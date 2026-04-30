@@ -459,6 +459,27 @@ export interface ClientData {
   mediaCosts?: { [yearMonth: string]: { [sourceName: string]: number } };
   /** レポート定期配信設定 */
   reportSchedule?: ReportScheduleSetting;
+  /** SMS送信履歴。月単位の集計用に保持。 */
+  smsLogs?: SmsLog[];
+}
+
+/** SMS送信1件の記録 */
+export interface SmsLog {
+  id: number;
+  /** ISO timestamp */
+  sentAt: string;
+  /** 送信先電話番号 */
+  to: string;
+  /** 関連応募者ID（任意） */
+  applicantId?: number;
+  /** 本文の先頭(プレビュー用) */
+  preview: string;
+  /** 送信ステータス: success/failed/pending */
+  status: 'success' | 'failed' | 'pending';
+  /** 失敗時のエラーメッセージ */
+  errorMessage?: string;
+  /** 操作者(クライアント側のメンバー名) */
+  sentBy?: string;
 }
 
 /** レポート定期配信設定 */

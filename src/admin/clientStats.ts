@@ -4,6 +4,7 @@
 import { storage } from '@/utils/storage';
 import { getClientLogs } from '@/utils/clientLog';
 import type { Client, ClientData, ClientOperationLog } from '@/types';
+import { smsSuccessCountThisMonth, smsOverage, smsOverageCharge } from '@/utils/sms';
 
 export interface ClientStats {
   applicantCount: number;
@@ -31,6 +32,12 @@ export interface ClientStats {
   thisMonthCpa: number;              // 当月CPA (媒体費/応募)
   thisMonthCph: number;              // 当月CPH (媒体費/採用)
   alertsCount: number;               // アクティブなアラート数
+  // SMS送信
+  smsSentTotal: number;              // 全期間の送信成功数
+  smsSentThisMonth: number;          // 当月の送信成功数
+  smsFailedThisMonth: number;        // 当月の送信失敗数
+  smsOverageThisMonth: number;       // 当月の超過数（プラン上限超過）
+  smsOverageChargeThisMonth: number; // 当月の超過課金額(円)
   lastLoginAt: string | null;     // ISO timestamp or null
   lastActionAt: string | null;
 }
@@ -98,6 +105,14 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
   if (prevMonthApps.length >= 5 && thisMonthApps.length > 0 && thisMonthApps.length < prevMonthApps.length * 0.5) alertsCount += 1;
   if (thisMonthApps.length >= 5 && thisMonthHired === 0) alertsCount += 1;
 
+  // SMS送信
+  const smsLogs = data?.smsLogs || [];
+  const smsSentTotal = smsLogs.filter((l) => l.status === 'success').length;
+  const smsSentThisMonth = smsSuccessCountThisMonth(smsLogs, month);
+  const smsFailedThisMonth = smsLogs.filter((l) => l.sentAt.startsWith(month) && l.status === 'failed').length;
+  const smsOverageThisMonth = smsOverage(client.plan, smsSentThisMonth);
+  const smsOverageChargeThisMonth = smsOverageCharge(client.plan, smsSentThisMonth);
+
   const lastLogin = logs.find((l) => l.category === 'auth' && l.action === 'ログイン');
   const lastAction = logs[0]; // logs are reverse-chronological in pushClientLog
 
@@ -135,6 +150,11 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
     thisMonthCpa,
     thisMonthCph,
     alertsCount,
+    smsSentTotal,
+    smsSentThisMonth,
+    smsFailedThisMonth,
+    smsOverageThisMonth,
+    smsOverageChargeThisMonth,
     lastLoginAt: lastLogin?.timestamp || null,
     lastActionAt: lastAction?.timestamp || null,
   };
@@ -162,6 +182,12 @@ export interface AdminAggregates {
   totalChildAccounts: number;
   enabledScreening: number;     // スクリーニング有効化済の本部数
   parentCount: number;
+  // SMS送信
+  smsSentThisMonth: number;
+  smsFailedThisMonth: number;
+  smsOverageThisMonth: number;
+  smsOverageChargeThisMonth: number;
+  smsClientsOver: number;       // 上限超過しているクライアント数
 }
 
 export function calcAdminAggregates(clients: Client[], statsMap: { [id: string]: ClientStats }): AdminAggregates {
@@ -172,6 +198,11 @@ export function calcAdminAggregates(clients: Client[], statsMap: { [id: string]:
   let thisMonthScreeningRuns = 0;
   let totalChildAccounts = 0;
   let enabledScreening = 0;
+  let smsSentThisMonth = 0;
+  let smsFailedThisMonth = 0;
+  let smsOverageThisMonth = 0;
+  let smsOverageChargeThisMonth = 0;
+  let smsClientsOver = 0;
 
   parents.forEach((p) => {
     const s = statsMap[p.id];
@@ -182,6 +213,11 @@ export function calcAdminAggregates(clients: Client[], statsMap: { [id: string]:
     thisMonthScreeningRuns += s.screeningRunsThisMonth;
     totalChildAccounts += s.childCount;
     if (s.screeningEnabled) enabledScreening += 1;
+    smsSentThisMonth += s.smsSentThisMonth;
+    smsFailedThisMonth += s.smsFailedThisMonth;
+    smsOverageThisMonth += s.smsOverageThisMonth;
+    smsOverageChargeThisMonth += s.smsOverageChargeThisMonth;
+    if (s.smsOverageThisMonth > 0) smsClientsOver += 1;
   });
 
   return {
@@ -192,6 +228,11 @@ export function calcAdminAggregates(clients: Client[], statsMap: { [id: string]:
     totalChildAccounts,
     enabledScreening,
     parentCount: parents.length,
+    smsSentThisMonth,
+    smsFailedThisMonth,
+    smsOverageThisMonth,
+    smsOverageChargeThisMonth,
+    smsClientsOver,
   };
 }
 
