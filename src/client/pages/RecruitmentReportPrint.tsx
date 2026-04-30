@@ -4,6 +4,7 @@ import type { DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColum
 import { presetToRange, formatRange, prevRangeOf } from '@/utils/reports/dateRange';
 import { buildReport } from '@/utils/reports/aggregate';
 import { storage } from '@/utils/storage';
+import { apiPost } from '@/utils/apiClient';
 
 /**
  * 採用レポート 印刷専用ビュー
@@ -49,23 +50,19 @@ const RecruitmentReportPrint: React.FC = () => {
   const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!wantAI || !report) return;
+    if (!wantAI || !report || !client) return;
     let cancelled = false;
     setAiLoading(true);
     setAiError(null);
     // 30秒で強制タイムアウト（自動印刷時のフリーズ防止）
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
-    fetch('/api/report-summary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ report, prevReport }),
+    const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+    apiPost<any>('/api/report-summary', {
+      clientId: ownerId,
+      body: { report, prevReport },
       signal: controller.signal,
     })
-      .then(async (r) => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-        return r.json();
-      })
       .then((data) => { if (!cancelled) setAiSummary(data); })
       .catch((e) => {
         if (cancelled) return;

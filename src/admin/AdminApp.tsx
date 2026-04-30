@@ -63,7 +63,9 @@ import {
 /* ============================================================
    定数 / ヘルパー
    ============================================================ */
-const ADMIN_PASSWORD = 'admin123';
+/** 初期管理者パスワード。Vite ビルド時に VITE_ADMIN_INITIAL_PASSWORD で上書き可能。
+ *  本番では必ず環境変数で設定し、初回ログイン後に変更させる運用にすること。 */
+const ADMIN_PASSWORD = (import.meta as any).env?.VITE_ADMIN_INITIAL_PASSWORD || 'admin123';
 
 const PLAN_LABELS: Record<Client['plan'], string> = {
   trial: 'トライアル',
@@ -457,9 +459,11 @@ const AdminLogin: React.FC<{ onLogin: (account: AdminAccount, remember: boolean)
           {submitting ? '認証中...' : 'ログイン'}
         </button>
 
-        <div style={{ marginTop: '1.25rem', padding: '0.625rem 0.75rem', backgroundColor: '#F9FAFB', borderRadius: '6px', fontSize: '0.6875rem', color: '#6b7280', textAlign: 'center' }}>
-          初期管理者: admin@local / admin123（初回ログイン後に必ず変更してください）
-        </div>
+        {ADMIN_PASSWORD === 'admin123' && (
+          <div style={{ marginTop: '1.25rem', padding: '0.625rem 0.75rem', backgroundColor: '#FEF3C7', borderRadius: '6px', fontSize: '0.6875rem', color: '#92400E', textAlign: 'center' }}>
+            ⚠ 開発環境: 初期管理者 admin@local / admin123（本番では VITE_ADMIN_INITIAL_PASSWORD を必ず設定）
+          </div>
+        )}
       </form>
     </div>
   );
@@ -3361,9 +3365,12 @@ const AdminApp: React.FC = () => {
         if (c.accountType === 'parent') {
           try {
             storage.deleteClientData(c.id);
-            // 子アカは親IDのデータを参照するので個別削除不要
-            // 操作ログも削除
+            // 親の操作ログ
             localStorage.removeItem(`hireflow:client:${c.id}:logs`);
+            // 子アカウントの操作ログも削除（孤立防止）
+            children.forEach((ch) => {
+              localStorage.removeItem(`hireflow:client:${ch.id}:logs`);
+            });
           } catch { /* ignore */ }
         }
         setConfirmDialog(null);

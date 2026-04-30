@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
 import { resolveJobs, resolveSources, resolveScreeningCriteria, hasScreeningJobOverride } from '@/utils/baseScope';
 import { hasActiveOption, incrementOptionUsage, isOptionLimitReached, getOptionRemaining, getOptionUsageThisMonth } from '@/utils/clientOptions';
+import { apiPost } from '@/utils/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
@@ -1474,11 +1475,13 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
     setRunning(true);
     setError('');
     try {
-      const resp = await fetch('/api/screen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (!client) throw new Error('ログイン情報が取得できません');
+      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const data = await apiPost<any>('/api/screen', {
+        clientId: ownerId,
+        body: {
           applicant: {
+            // 個人特定情報(name/email/phone)は送信しない
             age: applicant.age,
             gender: applicant.gender,
             currentJob: applicant.currentJob,
@@ -1491,13 +1494,8 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
             note: applicant.note,
           },
           criteria: resolvedCriteria,
-        }),
+        },
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
       const result = {
         score: Number(data.score) || 0,
         recommendation: data.recommendation,

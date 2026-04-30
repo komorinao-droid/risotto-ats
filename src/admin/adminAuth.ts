@@ -127,6 +127,24 @@ export interface AdminOperationLogEntry {
   action: string;
   target: string;
   detail?: string;
+  /** ハッシュチェーン値 (改ざん検知用)。前ログのchain+当ログのcontentから算出 */
+  chain?: string;
+}
+
+/** 軽量な FNV-1a ハッシュ (改ざん検知用、暗号強度なし) */
+function fnv1aHash(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/** ハッシュチェーン用 chain 値を計算 (前ログの chain + 当ログ内容) */
+function computeChain(prevChain: string, log: Omit<AdminOperationLogEntry, 'chain'>): string {
+  const payload = `${prevChain}|${log.id}|${log.timestamp}|${log.operatorId}|${log.action}|${log.target}|${log.detail || ''}`;
+  return fnv1aHash(payload);
 }
 
 export function getAdminLogs(): AdminOperationLogEntry[] {
@@ -137,13 +155,36 @@ export function getAdminLogs(): AdminOperationLogEntry[] {
   return [];
 }
 
-export function pushAdminLog(entry: Omit<AdminOperationLogEntry, 'id' | 'timestamp'>): void {
+/** ハッシュチェーンの整合性を検証。改ざんがあれば該当エントリ index を返す */
+export function verifyAdminLogIntegrity(): { ok: boolean; tamperedIndex?: number } {
+  const logs = getAdminLogs();
+  // logs は新しい順なので chain検証は古い順から
+  const ordered = [...logs].reverse();
+  let prevChain = 'genesis';
+  for (let i = 0; i < ordered.length; i++) {
+    const entry = ordered[i];
+    if (!entry.chain) continue; // chain未設定の旧データはスキップ
+    const expected = computeChain(prevChain, entry);
+    if (entry.chain !== expected) {
+      return { ok: false, tamperedIndex: logs.length - 1 - i };
+    }
+    prevChain = entry.chain;
+  }
+  return { ok: true };
+}
+
+export function pushAdminLog(entry: Omit<AdminOperationLogEntry, 'id' | 'timestamp' | 'chain'>): void {
   const logs = getAdminLogs();
   const now = new Date();
-  const log: AdminOperationLogEntry = {
+  const prevChain = logs.length > 0 ? (logs[0].chain || 'genesis') : 'genesis';
+  const baseLog = {
     id: `${now.getTime()}_${Math.random().toString(36).slice(2, 6)}`,
     timestamp: now.toISOString(),
     ...entry,
+  };
+  const log: AdminOperationLogEntry = {
+    ...baseLog,
+    chain: computeChain(prevChain, baseLog),
   };
   logs.unshift(log);
   if (logs.length > MAX_LOGS) logs.length = MAX_LOGS;

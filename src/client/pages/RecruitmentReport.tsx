@@ -8,6 +8,7 @@ import { downloadCSV, printReport } from '@/utils/reports/export';
 import { evaluateRow, bgForLevel, fgForLevel } from '@/utils/reports/bottleneck';
 import { storage } from '@/utils/storage';
 import MediaCostManagement from '@/client/pages/settings/MediaCostManagement';
+import { apiPost } from '@/utils/apiClient';
 
 const card: React.CSSProperties = {
   backgroundColor: '#fff',
@@ -122,20 +123,15 @@ const RecruitmentReport: React.FC = () => {
   }, [range.start, range.end, prevRange.start, prevRange.end, compareEnabled]);
 
   const generateAISummary = async () => {
-    if (!report) return;
+    if (!report || !client) return;
     setAiLoading(true);
     setAiError(null);
     try {
-      const resp = await fetch('/api/report-summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report, prevReport: compareEnabled ? prevReport : null }),
+      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const data = await apiPost<any>('/api/report-summary', {
+        clientId: ownerId,
+        body: { report, prevReport: compareEnabled ? prevReport : null },
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
       setAiSummary(data);
     } catch (e: any) {
       setAiError(e.message || 'AI要約の生成に失敗しました');
