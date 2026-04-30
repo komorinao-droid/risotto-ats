@@ -91,6 +91,9 @@ export function reportToCSV(report: RecruitmentReport): string {
   report.byBaseSource.forEach(({ base, rows }) => {
     if (rows.length) lines.push(...matrixSection(`支社×媒体: ${base}`, rows));
   });
+  report.byBaseJob.forEach(({ base, rows }) => {
+    if (rows.length) lines.push(...matrixSection(`支社×職種: ${base}`, rows));
+  });
   lines.push(...ageSection('全社×年代別', report.byAge));
   report.byBaseAge.forEach(({ base, rows }) => {
     if (rows.length) lines.push(...ageSection(`支社×年代: ${base}`, rows));

@@ -73,10 +73,11 @@ const RecruitmentReport: React.FC = () => {
     if (t === 'cost' || t === 'base' || t === 'source' || t === 'job' || t === 'age' || t === 'step' || t === 'leadtime') return t;
     return 'summary' as const;
   })();
-  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'age' | 'step' | 'cost' | 'leadtime'>(initialTab);
+  const [section, setSection] = useState<'summary' | 'base' | 'source' | 'job' | 'baseJob' | 'age' | 'step' | 'cost' | 'leadtime'>(initialTab);
   const [stepAxis, setStepAxis] = useState<'source' | 'base' | 'job'>('source');
   const [costMode, setCostMode] = useState<'analysis' | 'input'>('analysis');
   const [expandedBaseSrc, setExpandedBaseSrc] = useState<Set<string>>(new Set());
+  const [expandedBaseJob, setExpandedBaseJob] = useState<Set<string>>(new Set());
   const [expandedBaseAge, setExpandedBaseAge] = useState<Set<string>>(new Set());
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [aiSummary, setAiSummary] = useState<AISummary | null>(null);
@@ -145,6 +146,11 @@ const RecruitmentReport: React.FC = () => {
     n.has(base) ? n.delete(base) : n.add(base);
     return n;
   });
+  const toggleBaseJob = (base: string) => setExpandedBaseJob((s) => {
+    const n = new Set(s);
+    n.has(base) ? n.delete(base) : n.add(base);
+    return n;
+  });
   const toggleBaseAge = (base: string) => setExpandedBaseAge((s) => {
     const n = new Set(s);
     n.has(base) ? n.delete(base) : n.add(base);
@@ -155,7 +161,7 @@ const RecruitmentReport: React.FC = () => {
     return <div style={{ padding: '2rem', color: '#6B7280' }}>データがありません。</div>;
   }
 
-  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byJobAge, stepFunnel, goal, cost, leadTime } = report;
+  const { total, ngBreakdown, byBase, bySource, byBaseSource, byAge, byBaseAge, bySourceAge, ngAgeBreakdown, byJob, byBaseJob, byJobAge, stepFunnel, goal, cost, leadTime } = report;
   const overallMatrix: MatrixRow = { label: '全体', ...total };
 
   return (
@@ -309,6 +315,7 @@ const RecruitmentReport: React.FC = () => {
           ['base', '拠点別', Building2],
           ['source', '媒体別', Megaphone],
           ['job', '職種別', Briefcase],
+          ['baseJob', '拠点×職種', Building2],
           ['age', '年代分析', Users],
           ['cost', 'コスト分析', Wallet],
           ['leadtime', 'リードタイム', Clock],
@@ -589,6 +596,49 @@ const RecruitmentReport: React.FC = () => {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ===== 拠点×職種 ===== */}
+      {section === 'baseJob' && (
+        <div style={card}>
+          <h3 style={sectionTitle}>
+            <Building2 size={16} color="#0284C7" />
+            拠点 × 職種別 ファネル
+          </h3>
+          <p style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: 0 }}>
+            各拠点でどの職種がどれだけ応募・採用に至っているかを確認できます。クリックで展開。
+          </p>
+          {byBaseJob.length === 0 ? (
+            <div style={{ fontSize: '0.8125rem', color: '#9CA3AF', padding: '1rem 0' }}>該当データがありません。</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {byBaseJob.map(({ base, rows }) => {
+                const open = expandedBaseJob.has(base);
+                const baseTotal = byBase.find((b) => b.label === base);
+                return (
+                  <div key={base} style={{ border: '1px solid #E5E7EB', borderRadius: '6px' }}>
+                    <button
+                      onClick={() => toggleBaseJob(base)}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '0.625rem 0.875rem', border: 'none', background: '#F9FAFB', cursor: 'pointer', borderRadius: '6px' }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <strong style={{ fontSize: '0.875rem' }}>{base}</strong>
+                        {baseTotal && <span style={{ fontSize: '0.75rem', color: '#6B7280', marginLeft: '0.5rem' }}>応募 {fmt(baseTotal.applications)} / 採用 {fmt(baseTotal.hired)}</span>}
+                      </span>
+                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>{rows.length} 職種</span>
+                    </button>
+                    {open && (
+                      <div style={{ padding: '0.5rem 0.875rem' }}>
+                        <MatrixTable rows={rows} overall={overallMatrix} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

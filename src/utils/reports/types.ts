@@ -95,6 +95,7 @@ export interface RecruitmentReport {
   ngAgeBreakdown: { ageGroup: string; count: number; rate: number }[];
   byMonth: MonthlyBucket[];                      // 月次推移
   byJob: MatrixRow[];                            // 職種別マトリクス
+  byBaseJob: { base: string; rows: MatrixRow[] }[]; // 拠点×職種
   byJobAge: { job: string; rows: AgeBreakdown[] }[]; // 職種×年代
   stepFunnel: StepFunnelData;                    // ステップ別到達率/通過率
   goal?: GoalProgress;                           // 採用目標達成率（期間内に該当目標があれば）

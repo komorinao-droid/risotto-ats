@@ -299,6 +299,24 @@ export function calcByJob(applicants: Applicant[], events: { applicantId: number
   }).sort((a, b) => b.hired - a.hired || b.applications - a.applications);
 }
 
+/** 拠点×職種 マトリクス */
+export function calcByBaseJob(applicants: Applicant[], events: { applicantId: number; date?: string }[], statuses?: Status[]): { base: string; rows: MatrixRow[] }[] {
+  const baseSet = new Set<string>();
+  applicants.forEach((a) => baseSet.add(a.base || '未設定'));
+  return Array.from(baseSet).map((base) => {
+    const inBase = applicants.filter((a) => (a.base || '未設定') === base);
+    const eventsInBase = events.filter((e) => inBase.some((a) => a.id === e.applicantId));
+    return { base, rows: calcByJob(inBase, eventsInBase, statuses) };
+  }).sort((a, b) => {
+    const ah = a.rows.reduce((s, r) => s + r.hired, 0);
+    const bh = b.rows.reduce((s, r) => s + r.hired, 0);
+    if (bh !== ah) return bh - ah;
+    const aa = a.rows.reduce((s, r) => s + r.applications, 0);
+    const ba = b.rows.reduce((s, r) => s + r.applications, 0);
+    return ba - aa;
+  });
+}
+
 /** 職種×年代 */
 export function calcByJobAge(applicants: Applicant[], statuses?: Status[]): { job: string; rows: AgeBreakdown[] }[] {
   const set = new Set<string>();
@@ -656,6 +674,7 @@ export function buildReport(data: ClientData, range: DateRange): RecruitmentRepo
     ngAgeBreakdown: calcNgAgeBreakdown(applicants, statuses),
     byMonth: calcByMonth(applicants, events, range, statuses),
     byJob: calcByJob(applicants, events, statuses),
+    byBaseJob: calcByBaseJob(applicants, events, statuses),
     byJobAge: calcByJobAge(applicants, statuses),
     stepFunnel: calcStepFunnel(applicants, events, statuses),
     goal: calcGoalProgress(applicants, range, data.recruitmentGoals, statuses),
