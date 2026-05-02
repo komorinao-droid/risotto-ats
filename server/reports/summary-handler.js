@@ -3,6 +3,7 @@
  * POST /api/report-summary  body: { report: RecruitmentReport, prevReport?: RecruitmentReport }
  */
 const Anthropic = require('@anthropic-ai/sdk');
+const { recordUsage } = require('../lib/usageLogger');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -103,12 +104,30 @@ async function summaryHandler(req, res) {
     const textBlock = (resp.content || []).find((b) => b.type === 'text');
     const text = textBlock ? textBlock.text : '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const clientId = req.clientId || (req.body && req.body.clientId) || 'unknown';
+
     if (!jsonMatch) {
+      recordUsage({
+        clientId,
+        purpose: 'reportSummary',
+        model: MODEL,
+        usage: resp.usage,
+        status: 'failed',
+        errorMessage: 'Failed to parse AI response',
+      });
       return res.status(502).json({ error: 'Failed to parse AI response', raw: text.slice(0, 500) });
     }
     const parsed = JSON.parse(jsonMatch[0]);
 
     const safeArr = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string').slice(0, 5) : []);
+
+    recordUsage({
+      clientId,
+      purpose: 'reportSummary',
+      model: MODEL,
+      usage: resp.usage,
+      status: 'success',
+    });
 
     res.json({
       headline: typeof parsed.headline === 'string' ? parsed.headline : '',
@@ -120,6 +139,14 @@ async function summaryHandler(req, res) {
     });
   } catch (e) {
     console.error('[report-summary] error:', e);
+    recordUsage({
+      clientId: req.clientId || (req.body && req.body.clientId) || 'unknown',
+      purpose: 'reportSummary',
+      model: MODEL,
+      usage: {},
+      status: 'failed',
+      errorMessage: e.message || 'internal error',
+    });
     res.status(500).json({ error: e.message || 'internal error' });
   }
 }

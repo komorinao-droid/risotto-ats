@@ -38,10 +38,8 @@ async function runScreening(prompt, criteria) {
   }
   const parsed = JSON.parse(jsonMatch[0]);
 
-  if (prompt.multiAxis) {
-    return parseMultiAxisResult(parsed, criteria);
-  }
-  return parseLegacyResult(parsed);
+  const result = prompt.multiAxis ? parseMultiAxisResult(parsed, criteria) : parseLegacyResult(parsed);
+  return { result, usage: resp.usage || {}, model: MODEL };
 }
 
 function parseLegacyResult(parsed) {

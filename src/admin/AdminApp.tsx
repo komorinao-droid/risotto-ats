@@ -35,8 +35,10 @@ import {
   Megaphone,
   KeyRound,
   MessageSquare,
+  DollarSign,
 } from 'lucide-react';
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
+import { fetchApiUsageSummary, type ApiUsageSummary } from './adminApi';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
@@ -647,6 +649,134 @@ const ReportPerformanceCompare: React.FC<{
   );
 };
 
+/**
+ * Anthropic API 利用コスト セクション。
+ *
+ * - サーバーのインメモリ usageLogger から今月分を取得し、合計 USD と概算円、内訳を表示
+ * - 直接ロードに失敗した場合は警告のみ（dev 環境想定）
+ */
+const ApiCostSection: React.FC<{ clients: Client[] }> = ({ clients }) => {
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [yearMonth, setYearMonth] = useState<string>(currentMonth);
+  const [summary, setSummary] = useState<ApiUsageSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [usdJpyRate, setUsdJpyRate] = useState<number>(150); // 為替は手入力で
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchApiUsageSummary(yearMonth);
+      setSummary(data);
+    } catch (e: any) {
+      setError(e.message || '取得に失敗しました');
+      setSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [yearMonth]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const clientNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    clients.forEach((c) => { m[c.id] = c.companyName; });
+    return m;
+  }, [clients]);
+
+  const totalJpy = summary ? Math.round(summary.totalUsd * usdJpyRate) : 0;
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>APIコスト（Anthropic）</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <input
+            type="month"
+            value={yearMonth}
+            onChange={(e) => setYearMonth(e.target.value)}
+            style={{ padding: '0.25rem 0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px', fontSize: '0.75rem' }}
+          />
+          <label style={{ fontSize: '0.75rem', color: '#6B7280', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+            為替
+            <input
+              type="number"
+              min="50"
+              max="300"
+              step="1"
+              value={usdJpyRate}
+              onChange={(e) => setUsdJpyRate(Number(e.target.value) || 150)}
+              style={{ width: '60px', padding: '0.25rem', border: '1px solid #D1D5DB', borderRadius: '4px', fontSize: '0.75rem' }}
+            />
+            円/USD
+          </label>
+          <button
+            onClick={reload}
+            disabled={loading}
+            style={{ padding: '0.25rem 0.625rem', border: '1px solid #D1D5DB', borderRadius: '4px', backgroundColor: '#fff', fontSize: '0.75rem', cursor: 'pointer' }}
+          >
+            <RefreshCw size={12} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />更新
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '4px', fontSize: '0.75rem', color: '#991B1B', marginBottom: '1rem' }}>
+          {error}（サーバーが未デプロイ・認証未設定の可能性）
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <StatCard label="今月の概算コスト" value={`¥${totalJpy.toLocaleString()}`} color="#7C3AED" icon={<DollarSign size={22} />} />
+        <StatCard label="今月のコスト (USD)" value={summary ? `$${summary.totalUsd.toFixed(4)}` : '-'} color="#9333EA" icon={<DollarSign size={22} />} />
+        <StatCard label="呼び出し回数" value={summary ? summary.totalCalls : '-'} color="#A855F7" icon={<Sparkles size={22} />} />
+        <StatCard label="失敗回数" value={summary ? summary.failed : '-'} color="#DC2626" icon={<AlertTriangle size={22} />} />
+        <StatCard label="入力トークン" value={summary ? summary.totalInputTokens.toLocaleString() : '-'} color="#0EA5E9" icon={<FileText size={22} />} />
+        <StatCard label="出力トークン" value={summary ? summary.totalOutputTokens.toLocaleString() : '-'} color="#0891B2" icon={<FileText size={22} />} />
+      </div>
+
+      {summary && summary.byClient.length > 0 && (
+        <div style={{ ...cardStyle, padding: '1rem', marginBottom: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', fontWeight: 600 }}>クライアント別 API コスト（{yearMonth}）</h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #E5E7EB', color: '#6B7280' }}>
+                  <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>クライアント</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>呼出</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>失敗</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>入力tok</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>出力tok</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>USD</th>
+                  <th style={{ textAlign: 'right', padding: '0.375rem 0.5rem' }}>概算円</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.byClient.map((row) => (
+                  <tr key={row.clientId} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                    <td style={{ padding: '0.375rem 0.5rem' }}>{clientNameMap[row.clientId] || row.clientId}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right' }}>{row.calls}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right', color: row.failed > 0 ? '#DC2626' : '#9CA3AF' }}>{row.failed}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right' }}>{row.inputTokens.toLocaleString()}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right' }}>{row.outputTokens.toLocaleString()}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right' }}>${row.estimatedUsd.toFixed(4)}</td>
+                    <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right', fontWeight: 600 }}>¥{Math.round(row.estimatedUsd * usdJpyRate).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.5rem' }}>
+            ※ サーバー再起動でリセットされる暫定実装。本格運用時は永続化が必要（バッファ {summary.bufferSize}/{summary.bufferLimit} 件）
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: string) => void; statsMap: { [id: string]: ClientStats } }> = ({ clients, onNavigate, statsMap }) => {
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -703,6 +833,10 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
         <StatCard label="超過課金額（今月）" value={`¥${aggregates.smsOverageChargeThisMonth.toLocaleString()}`} color="#9A3412" icon={<MessageSquare size={22} />} />
         <StatCard label="超過クライアント" value={`${aggregates.smsClientsOver} / ${aggregates.parentCount}`} color="#EA580C" icon={<MessageSquare size={22} />} />
       </div>
+
+      {/* API コスト（Anthropic API 使用量） */}
+      <ApiCostSection clients={clients} />
+
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(360px, 1.4fr)', gap: '1rem', marginBottom: '2rem' }}>
         {/* プラン別グラフ */}

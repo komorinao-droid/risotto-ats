@@ -5,6 +5,7 @@
  */
 const { buildScreeningPrompt } = require('./prompt');
 const { runScreening } = require('./claude');
+const { recordUsage } = require('../lib/usageLogger');
 
 /**
  * @param {import('express').Request} req
@@ -35,7 +36,16 @@ async function screeningHandler(req, res) {
     };
 
     const prompt = buildScreeningPrompt({ applicant, criteria: normalizedCriteria });
-    const result = await runScreening(prompt, normalizedCriteria);
+    const { result, usage, model } = await runScreening(prompt, normalizedCriteria);
+
+    recordUsage({
+      clientId: req.clientId || (req.body && req.body.clientId) || 'unknown',
+      purpose: 'screening',
+      model,
+      usage,
+      applicantId: applicant.id,
+      status: 'success',
+    });
 
     return res.json({
       ...result,
@@ -44,6 +54,14 @@ async function screeningHandler(req, res) {
   } catch (err) {
     const message = err && err.message ? err.message : 'Internal error';
     console.error('[screening]', message);
+    recordUsage({
+      clientId: req.clientId || (req.body && req.body.clientId) || 'unknown',
+      purpose: 'screening',
+      model: 'claude-haiku-4-5-20251001',
+      usage: {},
+      status: 'failed',
+      errorMessage: message,
+    });
     return res.status(500).json({ error: message });
   }
 }
