@@ -1344,7 +1344,7 @@ const KillSwitchSection: React.FC<{ clientId: string }> = ({ clientId }) => {
   return (
     <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderLeft: activeCount > 0 ? '4px solid #DC2626' : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <h3 style={{ ...sectionTitle, marginBottom: 0, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
           <Power size={16} color={activeCount > 0 ? '#DC2626' : undefined} />
           機能キルスイッチ
           {activeCount > 0 && (
