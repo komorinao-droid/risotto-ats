@@ -264,6 +264,34 @@ export interface Client {
   smsPhone?: string;
   // オプション契約
   options?: { [key in ClientOptionKey]?: ClientOption };
+
+  // ─── 解約・データ保持ポリシー（2026-05 追加） ───
+  /** 解約予約日（YYYY-MM-DD）。未到来なら有効、到来後は status='inactive' へ自動遷移を想定 */
+  cancellationDate?: string;
+  /** 解約申請を受け付けた日時（ISO timestamp）。問い合わせ履歴用 */
+  cancellationRequestedAt?: string;
+  /** 解約理由（自由記述） */
+  cancellationReason?: string;
+  /** データ削除予定日（YYYY-MM-DD）。これを過ぎたらバッチで物理削除候補 */
+  dataRetentionUntil?: string;
+  /** 復元期限（保持期間内は復元可。dataRetentionUntil と同義で使ってもよい） */
+  restorableUntil?: string;
+
+  // ─── 緊急 kill switch（2026-05 追加） ───
+  /**
+   * 機能個別の停止フラグ。true = 一時停止中。クライアント側 UI / API の各経路でチェック。
+   * 既存の status: 'inactive' は全停止だが、これは部分停止用。
+   */
+  featureKillSwitches?: {
+    aiScreening?: boolean;        // AI スクリーニング実行を停止
+    recruitmentReport?: boolean;  // 採用レポート集計・配信を停止
+    emailSend?: boolean;          // メール送信全般を停止
+    smsSend?: boolean;            // SMS 送信全般を停止
+    chatbot?: boolean;            // チャットボット応答を停止
+    webhookDelivery?: boolean;    // Webhook 配信を停止
+  };
+  /** 強制ログアウト指示（このタイムスタンプより前に発行されたセッションを無効化） */
+  sessionInvalidatedAt?: string;
 }
 
 // メールテンプレート
@@ -461,6 +489,14 @@ export interface ClientData {
   reportSchedule?: ReportScheduleSetting;
   /** SMS送信履歴。月単位の集計用に保持。 */
   smsLogs?: SmsLog[];
+  /** メール送信履歴（2026-05 追加） */
+  emailLogs?: EmailLog[];
+  /** Webhook 配信履歴（2026-05 追加） */
+  webhookLogs?: WebhookLog[];
+  /** Anthropic API 呼び出し履歴（2026-05 追加）。コスト集計用 */
+  apiCallLogs?: ApiCallLog[];
+  /** 月次請求書履歴（2026-05 追加） */
+  invoices?: InvoiceLog[];
 }
 
 /** SMS送信1件の記録 */
@@ -480,6 +516,108 @@ export interface SmsLog {
   errorMessage?: string;
   /** 操作者(クライアント側のメンバー名) */
   sentBy?: string;
+}
+
+/** メール送信1件の記録（2026-05 追加） */
+export interface EmailLog {
+  id: number;
+  sentAt: string;        // ISO timestamp
+  to: string;            // 宛先
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  /** 本文プレビュー（先頭 200 文字程度） */
+  preview: string;
+  applicantId?: number;
+  /** テンプレート ID（手動送信なら未設定） */
+  templateId?: number;
+  status: 'success' | 'failed' | 'pending';
+  errorMessage?: string;
+  sentBy?: string;
+  /** 何度目の送信か。リトライ時に増える */
+  attempt?: number;
+}
+
+/** Webhook 配信1件の記録（2026-05 追加） */
+export interface WebhookLog {
+  id: number;
+  firedAt: string;        // ISO timestamp
+  /** Webhook 種別キー（applicant.created など） */
+  event: string;
+  /** 配信先 URL */
+  url: string;
+  /** HTTP ステータスコード（接続失敗なら null） */
+  responseStatus: number | null;
+  /** 応答ボディ先頭プレビュー */
+  responsePreview?: string;
+  status: 'success' | 'failed' | 'pending';
+  errorMessage?: string;
+  attempt?: number;
+  /** 次回再送予定時刻（リトライ予定時） */
+  nextRetryAt?: string;
+}
+
+/**
+ * Anthropic API 呼び出し1件の記録（2026-05 追加）。
+ * クライアント別月次コスト集計に使う。
+ * サーバー側で呼び出し完了時に作成し、ClientData に push する想定。
+ */
+export interface ApiCallLog {
+  id: number;
+  /** ISO timestamp */
+  calledAt: string;
+  /** 用途キー: 'screening' | 'reportSummary' | 'jobpost' など */
+  purpose: 'screening' | 'reportSummary' | 'jobpost' | 'other';
+  /** モデル ID（claude-opus-4-6 など） */
+  model: string;
+  /** 入力トークン */
+  inputTokens: number;
+  /** 出力トークン */
+  outputTokens: number;
+  /** Cache 読み込み（Anthropic prompt caching を使った場合） */
+  cacheReadTokens?: number;
+  /** Cache 作成 */
+  cacheCreationTokens?: number;
+  /** USD 推定コスト（小数。為替変換は別レイヤ） */
+  estimatedUsd: number;
+  /** 関連応募者 ID（screening の場合） */
+  applicantId?: number;
+  status: 'success' | 'failed';
+  errorMessage?: string;
+}
+
+/** 月次請求書（2026-05 追加） */
+export interface InvoiceLog {
+  id: number;
+  /** YYYY-MM。請求対象月 */
+  yearMonth: string;
+  /** 発行日 ISO */
+  issuedAt: string;
+  /** 請求金額（円、税込） */
+  totalAmount: number;
+  /** 内訳行 */
+  lines: InvoiceLine[];
+  /** PDF を生成済みなら data URL or 保存パス */
+  pdfUrl?: string;
+  /** メール送付済みフラグ */
+  emailedAt?: string;
+  /** 入金確認日 */
+  paidAt?: string;
+  /** ステータス */
+  status: 'draft' | 'issued' | 'sent' | 'paid' | 'void';
+  memo?: string;
+}
+
+export interface InvoiceLine {
+  /** 'plan' | 'option:aiScreening' | 'sms-overage' | 'custom' など */
+  kind: string;
+  description: string;
+  /** 単価（円） */
+  unitPrice: number;
+  /** 数量（基本 1。SMS 超過件数など） */
+  quantity: number;
+  /** 行合計（unitPrice * quantity） */
+  amount: number;
 }
 
 /** レポート定期配信設定 */
