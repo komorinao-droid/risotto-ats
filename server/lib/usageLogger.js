@@ -1,12 +1,16 @@
 /**
- * Anthropic API 利用ログ（サーバー内メモリのリングバッファ）。
+ * Anthropic API 利用ログ（サーバー内メモリのリングバッファ + JSONL 永続化）。
  *
- * - 永続化はせず、Railway 再デプロイで消える前提（Phase 2 のスコープ）
- * - 1 プロセスにつき直近 N 件のみ保持し、メモリ膨張を防ぐ
- * - クライアント別・月別の集計を都度算出
+ * - メイン: メモリ上のリングバッファ。集計・APIレスポンスはここから生成（高速）
+ * - 永続化: USAGE_LOG_PATH が指定されていれば毎件 append（Railway Volume 想定）
+ *   起動時に同ファイルから直近 MAX_ENTRIES を読み込んでメモリを復元する
+ * - USAGE_LOG_PATH 未設定だと永続化スキップ（dev/preview 互換）
  *
  * 価格表は 2026-01 時点の参考値。実コストは Anthropic Console を一次情報に。
  */
+
+const fs = require('fs');
+const path = require('path');
 
 /**
  * 1 リング内の最大件数。1 件あたり ~600B 想定で 5000 件 ≒ 3MB。
@@ -31,6 +35,60 @@ const DEFAULT_PRICE = { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.
 /** @type {Array<import('./usageTypes').ApiCallLog>} */
 const buffer = [];
 let nextId = 1;
+
+/** 永続化先（環境変数で制御）。Railway Volume では `/data/api-usage.jsonl` 等を指定する想定 */
+const LOG_PATH = process.env.USAGE_LOG_PATH || '';
+
+/**
+ * 起動時にファイルから直近 MAX_ENTRIES 件を読み込んでメモリを復元する。
+ * 失敗しても起動は続ける（破損ログのスキップ）。
+ */
+function loadFromDisk() {
+  if (!LOG_PATH) return;
+  try {
+    if (!fs.existsSync(LOG_PATH)) {
+      // 親ディレクトリがあるか確認し、なければ作る
+      const dir = path.dirname(LOG_PATH);
+      if (dir && !fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      return;
+    }
+    const text = fs.readFileSync(LOG_PATH, 'utf-8');
+    const lines = text.split('\n').filter((l) => l.trim());
+    // 末尾 MAX_ENTRIES だけ取り、新しい順に並んでいる前提で push
+    const recent = lines.slice(-MAX_ENTRIES);
+    let maxId = 0;
+    for (const line of recent) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry && typeof entry.id === 'number') {
+          buffer.push(entry);
+          if (entry.id > maxId) maxId = entry.id;
+        }
+      } catch {
+        // 1行壊れていても続行
+      }
+    }
+    if (maxId > 0) nextId = maxId + 1;
+    console.log(`[usageLogger] loaded ${buffer.length} entries from ${LOG_PATH}`);
+  } catch (e) {
+    console.warn(`[usageLogger] failed to load ${LOG_PATH}: ${e && e.message}`);
+  }
+}
+
+/** 1 行 append。失敗しても呼び出し元には伝播させない（記録漏れ < 機能停止） */
+function appendToDisk(entry) {
+  if (!LOG_PATH) return;
+  try {
+    fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + '\n', 'utf-8');
+  } catch (e) {
+    console.warn(`[usageLogger] failed to append to ${LOG_PATH}: ${e && e.message}`);
+  }
+}
+
+// 起動時に同期ロード（小さい想定なので同期で十分）
+loadFromDisk();
 
 /**
  * Anthropic SDK の resp.usage オブジェクトと文脈情報を受けてログを 1 件追加。
@@ -77,6 +135,8 @@ function recordUsage(args) {
 
   buffer.push(entry);
   if (buffer.length > MAX_ENTRIES) buffer.shift();
+
+  appendToDisk(entry);
 
   return entry;
 }
@@ -152,6 +212,8 @@ function summarize(opts) {
     bufferSize: buffer.length,
     bufferLimit: MAX_ENTRIES,
     yearMonth: o.yearMonth || null,
+    /** 永続化先（未設定 = 揮発モード） */
+    persistencePath: LOG_PATH || null,
   };
 }
 

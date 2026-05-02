@@ -30,6 +30,8 @@ export interface ApiUsageSummary {
   bufferSize: number;
   bufferLimit: number;
   yearMonth: string | null;
+  /** 永続化先パス（未設定なら null = サーバー再起動でリセット） */
+  persistencePath?: string | null;
 }
 
 export interface ApiUsageRecentEntry {
