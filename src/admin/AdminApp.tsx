@@ -36,9 +36,10 @@ import {
   KeyRound,
   MessageSquare,
   DollarSign,
+  Power,
 } from 'lucide-react';
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
-import { fetchApiUsageSummary, type ApiUsageSummary } from './adminApi';
+import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags } from './adminApi';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
@@ -1270,6 +1271,156 @@ const MenuItem: React.FC<{ onClick: () => void; children: React.ReactNode; color
 );
 
 /* ============================================================
+   機能キルスイッチ（クライアント詳細内のセクション）
+   ============================================================ */
+const FEATURE_LABELS: Record<FeatureKey, { label: string; note: string; implemented: boolean }> = {
+  aiScreening: { label: 'AI スクリーニング', note: '/api/screen を 503 で遮断', implemented: true },
+  recruitmentReport: { label: '採用レポート AI 要約', note: '/api/report-summary を 503 で遮断', implemented: true },
+  emailSend: { label: 'メール送信', note: '将来のメール送信 API で参照（現状は記録のみ）', implemented: false },
+  smsSend: { label: 'SMS 送信', note: '将来の SMS 送信 API で参照（現状は記録のみ）', implemented: false },
+  chatbot: { label: 'チャットボット', note: '将来のチャットボット API で参照（現状は記録のみ）', implemented: false },
+  webhookDelivery: { label: 'Webhook 配信', note: '将来の Webhook 配信で参照（現状は記録のみ）', implemented: false },
+};
+
+const KillSwitchSection: React.FC<{ clientId: string }> = ({ clientId }) => {
+  const [flags, setFlags] = useState<KillSwitchFlags>({});
+  const [serverFlags, setServerFlags] = useState<KillSwitchFlags>({});
+  const [storePath, setStorePath] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchKillSwitches();
+        if (cancelled) return;
+        const cur = data.clients[clientId] || {};
+        setFlags(cur);
+        setServerFlags(cur);
+        setStorePath(data.storePath);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Failed to load');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  const dirty = useMemo(() => {
+    const keys = new Set([...Object.keys(flags), ...Object.keys(serverFlags)]);
+    for (const k of keys) {
+      if (Boolean((flags as any)[k]) !== Boolean((serverFlags as any)[k])) return true;
+    }
+    return false;
+  }, [flags, serverFlags]);
+
+  const handleToggle = (key: FeatureKey) => {
+    setFlags((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await updateKillSwitches(clientId, flags);
+      setFlags(saved);
+      setServerFlags(saved);
+      setSavedAt(new Date().toLocaleTimeString());
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const activeCount = Object.values(flags).filter(Boolean).length;
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderLeft: activeCount > 0 ? '4px solid #DC2626' : undefined }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h3 style={{ ...sectionTitle, marginBottom: 0, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <Power size={16} color={activeCount > 0 ? '#DC2626' : undefined} />
+          機能キルスイッチ
+          {activeCount > 0 && (
+            <span style={{ marginLeft: '0.5rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#FEE2E2', color: '#991B1B' }}>
+              {activeCount} 機能停止中
+            </span>
+          )}
+        </h3>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {savedAt && !dirty && <span style={{ fontSize: '0.6875rem', color: '#059669' }}>保存済み {savedAt}</span>}
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving || loading}
+            style={{ ...btnPrimary, opacity: !dirty || saving || loading ? 0.5 : 1, cursor: !dirty || saving ? 'not-allowed' : 'pointer' }}
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.875rem' }}>
+        ⚠ ON にした機能は即時にこのクライアントで停止されます（事故時の緊急遮断・プラン制限・コスト暴走対策）。クライアント側ボタンは押せても API が 503 を返します。
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '1rem', textAlign: 'center', color: '#6B7280', fontSize: '0.8125rem' }}>読み込み中...</div>
+      ) : error ? (
+        <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '4px', fontSize: '0.75rem', color: '#991B1B' }}>{error}</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.625rem' }}>
+          {(Object.keys(FEATURE_LABELS) as FeatureKey[]).map((key) => {
+            const meta = FEATURE_LABELS[key];
+            const on = Boolean(flags[key]);
+            return (
+              <label
+                key={key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.625rem',
+                  padding: '0.625rem 0.75rem',
+                  borderRadius: '6px',
+                  border: `1px solid ${on ? '#FCA5A5' : '#E5E7EB'}`,
+                  backgroundColor: on ? '#FEF2F2' : '#F9FAFB',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => handleToggle(key)}
+                  style={{ width: '16px', height: '16px', accentColor: '#DC2626' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: on ? '#991B1B' : '#111827' }}>
+                    {meta.label}
+                    {!meta.implemented && (
+                      <span style={{ marginLeft: '0.375rem', padding: '0 0.375rem', borderRadius: '9999px', fontSize: '0.625rem', fontWeight: 500, backgroundColor: '#E5E7EB', color: '#6B7280' }}>未配線</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.6875rem', color: '#6B7280', marginTop: '0.125rem' }}>{meta.note}</div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.625rem' }}>
+        {storePath ? `※ 永続化: ${storePath}` : '※ 揮発モード（KILLSWITCHES_PATH 未設定）。サーバー再起動でリセット。'}
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
    クライアント詳細
    ============================================================ */
 const ClientDetail: React.FC<{
@@ -1446,6 +1597,11 @@ const ClientDetail: React.FC<{
           )}
         </div>
       </div>
+
+      {/* 機能キルスイッチ（親アカウントのみ） */}
+      {client.accountType === 'parent' && (
+        <KillSwitchSection clientId={client.id} />
+      )}
 
       {/* データサマリ（親アカウントのみ） */}
       {client.accountType === 'parent' && (

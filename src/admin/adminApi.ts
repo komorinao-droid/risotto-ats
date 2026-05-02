@@ -63,3 +63,37 @@ export async function fetchApiUsageRecent(limit = 100): Promise<ApiUsageRecentEn
   const data = await resp.json();
   return data.entries || [];
 }
+
+// ─── 機能キルスイッチ ───
+
+export type FeatureKey =
+  | 'aiScreening'
+  | 'recruitmentReport'
+  | 'emailSend'
+  | 'smsSend'
+  | 'chatbot'
+  | 'webhookDelivery';
+
+export type KillSwitchFlags = Partial<Record<FeatureKey, boolean>>;
+
+export interface KillSwitchesResponse {
+  clients: Record<string, KillSwitchFlags>;
+  storePath: string | null;
+}
+
+export async function fetchKillSwitches(): Promise<KillSwitchesResponse> {
+  const resp = await fetch('/api/admin/kill-switches', { headers: buildHeaders() });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+  return resp.json();
+}
+
+export async function updateKillSwitches(clientId: string, flags: KillSwitchFlags): Promise<KillSwitchFlags> {
+  const resp = await fetch(`/api/admin/kill-switches/${encodeURIComponent(clientId)}`, {
+    method: 'PUT',
+    headers: buildHeaders(),
+    body: JSON.stringify({ flags }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+  const data = await resp.json();
+  return data.flags || {};
+}
