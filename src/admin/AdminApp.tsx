@@ -768,11 +768,14 @@ const ApiCostSection: React.FC<{ clients: Client[] }> = ({ clients }) => {
               </tbody>
             </table>
           </div>
-          <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.5rem' }}>
-            {summary.persistencePath
-              ? `※ 永続化: ${summary.persistencePath}（バッファ ${summary.bufferSize}/${summary.bufferLimit} 件）`
-              : `※ 揮発モード（USAGE_LOG_PATH 未設定）。サーバー再起動でリセット。バッファ ${summary.bufferSize}/${summary.bufferLimit} 件`}
-          </div>
+        </div>
+      )}
+
+      {summary && (
+        <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.25rem' }}>
+          {summary.persistencePath
+            ? `※ 永続化: ${summary.persistencePath}（バッファ ${summary.bufferSize}/${summary.bufferLimit} 件）`
+            : `※ 揮発モード（USAGE_LOG_PATH 未設定）。サーバー再起動でリセット。バッファ ${summary.bufferSize}/${summary.bufferLimit} 件`}
         </div>
       )}
     </>
