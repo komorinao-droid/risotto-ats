@@ -800,6 +800,23 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
 
   const parents = clients.filter(c => c.accountType === 'parent');
 
+  // 解約予約状況（親アカウントのみ）
+  const cancellationStats = useMemo(() => {
+    const reserved: Client[] = [];
+    const grace: Client[] = [];
+    const expired: Client[] = [];
+    parents.forEach((p) => {
+      if (!p.cancellationDate) return;
+      const dRet = daysUntil(p.dataRetentionUntil);
+      const dCan = daysUntil(p.cancellationDate);
+      if ((dRet ?? 1) <= 0) expired.push(p);
+      else if ((dCan ?? 1) <= 0) grace.push(p);
+      else reserved.push(p);
+    });
+    return { reserved, grace, expired };
+  }, [parents]);
+  const hasCancellations = cancellationStats.reserved.length + cancellationStats.grace.length + cancellationStats.expired.length > 0;
+
   // 応募者数ランキング（多い順 上位5社）
   const topByApplicants = parents
     .map((p) => ({ client: p, count: statsMap[p.id]?.applicantCount || 0 }))
@@ -819,6 +836,54 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
         <StatCard label="無効" value={inactiveCount} color="#DC2626" icon={<UserX size={22} />} />
         <StatCard label="今月の新規" value={newThisMonth} color="#8B5CF6" icon={<PartyPopper size={22} />} />
       </div>
+
+      {/* 解約・データ保持アラート */}
+      {hasCancellations && (
+        <div style={{ ...cardStyle, padding: '1rem 1.25rem', marginBottom: '1.5rem', borderLeft: cancellationStats.expired.length > 0 ? '4px solid #DC2626' : cancellationStats.grace.length > 0 ? '4px solid #F59E0B' : '4px solid #EAB308' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <AlertTriangle size={16} color={cancellationStats.expired.length > 0 ? '#DC2626' : '#D97706'} />
+            <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: '#111827' }}>解約・データ保持の状況</h3>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+            {cancellationStats.expired.length > 0 && (
+              <div style={{ padding: '0.625rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.6875rem', color: '#991B1B', fontWeight: 700, marginBottom: '0.25rem' }}>削除候補（保持期限超過）</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#DC2626', marginBottom: '0.25rem' }}>{cancellationStats.expired.length} 社</div>
+                <div style={{ fontSize: '0.75rem', color: '#7F1D1D', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                  {cancellationStats.expired.slice(0, 4).map((c) => (
+                    <span key={c.id} onClick={() => onNavigate('detail', c.id)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{c.companyName}</span>
+                  ))}
+                  {cancellationStats.expired.length > 4 && <span>+{cancellationStats.expired.length - 4}</span>}
+                </div>
+              </div>
+            )}
+            {cancellationStats.grace.length > 0 && (
+              <div style={{ padding: '0.625rem 0.75rem', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.6875rem', color: '#92400E', fontWeight: 700, marginBottom: '0.25rem' }}>保持期間中（解約済）</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#D97706', marginBottom: '0.25rem' }}>{cancellationStats.grace.length} 社</div>
+                <div style={{ fontSize: '0.75rem', color: '#78350F', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                  {cancellationStats.grace.slice(0, 4).map((c) => (
+                    <span key={c.id} onClick={() => onNavigate('detail', c.id)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{c.companyName}</span>
+                  ))}
+                  {cancellationStats.grace.length > 4 && <span>+{cancellationStats.grace.length - 4}</span>}
+                </div>
+              </div>
+            )}
+            {cancellationStats.reserved.length > 0 && (
+              <div style={{ padding: '0.625rem 0.75rem', backgroundColor: '#FEFCE8', border: '1px solid #FEF08A', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.6875rem', color: '#854D0E', fontWeight: 700, marginBottom: '0.25rem' }}>解約予約中</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#CA8A04', marginBottom: '0.25rem' }}>{cancellationStats.reserved.length} 社</div>
+                <div style={{ fontSize: '0.75rem', color: '#713F12', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                  {cancellationStats.reserved.slice(0, 4).map((c) => (
+                    <span key={c.id} onClick={() => onNavigate('detail', c.id)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{c.companyName}</span>
+                  ))}
+                  {cancellationStats.reserved.length > 4 && <span>+{cancellationStats.reserved.length - 4}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 統計カード - 利用状況 */}
       <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>利用状況</div>
@@ -1104,6 +1169,17 @@ const ClientList: React.FC<{
                         <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{p.companyName}</span>
                         <span style={{ padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#DBEAFE', color: '#1D4ED8' }}>本部</span>
                         {aiOn && <span title="AIスクリーニング有効" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.125rem', padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#F5F3FF', color: '#7C3AED' }}><Sparkles size={10} />AI</span>}
+                        {p.cancellationDate && (() => {
+                          const dRet = daysUntil(p.dataRetentionUntil);
+                          const dCan = daysUntil(p.cancellationDate);
+                          const expired = (dRet ?? 1) <= 0;
+                          const grace = !expired && (dCan ?? 1) <= 0;
+                          const bg = expired ? '#FEE2E2' : grace ? '#FEF3C7' : '#FEF9C3';
+                          const fg = expired ? '#991B1B' : grace ? '#92400E' : '#854D0E';
+                          const label = expired ? '削除候補' : grace ? '保持期間中' : '解約予約';
+                          const tip = `解約 ${p.cancellationDate}${p.dataRetentionUntil ? ` / 保持期限 ${p.dataRetentionUntil}` : ''}`;
+                          return <span title={tip} style={{ padding: '0.0625rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: bg, color: fg }}>{label}</span>;
+                        })()}
                       </div>
                       <div style={{ fontSize: '0.6875rem', color: '#6B7280' }}>
                         {p.contactName ? `担当: ${p.contactName}` : <span style={{ color: '#9CA3AF' }}>担当者未設定</span>}
@@ -1421,6 +1497,181 @@ const KillSwitchSection: React.FC<{ clientId: string }> = ({ clientId }) => {
 };
 
 /* ============================================================
+   解約管理（クライアント詳細内のセクション）
+   ============================================================ */
+function daysUntil(ymd?: string): number | null {
+  if (!ymd) return null;
+  const target = new Date(ymd + 'T00:00:00');
+  if (isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  return diff;
+}
+
+const CancellationSection: React.FC<{
+  client: Client;
+  onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ client, onUpdateClient, onLog }) => {
+  const [editing, setEditing] = useState(false);
+  const [draftDate, setDraftDate] = useState(client.cancellationDate || '');
+  const [draftRetention, setDraftRetention] = useState(client.dataRetentionUntil || '');
+  const [draftReason, setDraftReason] = useState(client.cancellationReason || '');
+  const [confirmRestore, setConfirmRestore] = useState(false);
+
+  const isCancelled = Boolean(client.cancellationDate);
+  const isInGracePeriod = isCancelled && daysUntil(client.cancellationDate)! <= 0 && (daysUntil(client.dataRetentionUntil) ?? 1) > 0;
+  const isExpired = isCancelled && (daysUntil(client.dataRetentionUntil) ?? 1) <= 0;
+  const daysToCancel = daysUntil(client.cancellationDate);
+  const daysToDelete = daysUntil(client.dataRetentionUntil);
+
+  const startEdit = () => {
+    setDraftDate(client.cancellationDate || '');
+    setDraftRetention(client.dataRetentionUntil || '');
+    setDraftReason(client.cancellationReason || '');
+    setEditing(true);
+  };
+
+  const handleSubmit = () => {
+    if (!draftDate) {
+      alert('解約予約日を入力してください');
+      return;
+    }
+    if (draftRetention && new Date(draftRetention) < new Date(draftDate)) {
+      alert('データ保持期限は解約日以降の日付にしてください');
+      return;
+    }
+    onUpdateClient(client.id, (c) => ({
+      ...c,
+      cancellationDate: draftDate,
+      cancellationRequestedAt: c.cancellationRequestedAt || new Date().toISOString(),
+      cancellationReason: draftReason.trim() || undefined,
+      dataRetentionUntil: draftRetention || undefined,
+      restorableUntil: draftRetention || undefined,
+    }));
+    onLog?.('解約予約登録', client.companyName, `解約日 ${draftDate}${draftRetention ? ` / 保持期限 ${draftRetention}` : ''}`);
+    setEditing(false);
+  };
+
+  const handleRestore = () => {
+    if (!confirmRestore) {
+      setConfirmRestore(true);
+      return;
+    }
+    onUpdateClient(client.id, (c) => ({
+      ...c,
+      cancellationDate: undefined,
+      cancellationRequestedAt: undefined,
+      cancellationReason: undefined,
+      dataRetentionUntil: undefined,
+      restorableUntil: undefined,
+    }));
+    onLog?.('解約取り消し', client.companyName);
+    setConfirmRestore(false);
+    setEditing(false);
+  };
+
+  const borderColor = isExpired ? '#DC2626' : isInGracePeriod ? '#F59E0B' : isCancelled ? '#EAB308' : undefined;
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderLeft: borderColor ? `4px solid ${borderColor}` : undefined }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <CalendarDays size={16} color={borderColor || undefined} />
+          解約・データ保持
+          {isExpired && <span style={{ marginLeft: '0.5rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#FEE2E2', color: '#991B1B' }}>削除候補</span>}
+          {isInGracePeriod && <span style={{ marginLeft: '0.5rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#FEF3C7', color: '#92400E' }}>保持期間中</span>}
+          {isCancelled && !isInGracePeriod && !isExpired && <span style={{ marginLeft: '0.5rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#FEF9C3', color: '#854D0E' }}>解約予約中</span>}
+        </h3>
+        {!editing && (
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {isCancelled && (
+              <button onClick={handleRestore} style={{ ...btnSecondary, color: confirmRestore ? '#fff' : '#059669', backgroundColor: confirmRestore ? '#059669' : '#fff', borderColor: '#059669' }}>
+                {confirmRestore ? '本当に取り消す（クリック）' : '解約を取り消す'}
+              </button>
+            )}
+            <button onClick={startEdit} style={btnPrimary}>{isCancelled ? '編集' : '解約予約を登録'}</button>
+          </div>
+        )}
+      </div>
+
+      {!editing && !isCancelled && (
+        <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+          現在解約予約はありません。クライアントから解約申請があった場合に「解約予約を登録」から日付・理由を記録します。
+        </div>
+      )}
+
+      {!editing && isCancelled && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', fontSize: '0.8125rem' }}>
+          <div>
+            <div style={{ color: '#6B7280', fontSize: '0.6875rem', marginBottom: '0.125rem' }}>解約予約日</div>
+            <div style={{ fontWeight: 600 }}>
+              {client.cancellationDate}
+              {daysToCancel !== null && (
+                <span style={{ marginLeft: '0.5rem', fontSize: '0.6875rem', color: daysToCancel < 0 ? '#DC2626' : daysToCancel <= 7 ? '#D97706' : '#6B7280', fontWeight: 500 }}>
+                  {daysToCancel < 0 ? `${Math.abs(daysToCancel)} 日前に解約済` : daysToCancel === 0 ? '本日解約' : `あと ${daysToCancel} 日`}
+                </span>
+              )}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: '#6B7280', fontSize: '0.6875rem', marginBottom: '0.125rem' }}>データ保持期限</div>
+            <div style={{ fontWeight: 600 }}>
+              {client.dataRetentionUntil || '未設定'}
+              {daysToDelete !== null && (
+                <span style={{ marginLeft: '0.5rem', fontSize: '0.6875rem', color: daysToDelete < 0 ? '#DC2626' : daysToDelete <= 7 ? '#D97706' : '#6B7280', fontWeight: 500 }}>
+                  {daysToDelete < 0 ? `${Math.abs(daysToDelete)} 日経過（削除候補）` : daysToDelete === 0 ? '本日期限' : `あと ${daysToDelete} 日`}
+                </span>
+              )}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: '#6B7280', fontSize: '0.6875rem', marginBottom: '0.125rem' }}>申請日時</div>
+            <div style={{ fontSize: '0.75rem', color: '#374151' }}>
+              {client.cancellationRequestedAt ? formatLogTimestamp(client.cancellationRequestedAt) : '-'}
+            </div>
+          </div>
+          {client.cancellationReason && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ color: '#6B7280', fontSize: '0.6875rem', marginBottom: '0.125rem' }}>解約理由</div>
+              <div style={{ backgroundColor: '#F9FAFB', borderRadius: '4px', padding: '0.5rem 0.625rem', whiteSpace: 'pre-wrap' }}>{client.cancellationReason}</div>
+            </div>
+          )}
+          {isExpired && (
+            <div style={{ gridColumn: '1 / -1', padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '4px', fontSize: '0.75rem', color: '#991B1B' }}>
+              ⚠ データ保持期限を過ぎています。物理削除候補です。クライアント管理から「削除」を実行してください。
+            </div>
+          )}
+        </div>
+      )}
+
+      {editing && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <div>
+            <label style={labelStyle}>解約予約日 <span style={{ color: '#DC2626' }}>*</span></label>
+            <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>データ保持期限</label>
+            <input type="date" value={draftRetention} onChange={(e) => setDraftRetention(e.target.value)} style={inputStyle} />
+            <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>未入力なら解約と同時に削除候補</div>
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={labelStyle}>解約理由（任意）</label>
+            <textarea value={draftReason} onChange={(e) => setDraftReason(e.target.value)} style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} placeholder="例: 採用予算縮小、別ATSへの移行 等" />
+          </div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditing(false)} style={btnSecondary}>キャンセル</button>
+            <button onClick={handleSubmit} style={btnPrimary}>保存</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================
    クライアント詳細
    ============================================================ */
 const ClientDetail: React.FC<{
@@ -1601,6 +1852,11 @@ const ClientDetail: React.FC<{
       {/* 機能キルスイッチ（親アカウントのみ） */}
       {client.accountType === 'parent' && (
         <KillSwitchSection clientId={client.id} />
+      )}
+
+      {/* 解約管理（親アカウントのみ） */}
+      {client.accountType === 'parent' && (
+        <CancellationSection client={client} onUpdateClient={onUpdateClient} onLog={onLogAdminAction} />
       )}
 
       {/* データサマリ（親アカウントのみ） */}
