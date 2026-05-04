@@ -3419,9 +3419,251 @@ const ClientFormModal: React.FC<{
 };
 
 /* ============================================================
+   請求書 一括生成モーダル
+   ============================================================ */
+type BulkPreviewRow = {
+  client: Client;
+  lines: InvoiceLine[];
+  subtotal: number;
+  total: number;
+  existing?: InvoiceLog;
+  optionLabels: string[];
+};
+
+const BulkInvoiceGenerateModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  parents: Client[];
+  statsMap: { [id: string]: ClientStats };
+  onCompleted: () => void;
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ open, onClose, parents, statsMap, onCompleted, onLog }) => {
+  const defaultMonth = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+  const [yearMonth, setYearMonth] = useState(defaultMonth);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [overwrite, setOverwrite] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ created: number; overwritten: number; skipped: number; failed: number } | null>(null);
+
+  const activeParents = useMemo(() => parents.filter((c) => c.status === 'active'), [parents]);
+
+  // モーダルが開いた瞬間に状態をリセット
+  useEffect(() => {
+    if (!open) return;
+    setYearMonth(defaultMonth);
+    setSelectedIds(new Set(activeParents.map((c) => c.id)));
+    setOverwrite(false);
+    setResult(null);
+  }, [open, defaultMonth, activeParents]);
+
+  // 各クライアントについてプレビュー行を構築（オプション・SMS超過込み）
+  const preview: BulkPreviewRow[] = useMemo(() => {
+    return activeParents.map((c) => {
+      const overage = statsMap[c.id]?.smsOverageChargeThisMonth || 0;
+      const lines = buildInvoiceLines(c, yearMonth, overage);
+      const subtotal = lines.reduce((s, l) => s + (l.amount || 0), 0);
+      const total = subtotal + Math.round(subtotal * INVOICE_TAX_RATE);
+      let existing: InvoiceLog | undefined;
+      try {
+        const d = storage.getClientData(c.id);
+        existing = (d.invoices || []).find((iv) => iv.yearMonth === yearMonth);
+      } catch {
+        /* skip broken data */
+      }
+      const optionLabels = Object.entries(c.options || {})
+        .filter(([, opt]) => opt && opt.status === 'active' && (opt.monthlyFee ?? 0) > 0)
+        .map(([key]) => OPTION_LABELS[key as ClientOptionKey] || key);
+      return { client: c, lines, subtotal, total, existing, optionLabels };
+    });
+  }, [activeParents, yearMonth, statsMap]);
+
+  const toggleId = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const allChecked = preview.length > 0 && preview.every((p) => selectedIds.has(p.client.id));
+  const toggleAll = () => {
+    if (allChecked) setSelectedIds(new Set());
+    else setSelectedIds(new Set(preview.map((p) => p.client.id)));
+  };
+
+  // 実際に生成する対象（選択されており、かつ overwrite or 既存無し、かつ明細1行以上）
+  const toCreate = preview.filter((p) => selectedIds.has(p.client.id) && p.lines.length > 0 && (overwrite || !p.existing));
+  const toCreateTotal = toCreate.reduce((s, p) => s + p.total, 0);
+
+  const handleRun = () => {
+    if (running) return;
+    setRunning(true);
+    let created = 0;
+    let overwritten = 0;
+    let skipped = 0;
+    let failed = 0;
+    preview.forEach((p) => {
+      if (!selectedIds.has(p.client.id)) return;
+      if (p.lines.length === 0) {
+        skipped++;
+        return;
+      }
+      if (p.existing && !overwrite) {
+        skipped++;
+        return;
+      }
+      const subtotal = p.lines.reduce((s, l) => s + l.amount, 0);
+      const tax = Math.round(subtotal * INVOICE_TAX_RATE);
+      const totalAmount = subtotal + tax;
+      const newInvoice: InvoiceLog = {
+        id: p.existing?.id || (Date.now() + Math.floor(Math.random() * 100000)),
+        yearMonth,
+        issuedAt: p.existing?.issuedAt || new Date().toISOString(),
+        subtotal,
+        taxRate: INVOICE_TAX_RATE,
+        tax,
+        totalAmount,
+        lines: p.lines,
+        status: p.existing?.status || 'draft',
+        memo: p.existing?.memo,
+        pdfUrl: p.existing?.pdfUrl,
+        emailedAt: p.existing?.emailedAt,
+        paidAt: p.existing?.paidAt,
+      };
+      try {
+        const d = storage.getClientData(p.client.id);
+        const filtered = (d.invoices || []).filter((iv) => iv.id !== newInvoice.id);
+        storage.saveClientData(p.client.id, { ...d, invoices: [...filtered, newInvoice] });
+        if (p.existing) {
+          overwritten++;
+          onLog?.('請求書一括上書き', p.client.companyName, `${yearMonth} / ¥${totalAmount.toLocaleString()}`);
+        } else {
+          created++;
+          onLog?.('請求書一括作成', p.client.companyName, `${yearMonth} / ¥${totalAmount.toLocaleString()}`);
+        }
+      } catch {
+        failed++;
+      }
+    });
+    setResult({ created, overwritten, skipped, failed });
+    setRunning(false);
+    onCompleted();
+  };
+
+  return (
+    <Modal isOpen={open} onClose={onClose} title="請求書 一括生成" width="820px">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '0.875rem' }}>
+        <div>
+          <label style={labelStyle}>対象月</label>
+          <input type="month" value={yearMonth} onChange={(e) => setYearMonth(e.target.value)} style={inputStyle} disabled={running} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '0.25rem' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.8125rem', color: '#374151', cursor: 'pointer' }}>
+            <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} disabled={running} />
+            既存の請求書を上書きする（同月のみ）
+          </label>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#6B7280' }}>
+        プラン基本料 + 契約中オプション料 + SMS 超過課金 を自動で集計します。下書き状態で作成され、後から個別画面で発行・送付できます。
+      </div>
+
+      <div style={{ overflowX: 'auto', maxHeight: '52vh', overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: '6px' }}>
+        <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+          <thead style={{ position: 'sticky', top: 0, backgroundColor: '#F9FAFB', zIndex: 1 }}>
+            <tr style={{ borderBottom: '1px solid #E5E7EB', color: '#6B7280' }}>
+              <th style={{ width: '36px', padding: '0.5rem 0.375rem' }}>
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} disabled={running} />
+              </th>
+              <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>会社名 / プラン</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>オプション</th>
+              <th style={{ textAlign: 'right', padding: '0.5rem 0.375rem' }}>合計（税込）</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>当月既存</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.length === 0 && (
+              <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1.25rem', color: '#9CA3AF' }}>対象クライアントがありません</td></tr>
+            )}
+            {preview.map((p) => {
+              const checked = selectedIds.has(p.client.id);
+              const willOverwrite = !!(p.existing && overwrite && checked);
+              const willSkip = !!(p.existing && !overwrite && checked);
+              return (
+                <tr key={p.client.id} style={{ borderBottom: '1px solid #F3F4F6', backgroundColor: willSkip ? '#FEF9C3' : willOverwrite ? '#FEF2F2' : '#fff' }}>
+                  <td style={{ padding: '0.5rem 0.375rem', textAlign: 'center' }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleId(p.client.id)} disabled={running} />
+                  </td>
+                  <td style={{ padding: '0.5rem 0.375rem' }}>
+                    <div style={{ fontWeight: 600, color: '#111827' }}>{p.client.companyName}</div>
+                    <div style={{ fontSize: '0.6875rem', color: '#6B7280' }}>{PLAN_LABELS[p.client.plan]} / 月額 ¥{PLAN_PRICES[p.client.plan].toLocaleString()}</div>
+                  </td>
+                  <td style={{ padding: '0.5rem 0.375rem' }}>
+                    {p.optionLabels.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                        {p.optionLabels.map((l) => (
+                          <span key={l} style={{ padding: '0.0625rem 0.5rem', borderRadius: '9999px', backgroundColor: '#F3E8FF', color: '#6B21A8', fontSize: '0.6875rem', fontWeight: 600 }}>{l}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>なし</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 600, color: p.lines.length === 0 ? '#9CA3AF' : '#111827' }}>
+                    {p.lines.length === 0 ? '—' : `¥${p.total.toLocaleString()}`}
+                  </td>
+                  <td style={{ padding: '0.5rem 0.375rem', fontSize: '0.6875rem' }}>
+                    {p.existing ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', backgroundColor: '#DBEAFE', color: '#1E40AF', fontWeight: 600 }}>
+                        <Receipt size={10} /> {INVOICE_STATUS_LABEL[p.existing.status]} ¥{p.existing.totalAmount.toLocaleString()}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>—</span>
+                    )}
+                    {willSkip && <div style={{ marginTop: '0.25rem', color: '#92400E' }}>※ 既存あり → スキップ</div>}
+                    {willOverwrite && <div style={{ marginTop: '0.25rem', color: '#991B1B' }}>※ 既存を上書き</div>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: '0.875rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div style={{ fontSize: '0.8125rem', color: '#374151' }}>
+          実行対象: <strong>{toCreate.length}</strong> 件 / 合計（税込）: <strong style={{ color: '#0F766E' }}>¥{toCreateTotal.toLocaleString()}</strong>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={onClose} style={btnSecondary} disabled={running}>閉じる</button>
+          <button onClick={handleRun} style={btnPrimary} disabled={running || toCreate.length === 0}>
+            {running ? <Loader2 size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} /> : <Receipt size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />}
+            一括生成を実行
+          </button>
+        </div>
+      </div>
+
+      {result && (
+        <div style={{ marginTop: '0.875rem', padding: '0.75rem 1rem', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '6px', fontSize: '0.8125rem', color: '#166534' }}>
+          <strong>完了:</strong> 新規 {result.created} 件 / 上書き {result.overwritten} 件 / スキップ {result.skipped} 件{result.failed > 0 ? ` / 失敗 ${result.failed} 件` : ''}
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+/* ============================================================
    契約・請求管理
    ============================================================ */
-const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: ClientStats } }> = ({ clients, statsMap }) => {
+const ContractPage: React.FC<{
+  clients: Client[];
+  statsMap: { [id: string]: ClientStats };
+  onLogAdminAction?: (action: string, target: string, detail?: string) => void;
+}> = ({ clients, statsMap, onLogAdminAction }) => {
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
   const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
@@ -3481,9 +3723,45 @@ const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: Clie
 
   const sectionTitle: React.CSSProperties = { margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 600, color: '#111827' };
 
+  // 当月の請求書状況（一括生成後に再取得するための reloadKey）
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [invoiceReloadKey, setInvoiceReloadKey] = useState(0);
+  const currentMonth = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+  const invoiceByClient = useMemo(() => {
+    const map: Record<string, InvoiceLog | undefined> = {};
+    clients.filter((c) => c.accountType === 'parent').forEach((c) => {
+      try {
+        const d = storage.getClientData(c.id);
+        map[c.id] = (d.invoices || []).find((iv) => iv.yearMonth === currentMonth);
+      } catch {
+        /* skip */
+      }
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, currentMonth, invoiceReloadKey]);
+
+  // 当月請求書 未作成 で月額 > 0 のクライアント数（注意喚起バッジ用）
+  const missingCount = activeParents.filter((c) => !invoiceByClient[c.id] && clientMonthlyTotal(c).total > 0).length;
+
   return (
     <div style={{ padding: '1.5rem 2rem' }}>
-      <h2 style={{ margin: '0 0 1.5rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>契約・請求管理</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>契約・請求管理</h2>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {missingCount > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.25rem 0.625rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#FEF3C7', color: '#92400E' }}>
+              <AlertTriangle size={12} /> 当月未作成 {missingCount} 社
+            </span>
+          )}
+          <button onClick={() => setBulkOpen(true)} style={btnPrimary}>
+            <Receipt size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />請求書を一括生成
+          </button>
+        </div>
+      </div>
 
       {/* 月次売上サマリー */}
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
@@ -3528,14 +3806,14 @@ const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: Clie
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              {['会社名', 'プラン', '月額', '契約開始', '契約終了', '状態', 'ステータス'].map(h => (
+              {['会社名', 'プラン', '月額', `当月請求書 (${currentMonth})`, '契約開始', '契約終了', '状態', 'ステータス'].map(h => (
                 <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {parents.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>データなし</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>データなし</td></tr>
             )}
             {parents.map(c => {
               const status = getExpiryStatus(c.contractEnd);
@@ -3578,6 +3856,30 @@ const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: Clie
                       );
                     })()}
                   </td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.75rem' }}>
+                    {(() => {
+                      if (c.status !== 'active') return <span style={{ color: '#9CA3AF' }}>—</span>;
+                      const inv = invoiceByClient[c.id];
+                      const expectedTotal = clientMonthlyTotal(c).total;
+                      if (inv) {
+                        const sc = INVOICE_STATUS_COLOR[inv.status];
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', backgroundColor: sc.bg, color: sc.fg, fontSize: '0.6875rem', fontWeight: 600, width: 'fit-content' }}>
+                              <Check size={10} strokeWidth={3} /> {INVOICE_STATUS_LABEL[inv.status]}
+                            </span>
+                            <span style={{ fontSize: '0.6875rem', color: '#374151' }}>¥{inv.totalAmount.toLocaleString()}</span>
+                          </div>
+                        );
+                      }
+                      if (expectedTotal === 0) return <span style={{ color: '#9CA3AF' }}>—</span>;
+                      return (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', backgroundColor: '#FEF3C7', color: '#92400E', fontSize: '0.6875rem', fontWeight: 600 }}>
+                          <AlertTriangle size={10} /> 未作成
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>{c.contractStart || '-'}</td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>{c.contractEnd || '-'}</td>
                   <td style={{ padding: '0.75rem 1rem' }}>
@@ -3592,6 +3894,15 @@ const ContractPage: React.FC<{ clients: Client[]; statsMap: { [id: string]: Clie
           </tbody>
         </table>
       </div>
+
+      <BulkInvoiceGenerateModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        parents={parents}
+        statsMap={statsMap}
+        onCompleted={() => setInvoiceReloadKey((k) => k + 1)}
+        onLog={onLogAdminAction}
+      />
     </div>
   );
 };
@@ -4701,7 +5012,7 @@ const AdminApp: React.FC = () => {
           />
         )}
         {currentView === 'contracts' && (
-          <ContractPage clients={clients} statsMap={statsMap} />
+          <ContractPage clients={clients} statsMap={statsMap} onLogAdminAction={logAdminAction} />
         )}
         {currentView === 'initdata' && (
           <InitDataPage clients={clients} />
