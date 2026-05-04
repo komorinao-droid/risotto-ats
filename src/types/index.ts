@@ -593,9 +593,15 @@ export interface InvoiceLog {
   yearMonth: string;
   /** 発行日 ISO */
   issuedAt: string;
+  /** 小計（税抜・円）。lines の合計と一致。2026-05-04 追加 */
+  subtotal?: number;
+  /** 消費税率（小数。例 0.10）。2026-05-04 追加 */
+  taxRate?: number;
+  /** 消費税額（円）。2026-05-04 追加 */
+  tax?: number;
   /** 請求金額（円、税込） */
   totalAmount: number;
-  /** 内訳行 */
+  /** 内訳行（各行の金額は税抜） */
   lines: InvoiceLine[];
   /** PDF を生成済みなら data URL or 保存パス */
   pdfUrl?: string;

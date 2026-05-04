@@ -1816,6 +1816,9 @@ const CancellationSection: React.FC<{
    請求管理（クライアント詳細内のセクション）
    ============================================================ */
 
+/** 消費税率。管理画面の月額単価は全て税抜表記。 */
+const INVOICE_TAX_RATE = 0.10;
+
 const INVOICE_STATUS_LABEL: Record<InvoiceLog['status'], string> = {
   draft: '下書き',
   issued: '発行済',
@@ -1906,7 +1909,9 @@ const InvoiceFormModal: React.FC<{
     }
   }, [open, initial, client, smsOverageCharge, defaultMonth]);
 
-  const total = lines.reduce((s, l) => s + (l.amount || 0), 0);
+  const subtotal = lines.reduce((s, l) => s + (l.amount || 0), 0);
+  const tax = Math.round(subtotal * INVOICE_TAX_RATE);
+  const total = subtotal + tax;
 
   const updateLine = (idx: number, patch: Partial<InvoiceLine>) => {
     setLines((prev) => prev.map((l, i) => {
@@ -1934,11 +1939,16 @@ const InvoiceFormModal: React.FC<{
       alert('請求行を 1 行以上入力してください');
       return;
     }
-    const totalAmount = cleanedLines.reduce((s, l) => s + l.amount, 0);
+    const sub = cleanedLines.reduce((s, l) => s + l.amount, 0);
+    const taxAmount = Math.round(sub * INVOICE_TAX_RATE);
+    const totalAmount = sub + taxAmount;
     const invoice: InvoiceLog = {
       id: initial?.id || Date.now(),
       yearMonth,
       issuedAt: initial?.issuedAt || new Date().toISOString(),
+      subtotal: sub,
+      taxRate: INVOICE_TAX_RATE,
+      tax: taxAmount,
       totalAmount,
       lines: cleanedLines,
       status,
@@ -2013,8 +2023,18 @@ const InvoiceFormModal: React.FC<{
           </tbody>
           <tfoot>
             <tr style={{ borderTop: '2px solid #E5E7EB' }}>
-              <td colSpan={3} style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 600, color: '#374151' }}>合計（税込）</td>
-              <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 700, fontSize: '0.9375rem' }}>¥{total.toLocaleString()}</td>
+              <td colSpan={3} style={{ padding: '0.375rem', textAlign: 'right', color: '#6B7280' }}>小計（税抜）</td>
+              <td style={{ padding: '0.375rem', textAlign: 'right', color: '#374151' }}>¥{subtotal.toLocaleString()}</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td colSpan={3} style={{ padding: '0.25rem 0.375rem', textAlign: 'right', color: '#6B7280' }}>消費税（{Math.round(INVOICE_TAX_RATE * 100)}%）</td>
+              <td style={{ padding: '0.25rem 0.375rem', textAlign: 'right', color: '#374151' }}>¥{tax.toLocaleString()}</td>
+              <td></td>
+            </tr>
+            <tr style={{ borderTop: '1px solid #E5E7EB' }}>
+              <td colSpan={3} style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 600, color: '#111827' }}>合計（税込）</td>
+              <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 700, fontSize: '0.9375rem', color: '#0F766E' }}>¥{total.toLocaleString()}</td>
               <td></td>
             </tr>
           </tfoot>
@@ -2148,6 +2168,12 @@ const InvoiceSection: React.FC<{
 
 const InvoicePrintView: React.FC<{ client: Client; invoice: InvoiceLog }> = ({ client, invoice }) => {
   const issuedDate = invoice.issuedAt ? new Date(invoice.issuedAt).toLocaleDateString('ja-JP') : '';
+  // 旧データ互換: subtotal/tax 未保存の請求書は line 合計を税抜とみなして再計算
+  const linesSum = invoice.lines.reduce((s, l) => s + (l.amount || 0), 0);
+  const subtotal = invoice.subtotal ?? linesSum;
+  const taxRate = invoice.taxRate ?? INVOICE_TAX_RATE;
+  const tax = invoice.tax ?? Math.round(subtotal * taxRate);
+  const grandTotal = invoice.subtotal !== undefined ? invoice.totalAmount : subtotal + tax;
   return (
     <div className="invoice-print-only" style={{ padding: '32px 40px', fontFamily: '"Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif', color: '#111827', backgroundColor: '#fff' }}>
       <style>{`
@@ -2178,7 +2204,7 @@ const InvoicePrintView: React.FC<{ client: Client; invoice: InvoiceLog }> = ({ c
         <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>請求対象月 / 合計金額（税込）</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <div style={{ fontSize: '18px', fontWeight: 600 }}>{invoice.yearMonth}</div>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: '#0F766E' }}>¥{invoice.totalAmount.toLocaleString()}</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: '#0F766E' }}>¥{grandTotal.toLocaleString()}</div>
         </div>
       </div>
 
@@ -2203,8 +2229,16 @@ const InvoicePrintView: React.FC<{ client: Client; invoice: InvoiceLog }> = ({ c
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={3} style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderTop: '2px solid #111827' }}>合計</td>
-            <td style={{ padding: '12px', textAlign: 'right', fontSize: '16px', fontWeight: 700, borderTop: '2px solid #111827' }}>¥{invoice.totalAmount.toLocaleString()}</td>
+            <td colSpan={3} style={{ padding: '8px 12px', textAlign: 'right', color: '#6B7280', borderTop: '2px solid #111827' }}>小計（税抜）</td>
+            <td style={{ padding: '8px 12px', textAlign: 'right', borderTop: '2px solid #111827' }}>¥{subtotal.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td colSpan={3} style={{ padding: '6px 12px', textAlign: 'right', color: '#6B7280' }}>消費税（{Math.round(taxRate * 100)}%）</td>
+            <td style={{ padding: '6px 12px', textAlign: 'right' }}>¥{tax.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td colSpan={3} style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderTop: '1px solid #E5E7EB' }}>合計（税込）</td>
+            <td style={{ padding: '12px', textAlign: 'right', fontSize: '16px', fontWeight: 700, borderTop: '1px solid #E5E7EB', color: '#0F766E' }}>¥{grandTotal.toLocaleString()}</td>
           </tr>
         </tfoot>
       </table>
