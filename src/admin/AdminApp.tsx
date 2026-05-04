@@ -3723,9 +3723,38 @@ const ContractPage: React.FC<{
 
   const sectionTitle: React.CSSProperties = { margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 600, color: '#111827' };
 
-  // 当月の請求書状況（一括生成後に再取得するための reloadKey）
+  // 当月の請求書状況（一括生成・個別編集後に再取得するための reloadKey）
   const [bulkOpen, setBulkOpen] = useState(false);
   const [invoiceReloadKey, setInvoiceReloadKey] = useState(0);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceLog | null>(null);
+
+  const openInvoiceEditor = (c: Client) => {
+    if (c.status !== 'active') return;
+    let existing: InvoiceLog | undefined;
+    try {
+      const d = storage.getClientData(c.id);
+      existing = (d.invoices || []).find((iv) => iv.yearMonth === currentMonth);
+    } catch { /* skip */ }
+    setEditingClient(c);
+    setEditingInvoice(existing || null);
+  };
+
+  const handleSingleSave = (inv: InvoiceLog) => {
+    if (!editingClient) return;
+    try {
+      const d = storage.getClientData(editingClient.id);
+      const filtered = (d.invoices || []).filter((iv) => iv.id !== inv.id);
+      storage.saveClientData(editingClient.id, { ...d, invoices: [...filtered, inv] });
+      onLogAdminAction?.(editingInvoice ? '請求書更新' : '請求書作成', editingClient.companyName, `${inv.yearMonth} / ¥${inv.totalAmount.toLocaleString()} / ${INVOICE_STATUS_LABEL[inv.status]}`);
+    } catch {
+      /* save failed */
+    }
+    setInvoiceReloadKey((k) => k + 1);
+    setEditingClient(null);
+    setEditingInvoice(null);
+  };
+
   const currentMonth = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -3861,7 +3890,8 @@ const ContractPage: React.FC<{
                       if (c.status !== 'active') return <span style={{ color: '#9CA3AF' }}>—</span>;
                       const inv = invoiceByClient[c.id];
                       const expectedTotal = clientMonthlyTotal(c).total;
-                      if (inv) {
+                      const clickable = expectedTotal > 0 || !!inv;
+                      const inner = inv ? (() => {
                         const sc = INVOICE_STATUS_COLOR[inv.status];
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
@@ -3871,12 +3901,24 @@ const ContractPage: React.FC<{
                             <span style={{ fontSize: '0.6875rem', color: '#374151' }}>¥{inv.totalAmount.toLocaleString()}</span>
                           </div>
                         );
-                      }
-                      if (expectedTotal === 0) return <span style={{ color: '#9CA3AF' }}>—</span>;
-                      return (
+                      })() : expectedTotal === 0 ? (
+                        <span style={{ color: '#9CA3AF' }}>—</span>
+                      ) : (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', backgroundColor: '#FEF3C7', color: '#92400E', fontSize: '0.6875rem', fontWeight: 600 }}>
                           <AlertTriangle size={10} /> 未作成
                         </span>
+                      );
+                      if (!clickable) return inner;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => openInvoiceEditor(c)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                          title={inv ? '請求書を編集' : '請求書を作成'}
+                        >
+                          {inner}
+                          <span style={{ fontSize: '0.625rem', color: '#0EA5E9', textDecoration: 'underline' }}>{inv ? '編集' : '作成'}</span>
+                        </button>
                       );
                     })()}
                   </td>
@@ -3903,6 +3945,17 @@ const ContractPage: React.FC<{
         onCompleted={() => setInvoiceReloadKey((k) => k + 1)}
         onLog={onLogAdminAction}
       />
+
+      {editingClient && (
+        <InvoiceFormModal
+          open={!!editingClient}
+          client={editingClient}
+          initial={editingInvoice || undefined}
+          smsOverageCharge={statsMap[editingClient.id]?.smsOverageChargeThisMonth || 0}
+          onClose={() => { setEditingClient(null); setEditingInvoice(null); }}
+          onSave={handleSingleSave}
+        />
+      )}
     </div>
   );
 };
