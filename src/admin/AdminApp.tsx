@@ -2269,12 +2269,12 @@ const ClientDetail: React.FC<{
   onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
   onLogAdminAction?: (action: string, target: string, detail?: string) => void;
 }> = ({ client, clients, onBack, onEdit, onUpdatePassword, onUpdateClient, onLogAdminAction }) => {
-  const [showPwSection, setShowPwSection] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [newPw, setNewPw] = useState('');
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
   const [dataReloadKey, setDataReloadKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<'overview' | 'usage' | 'children' | 'billing' | 'audit' | 'danger'>('overview');
 
   const children = clients.filter(c => c.accountType === 'child' && c.parentId === client.id);
   const parent = client.parentId ? clients.find(c => c.id === client.parentId) : null;
@@ -2360,6 +2360,48 @@ const ClientDetail: React.FC<{
         <button onClick={() => onEdit(client)} style={btnPrimary}>編集</button>
       </div>
 
+      {/* タブナビゲーション */}
+      {(() => {
+        const tabs: Array<{ key: typeof activeTab; label: string; show: boolean }> = [
+          { key: 'overview', label: '概要', show: true },
+          { key: 'usage', label: '利用状況', show: client.accountType === 'parent' },
+          { key: 'children', label: client.accountType === 'parent' ? `子アカウント (${children.length})` : '付与権限', show: true },
+          { key: 'billing', label: '請求', show: client.accountType === 'parent' },
+          { key: 'audit', label: '監査ログ', show: true },
+          { key: 'danger', label: '危険操作', show: true },
+        ];
+        return (
+          <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid #E5E7EB', marginBottom: '1.5rem', overflowX: 'auto' }}>
+            {tabs.filter(t => t.show).map((t) => {
+              const isActive = activeTab === t.key;
+              const isDanger = t.key === 'danger';
+              const activeColor = isDanger ? '#DC2626' : '#0891B2';
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setActiveTab(t.key)}
+                  style={{
+                    padding: '0.625rem 1rem',
+                    fontSize: '0.875rem',
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? activeColor : '#6B7280',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    borderBottom: isActive ? `2px solid ${activeColor}` : '2px solid transparent',
+                    marginBottom: '-1px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {activeTab === 'overview' && (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
         {/* 基本情報 */}
         <div style={{ ...cardStyle, padding: '1.25rem' }}>
@@ -2383,71 +2425,67 @@ const ClientDetail: React.FC<{
           <div style={infoRow}><span style={infoLabel}>担当者メール</span><span>{client.contactEmail || '-'}</span></div>
         </div>
 
-        {/* パスワード管理（折りたたみ） & メモ */}
+        {/* メモ + 最終ログイン */}
         <div style={{ ...cardStyle, padding: '1.25rem' }}>
-          <button
-            onClick={() => setShowPwSection(!showPwSection)}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', marginBottom: showPwSection ? '0.875rem' : 0 }}
-          >
-            <h3 style={{ ...sectionTitle, marginBottom: 0, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
-              <KeyRound size={16} />
-              パスワード管理
-            </h3>
-            <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>{showPwSection ? '閉じる ▼' : '開く ▶'}</span>
-          </button>
-          {showPwSection && (
-            <>
-              <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.875rem' }}>
-                ⚠ パスワード情報は機密事項です。表示・変更はクライアントから依頼があった場合のみ行ってください。
-              </div>
-              <div style={infoRow}>
-                <span style={infoLabel}>現パスワード</span>
-                <span style={{ fontFamily: 'monospace' }}>{showPw ? client.password : '••••••••'}</span>
-                <button onClick={() => setShowPw(!showPw)} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.75rem', padding: 0 }}>
-                  {showPw ? '非表示' : '表示'}
-                </button>
-              </div>
-              <div style={{ marginTop: '1rem' }}>
-                <label style={labelStyle}>新しいパスワード（6文字以上）</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="新しいパスワード" />
-                  <button onClick={handlePasswordChange} style={btnPrimary}>変更</button>
-                </div>
-                {pwError && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwError}</div>}
-                {pwSuccess && <div style={{ color: '#059669', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwSuccess}</div>}
-              </div>
-            </>
+          <h3 style={sectionTitle}>社内メモ</h3>
+          {client.memo ? (
+            <div style={{ backgroundColor: '#F9FAFB', borderRadius: '6px', padding: '0.75rem', fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>{client.memo}</div>
+          ) : (
+            <div style={{ fontSize: '0.8125rem', color: '#9CA3AF' }}>メモはまだ登録されていません。「編集」から記入できます。</div>
           )}
-
-          {/* メモ */}
-          {client.memo && (
-            <div style={{ marginTop: '1.5rem' }}>
-              <h3 style={sectionTitle}>メモ</h3>
-              <div style={{ backgroundColor: '#F9FAFB', borderRadius: '6px', padding: '0.75rem', fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>{client.memo}</div>
-            </div>
-          )}
-
-          {/* 最終ログイン */}
           {stats.lastLogin && (
-            <div style={{ marginTop: showPwSection ? '1rem' : 0, fontSize: '0.75rem', color: '#6B7280' }}>
+            <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#6B7280' }}>
               最終ログイン: {formatLogTimestamp(stats.lastLogin)}
             </div>
           )}
         </div>
       </div>
-
-      {/* 機能キルスイッチ（親アカウントのみ） */}
-      {client.accountType === 'parent' && (
-        <KillSwitchSection clientId={client.id} />
       )}
 
-      {/* 解約管理（親アカウントのみ） */}
-      {client.accountType === 'parent' && (
-        <CancellationSection client={client} onUpdateClient={onUpdateClient} onLog={onLogAdminAction} />
+      {/* 危険操作タブ：パスワード管理 + 機能キルスイッチ + 解約管理 */}
+      {activeTab === 'danger' && (
+      <>
+        <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #DC2626' }}>
+          <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+            <KeyRound size={16} color="#DC2626" />
+            パスワード管理
+          </h3>
+          <div style={{ padding: '0.625rem 0.875rem', backgroundColor: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.875rem' }}>
+            ⚠ パスワード情報は機密事項です。表示・変更はクライアントから依頼があった場合のみ行ってください。
+          </div>
+          <div style={infoRow}>
+            <span style={infoLabel}>現パスワード</span>
+            <span style={{ fontFamily: 'monospace' }}>{showPw ? client.password : '••••••••'}</span>
+            <button onClick={() => setShowPw(!showPw)} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: '0.75rem', padding: 0 }}>
+              {showPw ? '非表示' : '表示'}
+            </button>
+          </div>
+          <div style={{ marginTop: '1rem' }}>
+            <label style={labelStyle}>新しいパスワード（6文字以上）</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input type="text" value={newPw} onChange={(e) => setNewPw(e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="新しいパスワード" />
+              <button onClick={handlePasswordChange} style={btnPrimary}>変更</button>
+            </div>
+            {pwError && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwError}</div>}
+            {pwSuccess && <div style={{ color: '#059669', fontSize: '0.75rem', marginTop: '0.25rem' }}>{pwSuccess}</div>}
+          </div>
+        </div>
+
+        {client.accountType === 'parent' && <KillSwitchSection clientId={client.id} />}
+        {client.accountType === 'parent' && (
+          <CancellationSection client={client} onUpdateClient={onUpdateClient} onLog={onLogAdminAction} />
+        )}
+      </>
       )}
 
-      {/* 請求管理（親アカウントのみ） */}
-      {client.accountType === 'parent' && (
+      {/* 請求タブ：オプション契約 + 請求管理 */}
+      {activeTab === 'billing' && client.accountType === 'parent' && (
+      <>
+        <OptionsSection
+          client={client}
+          onUpdateClient={onUpdateClient}
+          onLog={onLogAdminAction}
+        />
         <InvoiceSection
           client={client}
           clientData={clientData}
@@ -2461,10 +2499,13 @@ const ClientDetail: React.FC<{
           }}
           onLog={onLogAdminAction}
         />
+      </>
       )}
 
-      {/* データサマリ（親アカウントのみ） */}
-      {client.accountType === 'parent' && (
+      {/* 利用状況タブ：データ概要 + AI/採用レポ/SMS + クライアントデータ */}
+      {activeTab === 'usage' && client.accountType === 'parent' && (
+      <>
+        {/* データサマリ */}
         <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
           <h3 style={sectionTitle}>データ概要</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
@@ -2476,19 +2517,9 @@ const ClientDetail: React.FC<{
             <SummaryTile label="子アカウント" value={children.length} icon={<Store size={18} />} color="#0EA5E9" />
           </div>
         </div>
-      )}
 
-      {/* オプション契約管理（親アカウントのみ） */}
-      {client.accountType === 'parent' && (
-        <OptionsSection
-          client={client}
-          onUpdateClient={onUpdateClient}
-          onLog={onLogAdminAction}
-        />
-      )}
-
-      {/* AIスクリーニング状況（親アカウントのみ・オプション契約中のみ） */}
-      {client.accountType === 'parent' && client.options?.aiScreening?.status === 'active' && (
+      {/* AIスクリーニング状況（オプション契約中のみ） */}
+      {client.options?.aiScreening?.status === 'active' && (
         <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #9333EA' }}>
           <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
             <Sparkles size={16} color="#9333EA" />
@@ -2513,8 +2544,8 @@ const ClientDetail: React.FC<{
         </div>
       )}
 
-      {/* 採用レポート 利用状況（親アカウントのみ・オプション契約中のみ） */}
-      {client.accountType === 'parent' && client.options?.recruitmentReport?.status === 'active' && (
+      {/* 採用レポート 利用状況（オプション契約中のみ） */}
+      {client.options?.recruitmentReport?.status === 'active' && (
         <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem', borderTop: '3px solid #F97316' }}>
           <h3 style={{ ...sectionTitle, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
             <FileText size={16} color="#F97316" />
@@ -2570,8 +2601,8 @@ const ClientDetail: React.FC<{
         </div>
       )}
 
-      {/* SMS送信 利用状況（親アカウントのみ） */}
-      {client.accountType === 'parent' && (() => {
+      {/* SMS送信 利用状況 */}
+      {(() => {
         const smsLimit = SMS_MONTHLY_LIMIT[client.plan];
         const sentThisMonth = stats.smsSentThisMonth;
         const overage = stats.smsOverageThisMonth;
@@ -2648,6 +2679,24 @@ const ClientDetail: React.FC<{
         );
       })()}
 
+      {/* クライアントデータ閲覧 */}
+      <div style={{ ...cardStyle, padding: '1.25rem' }}>
+        <h3 style={sectionTitle}>クライアントデータ</h3>
+        {clientData && clientData.applicants.length > 0 ? (
+          <ClientDataView data={clientData} />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem', opacity: 0.5 }}><ClipboardList size={32} /></div>
+            <p style={{ margin: 0, fontSize: '0.875rem' }}>このクライアントはまだログインしていないか、データがありません。</p>
+          </div>
+        )}
+      </div>
+      </>
+      )}
+
+      {/* 子アカウント / 付与権限タブ */}
+      {activeTab === 'children' && (
+      <>
       {/* 子アカウント（親の場合） */}
       {client.accountType === 'parent' && (
         <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
@@ -2717,25 +2766,16 @@ const ClientDetail: React.FC<{
           </div>
         </div>
       )}
+      </>
+      )}
 
-      {/* クライアントデータ閲覧 */}
-      <div style={{ ...cardStyle, padding: '1.25rem' }}>
-        <h3 style={sectionTitle}>クライアントデータ</h3>
-        {clientData && clientData.applicants.length > 0 ? (
-          <ClientDataView data={clientData} />
-        ) : (
-          <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem', opacity: 0.5 }}><ClipboardList size={32} /></div>
-            <p style={{ margin: 0, fontSize: '0.875rem' }}>このクライアントはまだログインしていないか、データがありません。</p>
-          </div>
-        )}
-      </div>
-
-      {/* 操作ログ */}
-      <div style={{ marginTop: '1.5rem' }}>
-        <h3 style={sectionTitle}>操作ログ（このクライアント）</h3>
-        <ClientLogsSection client={client} />
-      </div>
+      {/* 監査ログタブ：操作ログ */}
+      {activeTab === 'audit' && (
+        <div style={{ marginTop: '0.5rem' }}>
+          <h3 style={sectionTitle}>操作ログ（このクライアント）</h3>
+          <ClientLogsSection client={client} />
+        </div>
+      )}
     </div>
   );
 };
