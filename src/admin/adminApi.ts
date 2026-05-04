@@ -97,3 +97,38 @@ export async function updateKillSwitches(clientId: string, flags: KillSwitchFlag
   const data = await resp.json();
   return data.flags || {};
 }
+
+// ─── 通知ログ（Email / Webhook / SMS の送信記録の受け皿） ───
+
+export type NotificationType = 'email' | 'webhook' | 'sms';
+
+export interface NotificationLogEntry {
+  id: number;
+  createdAt: string;
+  type: NotificationType;
+  clientId?: string;
+  target?: string;
+  subject?: string;
+  status: 'success' | 'failed';
+  errorMessage?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface NotificationLogResponse {
+  entries: NotificationLogEntry[];
+  summary: {
+    total: number;
+    byType: Record<string, { total: number; failed: number }>;
+  };
+  storePath: string | null;
+}
+
+export async function fetchNotificationLogs(opts?: { limit?: number; type?: NotificationType }): Promise<NotificationLogResponse> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.type) params.set('type', opts.type);
+  const qs = params.toString();
+  const resp = await fetch(`/api/admin/notification-logs${qs ? `?${qs}` : ''}`, { headers: buildHeaders() });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+  return resp.json();
+}

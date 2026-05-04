@@ -37,12 +37,17 @@ import {
   MessageSquare,
   DollarSign,
   Power,
+  Bell,
+  Receipt,
+  Plus,
+  Trash2,
+  Printer,
 } from 'lucide-react';
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
-import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags } from './adminApi';
+import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, fetchNotificationLogs, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags, type NotificationLogEntry, type NotificationType } from './adminApi';
 import { storage } from '@/utils/storage';
 import Modal from '@/components/Modal';
-import type { Client, ClientData, ClientPermissions, ClientOperationLog } from '@/types';
+import type { Client, ClientData, ClientPermissions, ClientOperationLog, InvoiceLog, InvoiceLine } from '@/types';
 import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
 import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
 import { OPTION_LABELS, OPTION_DEFAULTS, getOptionUsageThisMonth } from '@/utils/clientOptions';
@@ -783,6 +788,139 @@ const ApiCostSection: React.FC<{ clients: Client[] }> = ({ clients }) => {
   );
 };
 
+/* ============================================================
+   通知ログ閲覧（Email / Webhook / SMS の送信記録）
+   ============================================================ */
+const NotificationLogSection: React.FC<{ clients: Client[] }> = ({ clients }) => {
+  const [entries, setEntries] = useState<NotificationLogEntry[] | null>(null);
+  const [summary, setSummary] = useState<{ total: number; byType: Record<string, { total: number; failed: number }> } | null>(null);
+  const [storePath, setStorePath] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<NotificationType | ''>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchNotificationLogs({ limit: 100, type: typeFilter || undefined });
+      setEntries(data.entries);
+      setSummary(data.summary);
+      setStorePath(data.storePath);
+    } catch (e: any) {
+      setError(e.message || '取得に失敗しました');
+      setEntries(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [typeFilter]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const clientNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    clients.forEach((c) => { m[c.id] = c.companyName; });
+    return m;
+  }, [clients]);
+
+  const typeBadge = (t: NotificationType) => {
+    const map: Record<NotificationType, { bg: string; fg: string; label: string }> = {
+      email: { bg: '#DBEAFE', fg: '#1E40AF', label: 'メール' },
+      sms: { bg: '#FEF3C7', fg: '#92400E', label: 'SMS' },
+      webhook: { bg: '#E0E7FF', fg: '#3730A3', label: 'Webhook' },
+    };
+    const v = map[t];
+    return <span style={{ padding: '0.125rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: v.bg, color: v.fg }}>{v.label}</span>;
+  };
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <Bell size={16} color="#0EA5E9" />
+          通知ログ（Email / Webhook / SMS）
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as NotificationType | '')} style={{ padding: '0.25rem 0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px', fontSize: '0.75rem' }}>
+            <option value="">全タイプ</option>
+            <option value="email">メール</option>
+            <option value="sms">SMS</option>
+            <option value="webhook">Webhook</option>
+          </select>
+          <button onClick={reload} disabled={loading} style={{ padding: '0.25rem 0.625rem', border: '1px solid #D1D5DB', borderRadius: '4px', backgroundColor: '#fff', fontSize: '0.75rem', cursor: 'pointer' }}>
+            <RefreshCw size={12} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />更新
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '4px', fontSize: '0.75rem', color: '#991B1B', marginBottom: '0.75rem' }}>
+          {error}
+        </div>
+      )}
+
+      {summary && summary.total > 0 ? (
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          {(['email', 'sms', 'webhook'] as NotificationType[]).map((t) => {
+            const s = summary.byType[t];
+            if (!s) return null;
+            return (
+              <div key={t} style={{ padding: '0.5rem 0.75rem', backgroundColor: '#F9FAFB', borderRadius: '6px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                {typeBadge(t)}
+                <span><strong>{s.total}</strong> 件</span>
+                {s.failed > 0 && <span style={{ color: '#DC2626' }}>失敗 {s.failed}</span>}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ fontSize: '0.8125rem', color: '#6B7280', padding: '1rem 0' }}>
+          通知ログはまだありません。Email / Webhook / SMS の送信機能が実装され次第、ここに記録されます。
+        </div>
+      )}
+
+      {entries && entries.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #E5E7EB', color: '#6B7280' }}>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>日時</th>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>種別</th>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>クライアント</th>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>宛先</th>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>件名 / 説明</th>
+                <th style={{ textAlign: 'left', padding: '0.375rem 0.5rem' }}>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                  <td style={{ padding: '0.375rem 0.5rem', whiteSpace: 'nowrap' }}>{formatLogTimestamp(e.createdAt)}</td>
+                  <td style={{ padding: '0.375rem 0.5rem' }}>{typeBadge(e.type)}</td>
+                  <td style={{ padding: '0.375rem 0.5rem' }}>{e.clientId ? (clientNameMap[e.clientId] || e.clientId) : '-'}</td>
+                  <td style={{ padding: '0.375rem 0.5rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.target || ''}>{e.target || '-'}</td>
+                  <td style={{ padding: '0.375rem 0.5rem', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.subject || e.errorMessage || ''}>{e.subject || (e.status === 'failed' ? e.errorMessage : '-')}</td>
+                  <td style={{ padding: '0.375rem 0.5rem' }}>
+                    {e.status === 'success'
+                      ? <span style={{ padding: '0.125rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#D1FAE5', color: '#047857' }}>成功</span>
+                      : <span style={{ padding: '0.125rem 0.375rem', borderRadius: '4px', fontSize: '0.625rem', fontWeight: 700, backgroundColor: '#FEE2E2', color: '#991B1B' }}>失敗</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.5rem' }}>
+        {storePath
+          ? `※ 永続化: ${storePath}`
+          : '※ 揮発モード（NOTIFICATIONS_LOG_PATH 未設定）。サーバー再起動でリセット'}
+      </div>
+    </div>
+  );
+};
+
 const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: string) => void; statsMap: { [id: string]: ClientStats } }> = ({ clients, onNavigate, statsMap }) => {
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -907,6 +1045,9 @@ const Dashboard: React.FC<{ clients: Client[]; onNavigate: (view: string, id?: s
 
       {/* API コスト（Anthropic API 使用量） */}
       <ApiCostSection clients={clients} />
+
+      {/* 通知ログ（Email / Webhook / SMS） */}
+      <NotificationLogSection clients={clients} />
 
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(360px, 1.4fr)', gap: '1rem', marginBottom: '2rem' }}>
@@ -1672,6 +1813,417 @@ const CancellationSection: React.FC<{
 };
 
 /* ============================================================
+   請求管理（クライアント詳細内のセクション）
+   ============================================================ */
+
+const INVOICE_STATUS_LABEL: Record<InvoiceLog['status'], string> = {
+  draft: '下書き',
+  issued: '発行済',
+  sent: '送付済',
+  paid: '入金済',
+  void: '無効',
+};
+
+const INVOICE_STATUS_COLOR: Record<InvoiceLog['status'], { bg: string; fg: string }> = {
+  draft: { bg: '#F3F4F6', fg: '#4B5563' },
+  issued: { bg: '#DBEAFE', fg: '#1E40AF' },
+  sent: { bg: '#FEF3C7', fg: '#92400E' },
+  paid: { bg: '#D1FAE5', fg: '#047857' },
+  void: { bg: '#FEE2E2', fg: '#991B1B' },
+};
+
+function buildInvoiceLines(client: Client, yearMonth: string, smsOverageCharge: number): InvoiceLine[] {
+  const lines: InvoiceLine[] = [];
+  // プラン基本料
+  const planFee = PLAN_PRICES[client.plan] || 0;
+  if (planFee > 0) {
+    lines.push({
+      kind: 'plan',
+      description: `${PLAN_LABELS[client.plan]}プラン 月額`,
+      unitPrice: planFee,
+      quantity: 1,
+      amount: planFee,
+    });
+  }
+  // オプション
+  if (client.options) {
+    Object.entries(client.options).forEach(([key, opt]) => {
+      if (opt && opt.status === 'active' && opt.monthlyFee && opt.monthlyFee > 0) {
+        const label = OPTION_LABELS[key as keyof typeof OPTION_LABELS] || key;
+        lines.push({
+          kind: `option:${key}`,
+          description: `オプション: ${label}`,
+          unitPrice: opt.monthlyFee,
+          quantity: 1,
+          amount: opt.monthlyFee,
+        });
+      }
+    });
+  }
+  // SMS 超過課金
+  if (smsOverageCharge > 0) {
+    const qty = Math.round(smsOverageCharge / SMS_OVERAGE_UNIT_PRICE);
+    lines.push({
+      kind: 'sms-overage',
+      description: `SMS 超過送信（${yearMonth}）`,
+      unitPrice: SMS_OVERAGE_UNIT_PRICE,
+      quantity: qty,
+      amount: smsOverageCharge,
+    });
+  }
+  return lines;
+}
+
+const InvoiceFormModal: React.FC<{
+  open: boolean;
+  client: Client;
+  initial?: InvoiceLog;
+  smsOverageCharge: number;
+  onClose: () => void;
+  onSave: (invoice: InvoiceLog) => void;
+}> = ({ open, client, initial, smsOverageCharge, onClose, onSave }) => {
+  const defaultMonth = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+  const [yearMonth, setYearMonth] = useState(initial?.yearMonth || defaultMonth);
+  const [lines, setLines] = useState<InvoiceLine[]>(initial?.lines || []);
+  const [status, setStatus] = useState<InvoiceLog['status']>(initial?.status || 'draft');
+  const [memo, setMemo] = useState(initial?.memo || '');
+
+  useEffect(() => {
+    if (!open) return;
+    if (initial) {
+      setYearMonth(initial.yearMonth);
+      setLines(initial.lines);
+      setStatus(initial.status);
+      setMemo(initial.memo || '');
+    } else {
+      setYearMonth(defaultMonth);
+      setLines(buildInvoiceLines(client, defaultMonth, smsOverageCharge));
+      setStatus('draft');
+      setMemo('');
+    }
+  }, [open, initial, client, smsOverageCharge, defaultMonth]);
+
+  const total = lines.reduce((s, l) => s + (l.amount || 0), 0);
+
+  const updateLine = (idx: number, patch: Partial<InvoiceLine>) => {
+    setLines((prev) => prev.map((l, i) => {
+      if (i !== idx) return l;
+      const next = { ...l, ...patch };
+      if (patch.unitPrice !== undefined || patch.quantity !== undefined) {
+        next.amount = (next.unitPrice || 0) * (next.quantity || 0);
+      }
+      return next;
+    }));
+  };
+
+  const addLine = () => setLines((prev) => [...prev, { kind: 'custom', description: '', unitPrice: 0, quantity: 1, amount: 0 }]);
+  const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx));
+
+  const recompute = () => setLines(buildInvoiceLines(client, yearMonth, smsOverageCharge));
+
+  const handleSave = () => {
+    if (!yearMonth) {
+      alert('対象月を入力してください');
+      return;
+    }
+    const cleanedLines = lines.filter((l) => l.description.trim() && l.amount > 0);
+    if (cleanedLines.length === 0) {
+      alert('請求行を 1 行以上入力してください');
+      return;
+    }
+    const totalAmount = cleanedLines.reduce((s, l) => s + l.amount, 0);
+    const invoice: InvoiceLog = {
+      id: initial?.id || Date.now(),
+      yearMonth,
+      issuedAt: initial?.issuedAt || new Date().toISOString(),
+      totalAmount,
+      lines: cleanedLines,
+      status,
+      memo: memo.trim() || undefined,
+      pdfUrl: initial?.pdfUrl,
+      emailedAt: initial?.emailedAt,
+      paidAt: status === 'paid' ? (initial?.paidAt || new Date().toISOString()) : initial?.paidAt,
+    };
+    onSave(invoice);
+  };
+
+  return (
+    <Modal isOpen={open} onClose={onClose} title={initial ? `請求書 編集（${initial.yearMonth}）` : '新規請求書を作成'} width="720px">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '0.875rem' }}>
+        <div>
+          <label style={labelStyle}>対象月</label>
+          <input type="month" value={yearMonth} onChange={(e) => setYearMonth(e.target.value)} style={inputStyle} />
+        </div>
+        <div>
+          <label style={labelStyle}>ステータス</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value as InvoiceLog['status'])} style={inputStyle}>
+            {(['draft', 'issued', 'sent', 'paid', 'void'] as const).map((s) => (
+              <option key={s} value={s}>{INVOICE_STATUS_LABEL[s]}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+          <button onClick={recompute} style={{ ...btnSecondary, fontSize: '0.75rem' }} title="プラン・オプション・SMS 超過から再計算">
+            <RefreshCw size={12} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />自動再計算
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '0.875rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>請求行</label>
+          <button onClick={addLine} style={{ ...btnSecondary, fontSize: '0.75rem' }}>
+            <Plus size={12} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />行を追加
+          </button>
+        </div>
+        <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #E5E7EB', color: '#6B7280' }}>
+              <th style={{ textAlign: 'left', padding: '0.375rem' }}>説明</th>
+              <th style={{ textAlign: 'right', padding: '0.375rem', width: '110px' }}>単価</th>
+              <th style={{ textAlign: 'right', padding: '0.375rem', width: '70px' }}>数量</th>
+              <th style={{ textAlign: 'right', padding: '0.375rem', width: '120px' }}>金額</th>
+              <th style={{ width: '32px' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.length === 0 && (
+              <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1rem', color: '#9CA3AF' }}>請求行がありません。「自動再計算」または「行を追加」から作成</td></tr>
+            )}
+            {lines.map((l, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                <td style={{ padding: '0.25rem' }}>
+                  <input type="text" value={l.description} onChange={(e) => updateLine(i, { description: e.target.value })} placeholder="例: スタンダードプラン 月額" style={{ ...inputStyle, fontSize: '0.75rem', padding: '0.25rem 0.375rem' }} />
+                </td>
+                <td style={{ padding: '0.25rem' }}>
+                  <input type="number" value={l.unitPrice} min={0} step={1} onChange={(e) => updateLine(i, { unitPrice: Number(e.target.value) || 0 })} style={{ ...inputStyle, fontSize: '0.75rem', padding: '0.25rem 0.375rem', textAlign: 'right' }} />
+                </td>
+                <td style={{ padding: '0.25rem' }}>
+                  <input type="number" value={l.quantity} min={0} step={1} onChange={(e) => updateLine(i, { quantity: Number(e.target.value) || 0 })} style={{ ...inputStyle, fontSize: '0.75rem', padding: '0.25rem 0.375rem', textAlign: 'right' }} />
+                </td>
+                <td style={{ padding: '0.375rem', textAlign: 'right', fontWeight: 600 }}>¥{(l.amount || 0).toLocaleString()}</td>
+                <td style={{ padding: '0.25rem', textAlign: 'center' }}>
+                  <button onClick={() => removeLine(i)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} title="削除"><Trash2 size={14} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: '2px solid #E5E7EB' }}>
+              <td colSpan={3} style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 600, color: '#374151' }}>合計（税込）</td>
+              <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 700, fontSize: '0.9375rem' }}>¥{total.toLocaleString()}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={labelStyle}>メモ（任意）</label>
+        <textarea value={memo} onChange={(e) => setMemo(e.target.value)} style={{ ...inputStyle, minHeight: '50px' }} placeholder="例: 振込先変更のお知らせ等" />
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={btnSecondary}>キャンセル</button>
+        <button onClick={handleSave} style={btnPrimary}>{initial ? '更新' : '保存'}</button>
+      </div>
+    </Modal>
+  );
+};
+
+const InvoiceSection: React.FC<{
+  client: Client;
+  clientData: ClientData | null;
+  smsOverageCharge: number;
+  onUpdateInvoices: (mutator: (invoices: InvoiceLog[]) => InvoiceLog[]) => void;
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ client, clientData, smsOverageCharge, onUpdateInvoices, onLog }) => {
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<InvoiceLog | null>(null);
+  const [printTarget, setPrintTarget] = useState<InvoiceLog | null>(null);
+
+  const invoices = useMemo(() => {
+    const arr = clientData?.invoices || [];
+    return [...arr].sort((a, b) => b.yearMonth.localeCompare(a.yearMonth));
+  }, [clientData?.invoices]);
+
+  const openCreate = () => { setEditing(null); setFormOpen(true); };
+  const openEdit = (inv: InvoiceLog) => { setEditing(inv); setFormOpen(true); };
+
+  const handleSave = (inv: InvoiceLog) => {
+    onUpdateInvoices((arr) => {
+      const next = arr.filter((x) => x.id !== inv.id);
+      next.push(inv);
+      return next;
+    });
+    onLog?.(editing ? '請求書更新' : '請求書作成', client.companyName, `${inv.yearMonth} / ¥${inv.totalAmount.toLocaleString()} / ${INVOICE_STATUS_LABEL[inv.status]}`);
+    setFormOpen(false);
+    setEditing(null);
+  };
+
+  const handleDelete = (inv: InvoiceLog) => {
+    if (!window.confirm(`${inv.yearMonth} の請求書を削除しますか？`)) return;
+    onUpdateInvoices((arr) => arr.filter((x) => x.id !== inv.id));
+    onLog?.('請求書削除', client.companyName, `${inv.yearMonth} / ¥${inv.totalAmount.toLocaleString()}`);
+  };
+
+  const handlePrint = (inv: InvoiceLog) => {
+    setPrintTarget(inv);
+    // 描画後に印刷ダイアログを開く
+    setTimeout(() => {
+      window.print();
+      // 印刷ダイアログ閉じたら通常表示に戻す
+      setTimeout(() => setPrintTarget(null), 500);
+    }, 100);
+  };
+
+  return (
+    <>
+      <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }} className="invoice-section-no-print">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+            <Receipt size={16} color="#0EA5E9" />
+            請求管理
+            {invoices.length > 0 && <span style={{ marginLeft: '0.375rem', padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 600, backgroundColor: '#E0F2FE', color: '#0369A1' }}>{invoices.length} 件</span>}
+          </h3>
+          <button onClick={openCreate} style={btnPrimary}>
+            <Plus size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />新規請求書を作成
+          </button>
+        </div>
+
+        {invoices.length === 0 ? (
+          <div style={{ fontSize: '0.8125rem', color: '#6B7280', padding: '0.5rem 0' }}>
+            請求書はまだありません。「新規請求書を作成」からプラン料金 + オプション + SMS 超過を自動集計できます。
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #E5E7EB', color: '#6B7280' }}>
+                  <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>対象月</th>
+                  <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>状態</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.375rem' }}>合計</th>
+                  <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>発行日</th>
+                  <th style={{ textAlign: 'left', padding: '0.5rem 0.375rem' }}>入金日</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.375rem' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv) => {
+                  const sc = INVOICE_STATUS_COLOR[inv.status];
+                  return (
+                    <tr key={inv.id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '0.5rem 0.375rem', fontWeight: 600 }}>{inv.yearMonth}</td>
+                      <td style={{ padding: '0.5rem 0.375rem' }}>
+                        <span style={{ padding: '0.125rem 0.5rem', borderRadius: '9999px', fontSize: '0.6875rem', fontWeight: 700, backgroundColor: sc.bg, color: sc.fg }}>{INVOICE_STATUS_LABEL[inv.status]}</span>
+                      </td>
+                      <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right', fontWeight: 600 }}>¥{inv.totalAmount.toLocaleString()}</td>
+                      <td style={{ padding: '0.5rem 0.375rem', fontSize: '0.75rem', color: '#6B7280' }}>{inv.issuedAt ? formatLogTimestamp(inv.issuedAt).slice(0, 10) : '-'}</td>
+                      <td style={{ padding: '0.5rem 0.375rem', fontSize: '0.75rem', color: '#6B7280' }}>{inv.paidAt ? formatLogTimestamp(inv.paidAt).slice(0, 10) : '-'}</td>
+                      <td style={{ padding: '0.5rem 0.375rem', textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '0.25rem' }}>
+                          <button onClick={() => handlePrint(inv)} style={{ ...btnSecondary, fontSize: '0.6875rem', padding: '0.25rem 0.5rem' }} title="印刷 / PDF 出力"><Printer size={12} /></button>
+                          <button onClick={() => openEdit(inv)} style={{ ...btnSecondary, fontSize: '0.6875rem', padding: '0.25rem 0.5rem' }}>編集</button>
+                          <button onClick={() => handleDelete(inv)} style={{ ...btnSecondary, fontSize: '0.6875rem', padding: '0.25rem 0.5rem', color: '#DC2626', borderColor: '#FECACA' }}><Trash2 size={12} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <InvoiceFormModal open={formOpen} client={client} initial={editing || undefined} smsOverageCharge={smsOverageCharge} onClose={() => { setFormOpen(false); setEditing(null); }} onSave={handleSave} />
+
+      {printTarget && <InvoicePrintView client={client} invoice={printTarget} />}
+    </>
+  );
+};
+
+const InvoicePrintView: React.FC<{ client: Client; invoice: InvoiceLog }> = ({ client, invoice }) => {
+  const issuedDate = invoice.issuedAt ? new Date(invoice.issuedAt).toLocaleDateString('ja-JP') : '';
+  return (
+    <div className="invoice-print-only" style={{ padding: '32px 40px', fontFamily: '"Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif', color: '#111827', backgroundColor: '#fff' }}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .invoice-print-only, .invoice-print-only * { visibility: visible !important; }
+          .invoice-print-only { position: absolute !important; left: 0; top: 0; width: 100%; }
+        }
+        @media screen {
+          .invoice-print-only { position: fixed; left: -9999px; top: 0; }
+        }
+      `}</style>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>請求書</h1>
+        <div style={{ textAlign: 'right', fontSize: '12px', color: '#374151' }}>
+          <div>発行日: {issuedDate}</div>
+          <div>請求書 No: {invoice.id}</div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '4px' }}>請求先</div>
+        <div style={{ fontSize: '18px', fontWeight: 700, marginBottom: '2px' }}>{client.companyName} 御中</div>
+        {client.contactName && <div style={{ fontSize: '13px', color: '#374151' }}>ご担当: {client.contactName} 様</div>}
+      </div>
+
+      <div style={{ marginBottom: '24px', padding: '12px 16px', backgroundColor: '#F9FAFB', borderRadius: '6px' }}>
+        <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>請求対象月 / 合計金額（税込）</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div style={{ fontSize: '18px', fontWeight: 600 }}>{invoice.yearMonth}</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: '#0F766E' }}>¥{invoice.totalAmount.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#F3F4F6' }}>
+            <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #E5E7EB' }}>項目</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid #E5E7EB', width: '100px' }}>単価</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid #E5E7EB', width: '60px' }}>数量</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid #E5E7EB', width: '120px' }}>金額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.lines.map((l, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid #F3F4F6' }}>
+              <td style={{ padding: '8px 12px' }}>{l.description}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right' }}>¥{l.unitPrice.toLocaleString()}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{l.quantity}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>¥{l.amount.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={3} style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderTop: '2px solid #111827' }}>合計</td>
+            <td style={{ padding: '12px', textAlign: 'right', fontSize: '16px', fontWeight: 700, borderTop: '2px solid #111827' }}>¥{invoice.totalAmount.toLocaleString()}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      {invoice.memo && (
+        <div style={{ marginBottom: '24px', padding: '12px 16px', backgroundColor: '#FEFCE8', borderLeft: '3px solid #EAB308', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+          {invoice.memo}
+        </div>
+      )}
+
+      <div style={{ marginTop: '40px', paddingTop: '16px', borderTop: '1px solid #E5E7EB', fontSize: '11px', color: '#6B7280', lineHeight: 1.6 }}>
+        <div>※ 本請求書は RISOTTO 運営管理画面より自動発行されています。</div>
+        <div>※ 振込先・支払期限等は別途ご案内いたします。</div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
    クライアント詳細
    ============================================================ */
 const ClientDetail: React.FC<{
@@ -1688,6 +2240,7 @@ const ClientDetail: React.FC<{
   const [newPw, setNewPw] = useState('');
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
+  const [dataReloadKey, setDataReloadKey] = useState(0);
 
   const children = clients.filter(c => c.accountType === 'child' && c.parentId === client.id);
   const parent = client.parentId ? clients.find(c => c.id === client.parentId) : null;
@@ -1698,7 +2251,7 @@ const ClientDetail: React.FC<{
     try {
       return storage.getClientData(dataId);
     } catch { return null; }
-  }, [dataId]);
+  }, [dataId, dataReloadKey]);
 
   // 統計
   const stats = useMemo(() => {
@@ -1857,6 +2410,23 @@ const ClientDetail: React.FC<{
       {/* 解約管理（親アカウントのみ） */}
       {client.accountType === 'parent' && (
         <CancellationSection client={client} onUpdateClient={onUpdateClient} onLog={onLogAdminAction} />
+      )}
+
+      {/* 請求管理（親アカウントのみ） */}
+      {client.accountType === 'parent' && (
+        <InvoiceSection
+          client={client}
+          clientData={clientData}
+          smsOverageCharge={stats.smsOverageChargeThisMonth}
+          onUpdateInvoices={(mutator) => {
+            const cur = (() => { try { return storage.getClientData(dataId); } catch { return null; } })();
+            if (!cur) return;
+            const nextInvoices = mutator(cur.invoices || []);
+            storage.saveClientData(dataId, { ...cur, invoices: nextInvoices });
+            setDataReloadKey((k) => k + 1);
+          }}
+          onLog={onLogAdminAction}
+        />
       )}
 
       {/* データサマリ（親アカウントのみ） */}

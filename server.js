@@ -8,6 +8,7 @@ const { apiAuth } = require('./server/middleware/apiAuth');
 const { adminAuth } = require('./server/middleware/adminAuth');
 const usageLogger = require('./server/lib/usageLogger');
 const killSwitches = require('./server/lib/killSwitches');
+const notificationLog = require('./server/lib/notificationLog');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,6 +62,38 @@ app.put('/api/admin/kill-switches/:clientId', adminAuth, (req, res) => {
     const flags = (req.body && req.body.flags) || {};
     const saved = killSwitches.setForClient(clientId, flags);
     return res.json({ clientId, flags: saved });
+  } catch (e) {
+    return res.status(500).json({ error: e && e.message });
+  }
+});
+
+// 管理画面 API: 通知ログ（Email/Webhook/SMS の送信記録、現状は受け皿のみ）
+app.get('/api/admin/notification-logs', adminAuth, (req, res) => {
+  const limit = Number(req.query.limit) || 100;
+  const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  return res.json({
+    entries: notificationLog.recent(limit, type),
+    summary: notificationLog.summary(),
+    storePath: notificationLog.storePath,
+  });
+});
+
+app.post('/api/admin/notification-logs', adminAuth, (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.type || !body.status) {
+      return res.status(400).json({ error: 'type and status required' });
+    }
+    const entry = notificationLog.record({
+      type: body.type,
+      clientId: body.clientId,
+      target: body.target,
+      subject: body.subject,
+      status: body.status,
+      errorMessage: body.errorMessage,
+      meta: body.meta,
+    });
+    return res.json({ entry });
   } catch (e) {
     return res.status(500).json({ error: e && e.message });
   }
