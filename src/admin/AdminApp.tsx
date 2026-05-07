@@ -1301,8 +1301,13 @@ const ClientList: React.FC<{
               return (
                 <React.Fragment key={p.id}>
                   {/* 親行 */}
-                  <tr style={{ backgroundColor: '#FAFBFC', borderTop: '1px solid #E5E7EB' }}>
-                    <td style={{ textAlign: 'center', cursor: children.length && showChildren ? 'pointer' : 'default', padding: '0.625rem 0.5rem' }} onClick={() => children.length && showChildren && toggleExpand(p.id)}>
+                  <tr
+                    style={{ backgroundColor: '#FAFBFC', borderTop: '1px solid #E5E7EB', cursor: 'pointer' }}
+                    onClick={() => onNavigate('detail', p.id)}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F1F5F9')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#FAFBFC')}
+                  >
+                    <td style={{ textAlign: 'center', cursor: children.length && showChildren ? 'pointer' : 'default', padding: '0.625rem 0.5rem' }} onClick={(e) => { e.stopPropagation(); if (children.length && showChildren) toggleExpand(p.id); }}>
                       {children.length > 0 && showChildren && <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{isExpanded ? '▼' : '▶'}</span>}
                     </td>
                     <td style={{ padding: '0.625rem 0.5rem' }}>
@@ -1361,7 +1366,13 @@ const ClientList: React.FC<{
                     // 子アカの統計は親と同じデータなので親の statsMap から参照
                     const cStats = statsMap[p.id];
                     return (
-                      <tr key={ch.id} style={{ backgroundColor: '#F8FAFF' }}>
+                      <tr
+                        key={ch.id}
+                        style={{ backgroundColor: '#F8FAFF', cursor: 'pointer' }}
+                        onClick={() => onNavigate('detail', ch.id)}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#EEF2FF')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#F8FAFF')}
+                      >
                         <td></td>
                         <td style={{ padding: '0.5rem 0.5rem 0.5rem 2rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
