@@ -3201,10 +3201,21 @@ const ClientFormModal: React.FC<{
     }
   }, [isOpen, editingClient, defaultParentId, clients]);
 
-  const parentOptions = useMemo(() =>
-    clients.filter(c => c.accountType === 'parent').map(c => ({ value: c.id, label: `${c.companyName} (${c.id})` })),
-    [clients]
-  );
+  // 親アカウント候補は「同じ会社名の本部アカウント」だけに絞る（誤って別会社の親に紐付けるのを防止）
+  // ただし以下は強制的に候補に含める：
+  //  - 編集中の子アカウントが現在紐付いている parentId（旧データで会社名が乖離していても再保存できるように）
+  //  - 編集中の自分自身（parent edit）は除外する
+  const parentOptions = useMemo(() => {
+    const targetName = (form.companyName || '').trim();
+    const allParents = clients.filter(c => c.accountType === 'parent' && c.id !== form.id);
+    const matched = allParents.filter(c => targetName ? c.companyName.trim() === targetName : true);
+    // 既存 parentId が matched に含まれていなければ追加（子アカ編集時の救済）
+    if (form.parentId && !matched.some(c => c.id === form.parentId)) {
+      const stale = allParents.find(c => c.id === form.parentId);
+      if (stale) matched.unshift(stale);
+    }
+    return matched.map(c => ({ value: c.id, label: `${c.companyName} (${c.id})` }));
+  }, [clients, form.companyName, form.id, form.parentId]);
 
   const updateField = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -3223,6 +3234,18 @@ const ClientFormModal: React.FC<{
     if (!form.password.trim()) e.password = 'パスワードは必須です';
     else if (form.password.length < 6) e.password = 'パスワードは6文字以上で入力してください';
     if (form.accountType === 'child' && !form.parentId) e.parentId = '親アカウントを選択してください';
+    // 自己参照禁止：parentId が自分自身を指していると本部リストから親が消える致命バグになる
+    if (form.accountType === 'child' && form.parentId === form.id) {
+      e.parentId = '親アカウントに自分自身は指定できません';
+    }
+    // 編集時にアカウント種別を切り替えると、本部 → 子に化けて子アカウントが孤立する致命バグになる
+    if (isEdit && editingClient && editingClient.accountType !== form.accountType) {
+      e.accountType = 'アカウント種別の切り替えはできません。必要な場合は一度削除して作成し直してください';
+    }
+    // 契約終了日 < 契約開始日 を禁止
+    if (form.contractStart && form.contractEnd && form.contractEnd < form.contractStart) {
+      e.contractEnd = '契約終了日は契約開始日より後を指定してください';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -3276,46 +3299,66 @@ const ClientFormModal: React.FC<{
           <input type="text" value={form.password} onChange={(e) => updateField('password', e.target.value)} style={inputStyle} placeholder="6文字以上" />
         )}
 
-        {/* アカウント種別 */}
+        {/* アカウント種別（編集時はロック：本部↔子の切替は致命データ破壊のため不可） */}
         <div style={{ marginBottom: '1rem' }}>
           <label style={labelStyle}>アカウント種別</label>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            {(['parent', 'child'] as const).map(t => (
-              <div
-                key={t}
-                onClick={() => updateField('accountType', t)}
-                style={{
-                  flex: 1,
-                  padding: '0.75rem',
-                  borderRadius: '8px',
-                  border: `2px solid ${form.accountType === t ? '#3B82F6' : '#e5e7eb'}`,
-                  backgroundColor: form.accountType === t ? '#EFF6FF' : '#fff',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.25rem', color: form.accountType === t ? '#3B82F6' : '#6b7280' }}>
-                  {t === 'parent' ? <Building2 size={22} /> : <Store size={22} />}
+            {(['parent', 'child'] as const).map(t => {
+              const isSelected = form.accountType === t;
+              const locked = isEdit;
+              return (
+                <div
+                  key={t}
+                  onClick={() => { if (!locked) updateField('accountType', t); }}
+                  title={locked ? '編集モードではアカウント種別の切り替えはできません' : ''}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    border: `2px solid ${isSelected ? '#3B82F6' : '#e5e7eb'}`,
+                    backgroundColor: isSelected ? '#EFF6FF' : '#fff',
+                    cursor: locked ? 'not-allowed' : 'pointer',
+                    opacity: locked && !isSelected ? 0.45 : 1,
+                    textAlign: 'center',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.25rem', color: isSelected ? '#3B82F6' : '#6b7280' }}>
+                    {t === 'parent' ? <Building2 size={22} /> : <Store size={22} />}
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t === 'parent' ? '本部アカウント' : '子アカウント'}</div>
                 </div>
-                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t === 'parent' ? '本部アカウント' : '子アカウント'}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
+          {isEdit && (
+            <div style={{ marginTop: '0.375rem', fontSize: '0.7rem', color: '#6b7280' }}>
+              編集モードではアカウント種別の切り替えはできません（本部↔子の入れ替えは紐付け破壊の原因になるため）。
+            </div>
+          )}
+          {errors.accountType && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors.accountType}</div>}
         </div>
 
         {/* 子アカウント時のみ */}
         {form.accountType === 'child' && (
           <>
             {fieldGroup('親アカウント', true, 'parentId',
-              <select
-                value={form.parentId || ''}
-                onChange={(e) => updateField('parentId', e.target.value || undefined)}
-                style={inputStyle}
-              >
-                <option value="">選択してください</option>
-                {parentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <>
+                <select
+                  value={form.parentId || ''}
+                  onChange={(e) => updateField('parentId', e.target.value || undefined)}
+                  style={inputStyle}
+                  disabled={parentOptions.length === 0}
+                >
+                  <option value="">選択してください</option>
+                  {parentOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {parentOptions.length === 0 && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: '#dc2626' }}>
+                    会社名「{form.companyName || '(未入力)'}」と一致する本部アカウントがありません。先に本部アカウントを作成するか、会社名を本部と完全一致させてください。
+                  </div>
+                )}
+              </>
             )}
 
             {fieldGroup('担当拠点名', false, 'baseName',
@@ -4862,12 +4905,30 @@ const AdminApp: React.FC = () => {
     let updated: Client[];
     const existing = clients.findIndex(c => c.id === client.id);
     const isNew = existing < 0;
+    const previous = existing >= 0 ? clients[existing] : null;
+
     if (existing >= 0) {
       updated = [...clients];
       updated[existing] = client;
     } else {
       updated = [...clients, client];
     }
+
+    // 本部の会社名が変わった場合、子アカウントの companyName も追従させる
+    // （子アカ編集モーダルの「同じ会社名の本部だけ表示」フィルタが破綻するのを防ぐ）
+    if (
+      previous &&
+      previous.accountType === 'parent' &&
+      client.accountType === 'parent' &&
+      previous.companyName !== client.companyName
+    ) {
+      updated = updated.map((c) =>
+        c.accountType === 'child' && c.parentId === client.id
+          ? { ...c, companyName: client.companyName }
+          : c
+      );
+    }
+
     saveAndReload(updated);
     setModalOpen(false);
     setEditingClient(null);
