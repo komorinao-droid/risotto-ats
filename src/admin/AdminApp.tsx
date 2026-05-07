@@ -451,6 +451,9 @@ const AdminLogin: React.FC<{ onLogin: (account: AdminAccount, remember: boolean)
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+              aria-pressed={showPassword}
+              title={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
               style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '0.875rem', padding: '0.25rem' }}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -1250,17 +1253,18 @@ const ClientList: React.FC<{
         <input
           type="text"
           placeholder="会社名・IDで検索..."
+          aria-label="クライアント検索（会社名・ID）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle, width: '220px' }}
         />
-        <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+        <select aria-label="プランで絞り込み" value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
           <option value="">プラン: 全て</option>
           {(['trial', 'standard', 'professional', 'enterprise'] as const).map((p) => (
             <option key={p} value={p}>{PLAN_LABELS[p]}</option>
           ))}
         </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+        <select aria-label="ステータスで絞り込み" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
           <option value="">ステータス: 全て</option>
           <option value="active">有効のみ</option>
           <option value="inactive">無効のみ</option>
@@ -3286,11 +3290,13 @@ const ClientFormModal: React.FC<{
   };
 
   const fieldGroup = (label: string, required: boolean, key: string, children: React.ReactNode) => (
-    <div style={{ marginBottom: '1rem' }}>
-      <label style={labelStyle}>{label}{required && <span style={{ color: '#DC2626' }}> *</span>}</label>
+    // <label> をフィールド全体のラッパーにすることで、内部の input/select/textarea と
+    // implicit に関連付ける（スクリーンリーダーや自動テストでアクセシブル名が拾える）
+    <label style={{ display: 'block', marginBottom: '1rem' }}>
+      <span style={labelStyle}>{label}{required && <span style={{ color: '#DC2626' }}> *</span>}</span>
       {children}
       {errors[key] && <div style={{ color: '#DC2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{errors[key]}</div>}
-    </div>
+    </label>
   );
 
   const plans: Client['plan'][] = ['trial', 'standard', 'professional', 'enterprise'];
@@ -3434,33 +3440,33 @@ const ClientFormModal: React.FC<{
 
         {/* 契約期間 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div>
-            <label style={labelStyle}>契約開始日</label>
+          <label style={{ display: 'block' }}>
+            <span style={labelStyle}>契約開始日</span>
             <input type="date" value={form.contractStart || ''} onChange={(e) => updateField('contractStart', e.target.value)} style={inputStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>契約終了日</label>
+          </label>
+          <label style={{ display: 'block' }}>
+            <span style={labelStyle}>契約終了日</span>
             <input type="date" value={form.contractEnd || ''} onChange={(e) => updateField('contractEnd', e.target.value)} style={inputStyle} />
-          </div>
+          </label>
         </div>
 
         {/* 担当者 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div>
-            <label style={labelStyle}>担当者名</label>
+          <label style={{ display: 'block' }}>
+            <span style={labelStyle}>担当者名</span>
             <input type="text" value={form.contactName || ''} onChange={(e) => updateField('contactName', e.target.value)} style={inputStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>担当者メール</label>
+          </label>
+          <label style={{ display: 'block' }}>
+            <span style={labelStyle}>担当者メール</span>
             <input type="email" value={form.contactEmail || ''} onChange={(e) => updateField('contactEmail', e.target.value)} style={inputStyle} />
-          </div>
+          </label>
         </div>
 
         {/* メモ */}
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={labelStyle}>メモ</label>
+        <label style={{ display: 'block', marginBottom: '1rem' }}>
+          <span style={labelStyle}>メモ</span>
           <textarea value={form.memo || ''} onChange={(e) => updateField('memo', e.target.value)} style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }} />
-        </div>
+        </label>
 
         {/* ボタン */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
@@ -4072,6 +4078,13 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
 
   const checkboxLabel: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', cursor: 'pointer', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #e5e7eb' };
 
+  const hasItems = Object.values(copyItems).some(Boolean);
+  const canExecute = !!srcId && dstIds.length > 0 && hasItems;
+  const missingHints: string[] = [];
+  if (!srcId) missingHints.push('コピー元');
+  if (!hasItems) missingHints.push('コピー項目');
+  if (dstIds.length === 0) missingHints.push('コピー先');
+
   return (
     <div style={{ padding: '1.5rem 2rem' }}>
       <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>初期データ設定</h2>
@@ -4081,7 +4094,7 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
         {/* コピー元 */}
         <div style={{ ...cardStyle, padding: '1.25rem' }}>
           <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', fontWeight: 600 }}>コピー元クライアント</h3>
-          <select value={srcId} onChange={e => setSrcId(e.target.value)} style={inputStyle}>
+          <select aria-label="コピー元クライアント" value={srcId} onChange={e => setSrcId(e.target.value)} style={inputStyle}>
             <option value="">選択してください</option>
             {parents.map(c => <option key={c.id} value={c.id}>{c.companyName} ({c.id})</option>)}
           </select>
@@ -4127,8 +4140,25 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
       {error && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', color: '#DC2626', borderRadius: '6px', fontSize: '0.875rem' }}>{error}</div>}
       {result && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#F0FDF4', color: '#059669', borderRadius: '6px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}><Check size={14} strokeWidth={3} /> {result}</div>}
 
-      <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
-        <button onClick={handleExecute} style={btnPrimary}>コピー実行</button>
+      <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem' }}>
+        {!canExecute && (
+          <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+            {missingHints.join('・')}を選択してください
+          </span>
+        )}
+        <button
+          onClick={handleExecute}
+          disabled={!canExecute}
+          aria-disabled={!canExecute}
+          title={!canExecute ? `${missingHints.join('・')}を選択してください` : ''}
+          style={{
+            ...btnPrimary,
+            opacity: canExecute ? 1 : 0.5,
+            cursor: canExecute ? 'pointer' : 'not-allowed',
+          }}
+        >
+          コピー実行
+        </button>
       </div>
     </div>
   );
