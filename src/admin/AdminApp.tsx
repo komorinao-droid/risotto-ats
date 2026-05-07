@@ -4531,7 +4531,8 @@ function simulateConnectionCheck(m: MediaIntegration): Promise<'ok' | 'error'> {
    ============================================================ */
 const MediaIntegrationPage: React.FC<{
   onConnectionError?: (count: number) => void;
-}> = ({ onConnectionError }) => {
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ onConnectionError, onLog }) => {
   const [integrations, setIntegrations] = useState<MediaIntegration[]>([]);
   const [form, setForm] = useState<MediaIntegration>({ id: '', name: '', type: 'custom', status: 'inactive' });
   const [modalOpen, setModalOpen] = useState(false);
@@ -4540,6 +4541,8 @@ const MediaIntegrationPage: React.FC<{
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [checkingIds, setCheckingIds] = useState<Set<string>>(new Set());
   const [dismissedAlert, setDismissedAlert] = useState(false);
+  // 削除確認用（window.confirm はブラウザ設定で無効化される/iframe で出ないため、Modal ベースに統一）
+  const [deleteTarget, setDeleteTarget] = useState<MediaIntegration | null>(null);
 
   const load = () => {
     const data = getMediaIntegrations();
@@ -4597,9 +4600,11 @@ const MediaIntegrationPage: React.FC<{
     saveMediaIntegrations(updated);
     setIntegrations(updated);
     setModalOpen(false);
+    onLog?.('媒体編集', form.name, `ID: ${form.id} / API Key: ${form.apiKey ? '更新' : '未設定'} / Webhook: ${form.webhookUrl ? '更新' : '未設定'}`);
   };
 
   const handleToggle = (id: string) => {
+    const target = integrations.find(m => m.id === id);
     const updated = integrations.map(m => m.id === id
       ? { ...m, status: m.status === 'active' ? 'inactive' as const : 'active' as const, connectionStatus: undefined, lastChecked: undefined }
       : m);
@@ -4607,6 +4612,10 @@ const MediaIntegrationPage: React.FC<{
     setIntegrations(updated);
     const errCount = updated.filter(x => x.status === 'active' && x.connectionStatus === 'error').length;
     onConnectionError?.(errCount);
+    if (target) {
+      const next = target.status === 'active' ? 'inactive' : 'active';
+      onLog?.(next === 'active' ? '媒体有効化' : '媒体無効化', target.name, `ID: ${target.id}`);
+    }
   };
 
   const validateNew = () => {
@@ -4624,17 +4633,22 @@ const MediaIntegrationPage: React.FC<{
     saveMediaIntegrations(updated);
     setIntegrations(updated);
     setAddModal(false);
+    onLog?.('媒体追加', newForm.name, `ID: ${newForm.id} / 種別: ${newForm.type} / 初期ステータス: ${newForm.status}`);
     setNewForm({ id: '', name: '', type: 'custom', status: 'inactive' });
     setErrors({});
   };
 
-  const handleDelete = (m: MediaIntegration) => {
-    if (!window.confirm(`${m.name} を削除しますか？`)) return;
+  // 削除確認 Modal から呼ばれる実削除処理
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const m = deleteTarget;
     const updated = integrations.filter(x => x.id !== m.id);
     saveMediaIntegrations(updated);
     setIntegrations(updated);
     const errCount = updated.filter(x => x.status === 'active' && x.connectionStatus === 'error').length;
     onConnectionError?.(errCount);
+    onLog?.('媒体削除', m.name, `ID: ${m.id} / 種別: ${m.type}`);
+    setDeleteTarget(null);
   };
 
   const handleCheckAll = () => {
@@ -4770,7 +4784,7 @@ const MediaIntegrationPage: React.FC<{
                   </button>
                 )}
                 <button onClick={() => openEdit(m)} style={{ ...btnSecondary, padding: '0.375rem 0.625rem', fontSize: '0.75rem' }}>設定</button>
-                <button onClick={() => handleDelete(m)} style={{ ...btnDanger, padding: '0.375rem 0.625rem', fontSize: '0.75rem' }}>削除</button>
+                <button onClick={() => setDeleteTarget(m)} style={{ ...btnDanger, padding: '0.375rem 0.625rem', fontSize: '0.75rem' }}>削除</button>
               </div>
             </div>
           );
@@ -4810,6 +4824,22 @@ const MediaIntegrationPage: React.FC<{
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
             <button onClick={() => setAddModal(false)} style={btnSecondary}>キャンセル</button>
             <button onClick={handleAddNew} style={btnPrimary}>追加</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 削除確認モーダル */}
+      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="媒体連携を削除" width="420px">
+        <div>
+          <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#374151' }}>
+            <strong>{deleteTarget?.name}</strong>（ID: {deleteTarget?.id}）の連携設定を削除します。
+          </p>
+          <p style={{ margin: '0 0 1rem', fontSize: '0.8125rem', color: '#DC2626' }}>
+            API Key・Webhook 設定もあわせて削除されます。この操作は取り消せません。
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button onClick={() => setDeleteTarget(null)} style={btnSecondary}>キャンセル</button>
+            <button onClick={confirmDelete} style={btnDanger}>削除する</button>
           </div>
         </div>
       </Modal>
@@ -5179,7 +5209,7 @@ const AdminApp: React.FC = () => {
           <AuditLogPage />
         )}
         {currentView === 'media' && (
-          <MediaIntegrationPage onConnectionError={setMediaErrorCount} />
+          <MediaIntegrationPage onConnectionError={setMediaErrorCount} onLog={logAdminAction} />
         )}
       </main>
 
