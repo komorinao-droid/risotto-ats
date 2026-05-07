@@ -262,6 +262,21 @@ const MediaIcon: React.FC<{ type: string; size?: number }> = ({ type, size = 20 
   return <Icon size={size} color={color} strokeWidth={2.2} />;
 };
 
+/** 媒体 type の日本語表示（監査ログ等で利用。未知のIDはそのまま返す） */
+const MEDIA_TYPE_LABELS: Record<string, string> = {
+  indeed: 'Indeed',
+  doda: 'doda',
+  rikunabi: 'リクナビNEXT',
+  mynavi: 'マイナビ転職',
+  hellowork: 'ハローワーク',
+  townwork: 'タウンワーク',
+  custom: 'カスタム',
+};
+const formatMediaType = (t: string): string => MEDIA_TYPE_LABELS[t] || t;
+
+/** 媒体ステータスの日本語表示 */
+const formatMediaStatus = (s: 'active' | 'inactive'): string => (s === 'active' ? '連携中' : '未連携');
+
 /* ============================================================
    共通スタイル
    ============================================================ */
@@ -4633,7 +4648,7 @@ const MediaIntegrationPage: React.FC<{
     saveMediaIntegrations(updated);
     setIntegrations(updated);
     setAddModal(false);
-    onLog?.('媒体追加', newForm.name, `ID: ${newForm.id} / 種別: ${newForm.type} / 初期ステータス: ${newForm.status}`);
+    onLog?.('媒体追加', newForm.name, `ID: ${newForm.id} / 種別: ${formatMediaType(newForm.type)} / 初期ステータス: ${formatMediaStatus(newForm.status)}`);
     setNewForm({ id: '', name: '', type: 'custom', status: 'inactive' });
     setErrors({});
   };
@@ -4647,7 +4662,7 @@ const MediaIntegrationPage: React.FC<{
     setIntegrations(updated);
     const errCount = updated.filter(x => x.status === 'active' && x.connectionStatus === 'error').length;
     onConnectionError?.(errCount);
-    onLog?.('媒体削除', m.name, `ID: ${m.id} / 種別: ${m.type}`);
+    onLog?.('媒体削除', m.name, `ID: ${m.id} / 種別: ${formatMediaType(m.type)}`);
     setDeleteTarget(null);
   };
 
