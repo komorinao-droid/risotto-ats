@@ -892,6 +892,9 @@ const ApplicantList: React.FC = () => {
                       borderBottom: '1px solid #f3f4f6',
                       transition: 'background-color 0.1s',
                       cursor: 'pointer',
+                      // 面接希望日程は最大3日入るので、それを格納できる高さで全行を一律に揃える
+                      // （希望日程ヘッダ + 3 行 + 要対応セルのメモ + 上下パディングを含めて 6rem 確保）
+                      height: '6rem',
                     }}
                     onClick={() => navigate(`/applicant?applicant=${a.id}`)}
                     onMouseEnter={(e) => {
@@ -1117,7 +1120,7 @@ const ApplicantList: React.FC = () => {
                       ) : a.prefDates && a.prefDates.length > 0 ? (
                         <div>
                           <span style={{ fontSize: '0.6rem', color: '#6b7280', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem' }}><CalendarDays size={10} /> 希望日程</span>
-                          {a.prefDates.map((raw, i) => {
+                          {a.prefDates.slice(0, 3).map((raw, i) => {
                             const d = normalizePrefDate(raw);
                             return (
                               <div key={i} style={{ fontSize: '0.75rem', color: '#6b7280', whiteSpace: 'nowrap' }}>
