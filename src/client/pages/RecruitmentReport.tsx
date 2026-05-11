@@ -6,7 +6,7 @@ import { presetToRange, presetLabel, formatRange, prevRangeForPreset } from '@/u
 import { buildReport } from '@/utils/reports/aggregate';
 import { downloadCSV, printReport } from '@/utils/reports/export';
 import { evaluateRow, bgForLevel, fgForLevel } from '@/utils/reports/bottleneck';
-import { storage } from '@/utils/storage';
+import { clientDataRepository, reportRepository, resolveDataOwnerId } from '@/repositories';
 import MediaCostManagement from '@/client/pages/settings/MediaCostManagement';
 import { apiPost } from '@/utils/apiClient';
 
@@ -104,9 +104,9 @@ const RecruitmentReport: React.FC = () => {
   // 親アカウントのデータをそのまま使う（子アカで拠点フィルタ済みでも、レポートは全社視点で表示）
   const fullData = useMemo(() => {
     if (!client) return null;
-    const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+    const dataId = resolveDataOwnerId(client);
     try {
-      return storage.getClientData(dataId);
+      return clientDataRepository.get(dataId);
     } catch {
       return null;
     }
@@ -352,13 +352,9 @@ const RecruitmentReport: React.FC = () => {
             range={range}
             onUpdateGoal={(yearMonth, value) => {
               if (!client) return;
-              const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+              const dataId = resolveDataOwnerId(client);
               try {
-                const data = storage.getClientData(dataId);
-                const newGoals = { ...(data.recruitmentGoals || {}) };
-                if (value > 0) newGoals[yearMonth] = value;
-                else delete newGoals[yearMonth];
-                storage.saveClientData(dataId, { ...data, recruitmentGoals: newGoals });
+                reportRepository.updateRecruitmentGoal(dataId, yearMonth, value);
                 setDataRev((v) => v + 1);
               } catch (e) { console.error(e); }
             }}
@@ -1449,6 +1445,14 @@ const LeadTimeTiles: React.FC<{ col: import('@/utils/reports/types').LeadTimeCol
               中央値 {stats.medianDays}日 / 最速 {stats.minDays}日 / 最遅 {stats.maxDays}日 (n={stats.count})
             </div>
           )}
+          {stats.count > 0 && (stats.estimatedCount ?? 0) > 0 && (
+            <div
+              style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}
+              title="stageHistory の実履歴で算出できた件数 / 推定フォールバックで算出した件数"
+            >
+              履歴 {stats.historyBasedCount ?? 0}件 / 推定 {stats.estimatedCount ?? 0}件
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -1457,6 +1461,13 @@ const LeadTimeTiles: React.FC<{ col: import('@/utils/reports/types').LeadTimeCol
 
 const LeadTimeTable: React.FC<{ rows: import('@/utils/reports/types').LeadTimeColumn[] }> = ({ rows }) => {
   const fmtDays = (s: import('@/utils/reports/types').LeadTimeStats) => s.count > 0 ? `${s.avgDays.toFixed(1)}日 (n=${s.count})` : '-';
+  const titleFor = (s: import('@/utils/reports/types').LeadTimeStats) => {
+    if (s.count === 0) return '';
+    const h = s.historyBasedCount ?? 0;
+    const e = s.estimatedCount ?? 0;
+    if (h + e === 0) return '';
+    return `履歴 ${h}件 / 推定 ${e}件 (中央値 ${s.medianDays}日 / 最速 ${s.minDays}日 / 最遅 ${s.maxDays}日)`;
+  };
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
@@ -1475,10 +1486,10 @@ const LeadTimeTable: React.FC<{ rows: import('@/utils/reports/types').LeadTimeCo
           ) : rows.map((r) => (
             <tr key={r.label}>
               <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', fontWeight: 500 }}>{r.label}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.applicationToInterview)}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.interviewToOffer)}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>{fmtDays(r.offerToHired)}</td>
-              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', fontWeight: 600, color: '#F97316' }}>{fmtDays(r.applicationToHired)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }} title={titleFor(r.applicationToInterview)}>{fmtDays(r.applicationToInterview)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }} title={titleFor(r.interviewToOffer)}>{fmtDays(r.interviewToOffer)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }} title={titleFor(r.offerToHired)}>{fmtDays(r.offerToHired)}</td>
+              <td style={{ padding: '0.5rem 0.625rem', borderBottom: '1px solid #F3F4F6', textAlign: 'right', fontWeight: 600, color: '#F97316' }} title={titleFor(r.applicationToHired)}>{fmtDays(r.applicationToHired)}</td>
             </tr>
           ))}
         </tbody>
