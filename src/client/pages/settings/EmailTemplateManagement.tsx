@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext';
 import type { EmailTemplate } from '@/types';
 import Modal from '@/components/Modal';
+import { emailTemplateRepository, resolveDataOwnerId } from '@/repositories';
 
 const inputStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -28,7 +29,7 @@ const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{
 const SHARED = '__shared__';
 
 const EmailTemplateManagement: React.FC = () => {
-  const { clientData, updateClientData, client, logAction } = useAuth();
+  const { clientData, reloadClientData, client, logAction } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
@@ -55,16 +56,10 @@ const EmailTemplateManagement: React.FC = () => {
   const canEdit = !client || client.accountType === 'parent' || client.permissions.mailtemplate;
   const editingScope = scope;
 
-  const writeTemplates = useCallback((mutator: (list: EmailTemplate[]) => EmailTemplate[]) => {
-    updateClientData((data) => {
-      if (editingScope === SHARED) return { ...data, emailTemplates: mutator(data.emailTemplates) };
-      const current = data.emailTemplatesByBase?.[editingScope] ?? data.emailTemplates;
-      return {
-        ...data,
-        emailTemplatesByBase: { ...(data.emailTemplatesByBase || {}), [editingScope]: mutator(current) },
-      };
-    });
-  }, [editingScope, updateClientData]);
+  // emailTemplateRepository への書き込みは parent の clientId で行う（updateClientData と同じ責務境界）。
+  // EmailTemplate には applicants 参照がないため applicantBaseFilter は不要。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
+  const targetBaseName = editingScope === SHARED ? undefined : editingScope;
 
   // スコープ切替時に選択をリセット
   useEffect(() => { setSelectedId(null); }, [scope]);
@@ -90,11 +85,12 @@ const EmailTemplateManagement: React.FC = () => {
   }, [templates]);
 
   const doSave = useCallback(() => {
-    if (selectedId === null) return;
+    if (selectedId === null || !ownerId) return;
     setSaveState('saving');
-    writeTemplates((list) => list.map((t) => (t.id === selectedId ? { ...t, name, subject, body } : t)));
+    emailTemplateRepository.update(ownerId, selectedId, { name, subject, body }, targetBaseName);
+    reloadClientData();
     setTimeout(() => setSaveState('saved'), 300);
-  }, [selectedId, name, subject, body, writeTemplates]);
+  }, [selectedId, name, subject, body, ownerId, targetBaseName, reloadClientData]);
 
   const scheduleAutoSave = () => {
     setSaveState('idle');
@@ -121,10 +117,13 @@ const EmailTemplateManagement: React.FC = () => {
 
   const addTemplate = () => {
     if (!newName.trim()) return;
-    writeTemplates((list) => {
-      const maxId = list.reduce((m, t) => Math.max(m, t.id), 0);
-      return [...list, { id: maxId + 1, name: newName.trim(), subject: '', body: '' }];
-    });
+    if (!ownerId) return;
+    emailTemplateRepository.create(
+      ownerId,
+      { name: newName.trim(), subject: '', body: '' },
+      targetBaseName,
+    );
+    reloadClientData();
     logAction('setting', 'メールテンプレ追加', newName.trim(), scopeDetail());
     setNewName('');
     setModalOpen(false);
@@ -133,7 +132,9 @@ const EmailTemplateManagement: React.FC = () => {
   const deleteTemplate = (id: number) => {
     const t = templates.find((t) => t.id === id);
     if (!t || !window.confirm(`"${t.name}" を削除しますか？`)) return;
-    writeTemplates((list) => list.filter((t) => t.id !== id));
+    if (!ownerId) return;
+    emailTemplateRepository.delete(ownerId, id, targetBaseName);
+    reloadClientData();
     logAction('setting', 'メールテンプレ削除', t.name, scopeDetail());
     if (selectedId === id) setSelectedId(null);
   };
@@ -141,11 +142,9 @@ const EmailTemplateManagement: React.FC = () => {
   const removeOverride = () => {
     if (!isBaseScope) return;
     if (!window.confirm(`「${scope}」の拠点別メールテンプレ設定を削除し、全社共通に戻しますか？`)) return;
-    updateClientData((data) => {
-      const next = { ...(data.emailTemplatesByBase || {}) };
-      delete next[scope];
-      return { ...data, emailTemplatesByBase: next };
-    });
+    if (!ownerId) return;
+    emailTemplateRepository.removeBaseOverride(ownerId, scope);
+    reloadClientData();
   };
 
   if (!canEdit) {

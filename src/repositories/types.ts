@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1084,4 +1084,123 @@ export interface SourceRepository {
    *  - applicants は触らない（override を消すと全社共通レイヤにフォールバックする = 名前一致は維持される）
    */
   removeBaseOverride(clientId: string, baseName: string): RemoveSourceBaseOverrideResult;
+}
+
+/**
+ * `EmailTemplateRepository.delete` の戻り値（Phase N-3 で追加）。
+ *
+ * カスケード方針:
+ *  - **cascade なし**。applicants は触らない（既存 EmailTemplateManagement.deleteTemplate と互換）
+ *  - 対象レイヤ (emailTemplates または emailTemplatesByBase[baseName]) から templateId 一致を除去
+ *  - templateId 不一致なら no-op で removed: false を返す（saveClientData も呼ばない）
+ */
+export interface DeleteEmailTemplateResult {
+  /** 対象レイヤから templateId が実際に除去されたか */
+  removed: boolean;
+  /** 除去した template の name。removed=false なら undefined */
+  removedTemplateName?: string;
+}
+
+/** `EmailTemplateRepository.removeBaseOverride` の戻り値（Phase N-3 で追加）。 */
+export interface RemoveEmailTemplateBaseOverrideResult {
+  /** emailTemplatesByBase[baseName] キーが存在して削除されたか（不在なら false / save も呼ばない） */
+  removed: boolean;
+}
+
+/**
+ * メールテンプレート (EmailTemplate) 設定の CRUD ＋ 拠点別オーバーライドを扱う Repository（Phase N-3 で追加）。
+ *
+ * 想定する移行先:
+ *  - `EmailTemplateManagement.tsx` の updateClientData 直更新を本 API 経由に置換
+ *
+ * 方針:
+ *  - Phase N-1 JobRepository / N-2 SourceRepository の base-override 型を機械的に横展開した実装
+ *  - 既存データ形状を維持する（EmailTemplate 型に baseName を追加する正規化は本フェーズで行わない）
+ *      - `data.emailTemplates`               : 全社共通レイヤ
+ *      - `data.emailTemplatesByBase[baseName]` : 拠点別オーバーライドレイヤ
+ *  - baseName 未指定 = 全社共通レイヤを対象
+ *  - baseName 指定 = 拠点別レイヤを対象
+ *      - 対象レイヤ未作成時は `data.emailTemplates` をコピーして開始（既存 writeTemplates と互換、編集すると override が新規作成される）
+ *
+ * N-1/N-2 との差分:
+ *  - **削除カスケードなし**（applicants にテンプレート参照フィールドが存在しない）
+ *      → API は `delete` で十分（`deleteWithCascade` ではない）。`applicantBaseFilter` opt も不要
+ *  - 呼出側 (EmailTemplateManagement.tsx) は **1000ms debounce auto-save** を持つが、
+ *    debounce は呼出側の責務で、Repository は同期 API のまま（既存挙動を維持）
+ *
+ * スコープ外:
+ *  - EmailTemplate 型への baseName 追加（Firestore 化時に再設計）
+ *  - rename / 並び替え / 並列重複名チェック（必要になったら別フェーズで検討）
+ *  - debounce / アンマウント時 flush の改善（既存挙動維持）
+ *  - HearingRepository / FilterConditionRepository / Screening / Chatbot 等（Phase N-4 以降）
+ *
+ * Firestore マッピング:
+ *  - 全社共通レイヤ: `/tenants/{tid}/emailTemplates/{templateId}` doc（baseName フィールドなし or null）
+ *  - 拠点別レイヤ: `/tenants/{tid}/emailTemplates/{templateId}` doc（baseName フィールド指定）or
+ *    `/tenants/{tid}/baseOverrides/{baseName}/emailTemplates/{templateId}`（設計判断は Phase J 時に確定）
+ *  - body が長文化しやすいため、必要に応じて collection 分離（quota / 転送量観点）
+ *  - delete は単純な `doc().delete()`（cascade なし）
+ *  - update は Phase J で `Promise<EmailTemplate>` に変更、画面側は async/await + saveState を Promise 完了まで延長
+ */
+export interface EmailTemplateRepository {
+  /**
+   * メールテンプレート一覧を返す。
+   *  - baseName 未指定: `data.emailTemplates`（全社共通）
+   *  - baseName 指定 + `data.emailTemplatesByBase[baseName]` あり: `data.emailTemplatesByBase[baseName]`
+   *  - baseName 指定 + `data.emailTemplatesByBase[baseName]` 未作成: `data.emailTemplates`（フォールバック、既存 UI 表示互換）
+   *  - 並び順は保存時のまま
+   */
+  list(clientId: string, baseName?: string): EmailTemplate[];
+  /**
+   * メールテンプレートを 1 件追加する。
+   *  - id は対象レイヤの `max(t.id) + 1` で採番（既存 EmailTemplateManagement.addTemplate と互換。
+   *    既存挙動: 0 件レイヤなら id=1 から開始）
+   *  - baseName 指定 + 対象レイヤ未作成: `data.emailTemplates` をコピーして開始 → 末尾に追加し
+   *    `data.emailTemplatesByBase[baseName]` として保存（既存 writeTemplates 互換、override 新規作成）
+   *  - 重複名チェックは行わない（呼出側責務）
+   *  - 戻り値は採番後の EmailTemplate
+   */
+  create(
+    clientId: string,
+    template: Omit<EmailTemplate, 'id'>,
+    baseName?: string,
+  ): EmailTemplate;
+  /**
+   * メールテンプレートを部分更新する（auto-save 経路の呼出を想定）。
+   *  - 対象 templateId が見つからなければ undefined を返す（saveClientData を呼ばない）
+   *  - patch に id が混入しても無視（id は不変）
+   *  - 対象レイヤが既存 + 全フィールドが現状と一致なら saveClientData を呼ばない（無駄な書込防止）
+   *  - 対象レイヤが未作成 (= baseName 指定で `data.emailTemplatesByBase[baseName]` が無い) の場合:
+   *      patch 内容が現状と一致しても saveClientData を呼んで override を新規作成する
+   *      （既存 writeTemplates 挙動互換: 「base 未設定で編集 = override 作成」）
+   *  - 戻り値は更新後 EmailTemplate（または既存値一致時の current）
+   */
+  update(
+    clientId: string,
+    templateId: number,
+    patch: Partial<Omit<EmailTemplate, 'id'>>,
+    baseName?: string,
+  ): EmailTemplate | undefined;
+  /**
+   * メールテンプレートを削除する（cascade なし）。
+   *
+   * 動作:
+   *  - 対象レイヤ (`data.emailTemplates` または `data.emailTemplatesByBase[baseName]`) から templateId 一致を除去
+   *      - baseName 指定 + 対象レイヤ未作成: `data.emailTemplates` をコピーして開始 → 削除（既存 writeTemplates/deleteTemplate 互換）
+   *  - 対象 templateId が見つからなければ no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - **applicants は触らない**（applicants 側にテンプレート参照フィールドが存在しないため。既存 deleteTemplate 互換）
+   */
+  delete(
+    clientId: string,
+    templateId: number,
+    /** 対象レイヤ。undefined = 全社共通 / 指定 = 拠点別 */
+    baseName?: string,
+  ): DeleteEmailTemplateResult;
+  /**
+   * 拠点別メールテンプレートオーバーライドレイヤをまるごと削除する（既存 EmailTemplateManagement.removeOverride 互換）。
+   *  - `data.emailTemplatesByBase[baseName]` キーを delete
+   *  - キー不在なら no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - applicants は触らない
+   */
+  removeBaseOverride(clientId: string, baseName: string): RemoveEmailTemplateBaseOverrideResult;
 }

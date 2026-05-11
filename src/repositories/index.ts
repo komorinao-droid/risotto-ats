@@ -23,6 +23,7 @@ import { LocalStorageSlotRepository } from './localStorage/slotRepository';
 import { LocalStorageBaseRepository } from './localStorage/baseRepository';
 import { LocalStorageJobRepository } from './localStorage/jobRepository';
 import { LocalStorageSourceRepository } from './localStorage/sourceRepository';
+import { LocalStorageEmailTemplateRepository } from './localStorage/emailTemplateRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -36,6 +37,7 @@ export const slotRepository = new LocalStorageSlotRepository();
 export const baseRepository = new LocalStorageBaseRepository();
 export const jobRepository = new LocalStorageJobRepository();
 export const sourceRepository = new LocalStorageSourceRepository();
+export const emailTemplateRepository = new LocalStorageEmailTemplateRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -61,6 +63,9 @@ export type {
   SourceRepository,
   DeleteSourceCascadeResult,
   RemoveSourceBaseOverrideResult,
+  EmailTemplateRepository,
+  DeleteEmailTemplateResult,
+  RemoveEmailTemplateBaseOverrideResult,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,

@@ -198,6 +198,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **M-8** | **BaseManagement の削除確認ダイアログ用 child 件数取得を `clientRepository.listChildren` 経由に置換。BaseManagement.tsx 内の `storage` 直叩き消滅** | **✅ 完了** |
 | **N-1** | **JobRepository 型 + LocalStorage 実装（list / create / update / deleteWithCascade / removeBaseOverride）+ JobManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。jobs / jobsByBase の形状を維持。設定系 Repository 化（Phase N）の参照実装（base-override 型）** | **✅ 完了** |
 | **N-2** | **SourceRepository 型 + LocalStorage 実装 + SourceManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1 JobRepository の base-override 型を機械的に横展開（`sources` / `sourcesByBase` + `applicants[].src` カスケード）。Source 型・データ形状・UI・文言は無変更** | **✅ 完了** |
+| **N-3** | **EmailTemplateRepository 型 + LocalStorage 実装 + EmailTemplateManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1/N-2 と同じ base-override 型だが cascade なし（applicants 触らない）。1000ms debounce auto-save は呼出側責務として既存挙動維持。EmailTemplate 型・データ形状・UI・文言・auto-save タイミングは無変更** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -207,7 +208,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -800,7 +801,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 
 - [x] **N-1**: `JobRepository` 型 + LocalStorage 実装 + JobManagement.tsx 移行
 - [x] **N-2**: `SourceRepository` 型 + LocalStorage 実装 + SourceManagement.tsx 移行
-- [ ] **N-3**: `EmailTemplateRepository`（EmailTemplateManagement.tsx、auto-save 800-1000ms 維持）
+- [x] **N-3**: `EmailTemplateRepository` 型 + LocalStorage 実装 + EmailTemplateManagement.tsx 移行（cascade なし、1000ms debounce auto-save は呼出側責務として既存挙動維持）
 - [ ] **N-4**: `HearingRepository`（HearingManagement.tsx、job-keyed singleton 型）
 - [ ] **N-5**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
 - [ ] **N-6**: `ReportScheduleRepository` または reportRepository 拡張
@@ -857,10 +858,43 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - UI / 文言 / バリデーション / logAction / showPw（パスワード表示トグル）は変更しない
 - `Source.password` は本フェーズでは平文のまま流通させる（既存仕様維持）
 
-### 14.5 残タスク
+### 14.5 N-3: EmailTemplateRepository（cascade なし base-override 型）
 
-- **N-3 以降**: §14.2 の通り、設定系 8 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-3 候補は EmailTemplate（base-override + job-keyed 混在型）
+#### 責務
+
+- `data.emailTemplates` / `data.emailTemplatesByBase[baseName]` の CRUD
+- API: `list` / `create` / `update` / `delete(clientId, templateId, baseName?)` / `removeBaseOverride`
+- 実装は `LocalStorageSourceRepository` をベースに **cascade ロジックと `applicantBaseFilter` opt を削除**
+- baseName 未指定: 全社共通レイヤ / 指定: 拠点別レイヤ。未作成時は `data.emailTemplates` をコピーして開始（既存 writeTemplates 互換）
+
+#### N-1/N-2 との差分
+
+- **削除カスケードなし**: applicants 側にテンプレート参照フィールドが存在しないため、`delete` API は applicants を一切触らない（既存 deleteTemplate 互換）。`deleteWithCascade` / `applicantBaseFilter` opt は不要
+- **呼出側に 1000ms debounce auto-save あり**: `EmailTemplateManagement.tsx` の `name` / `subject` / `body` 入力は `scheduleAutoSave` → `setTimeout(..., 1000)` 経由で `doSave()` を呼び、`doSave()` が `emailTemplateRepository.update(...)` + `reloadClientData()` を実行する。Repository は同期 API のまま（既存挙動維持）
+- **切替時 flush**: テンプレ選択切替時に既存タイマーがあれば `clearTimeout` + 即時 `doSave()`。Repository が同期実行のため flush 後の `setSelectedId(t.id)` → useEffect [selectedId] チェーンは既存と等価
+
+#### 既知の挙動メモ（既存 + N-3 共通、本フェーズで触らない）
+
+- **単一キーストロークの closure off-by-one**: `onChange` で `setBody(newVal)` + `scheduleAutoSave()` を同期実行するが、`scheduleAutoSave` が捉える `doSave` は **その直前のレンダーの closure**（body はまだ古い値）。連続入力では「直前の値が 1000ms 後に保存される」挙動になる（最後のキーストロークは次回入力 or 切替時 flush で確定）。**Repository 化前と完全に同じ挙動**で、N-3 では修正しない
+- **アンマウント時 flush 未実装**: 1000ms 以内に他画面遷移すると未保存。既存挙動維持
+
+#### 移行先
+
+- `src/client/pages/settings/EmailTemplateManagement.tsx` の `writeTemplates` ヘルパは削除、`addTemplate` / `doSave` / `deleteTemplate` / `removeOverride` を Repository 経由に置換
+- 画面側は `updateClientData` を撤去し、`reloadClientData()` で state 同期する
+- UI / 文言 / バリデーション / VARIABLES / 1000ms debounce / 切替時 flush / saveState 表示は変更しない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- `/tenants/{tid}/emailTemplates/{templateId}` 単一 collection + `baseName?: string | null` フィールド（案 A）/ 別 subcollection（案 B）
+- `body` が長文化しやすいため、quota / 転送量観点で案 A 寄り（必要なテンプレートだけ取得できる）
+- `update` は `Promise<EmailTemplate>` 化し、画面側は async/await + saveState を Promise 完了まで延長。アンマウント時 flush の改善とセットで検討
+
+### 14.6 残タスク
+
+- **N-4 以降**: §14.2 の通り、設定系 7 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-4 候補は Hearing（job-keyed 型 = base-override とは異なる構造）
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
-- **正規化（Job / Source 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) で同じ `pickLayer` / `writeLayer` パターンが既に 2 個。N-3 (EmailTemplate) / N-8 (FilterCondition) を待って 3〜4 個揃った段階で共通化検討（早すぎる抽象化を避ける）
+- **正規化（Job / Source / EmailTemplate 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
 - **`Source.password` の暗号化 / 秘匿化**: 既存仕様維持で本フェーズ対象外。Firestore 化（Phase J）と合わせて検討（client-side encryption / Cloud KMS / 別 collection 分離など）
+- **EmailTemplateManagement の closure off-by-one / アンマウント時 flush**: 既存挙動。改善する場合は別フェーズ（useRef で最新値を参照する pattern / useEffect cleanup で flush 等）
