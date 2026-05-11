@@ -1,18 +1,35 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { Client, ClientData, ClientOperationLog } from '@/types';
-import { storage, getDefaultClientData } from '@/utils/storage';
+import { getDefaultClientData } from '@/utils/storage';
+import {
+  clientRepository,
+  clientDataRepository,
+  resolveDataOwnerId as resolveDataOwnerIdShared,
+} from '@/repositories';
+import { authService } from '@/services/auth';
+import type { LoginResult, SafeClient } from '@/services/auth';
 import { pushClientLog } from '@/utils/clientLog';
 
 export interface AuthState {
   isLoggedIn: boolean;
-  client: Client | null;
+  /**
+   * I-5: state を SafeClient (= Omit<Client, 'password'>) 化。
+   * 画面側から平文パスワードへの直接アクセス経路を完全に閉鎖。
+   * パスワード変更は authService.changePassword 経由のみ可能。
+   */
+  client: SafeClient | null;
   clientData: ClientData | null;
 }
 
 type LogCategory = ClientOperationLog['category'];
 
 interface AuthContextValue extends AuthState {
-  login: (clientId: string, password: string) => boolean;
+  /**
+   * I-4: 戻り値を boolean → LoginResult に変更。
+   * Login.tsx が inactive / invalid_credentials を区別したエラー表示に使う。
+   * 成功時は { ok: true, session } 形式 (session は authService から SafeClient を含む)。
+   */
+  login: (clientId: string, password: string) => LoginResult;
   logout: () => void;
   updateClientData: (updater: (data: ClientData) => ClientData) => void;
   reloadClientData: () => void;
@@ -31,6 +48,32 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+/**
+ * I-5: 子アカウントの親オプション継承を SafeClient ベースで適用するヘルパー。
+ * authService 内の applyParentOptions と同じロジックだが、画面側で
+ * sessionStorage 復元後 / login 後 / refreshClient 後に適用するため複製。
+ * 親 options を返さない場合は引数の SafeClient をそのまま返す。
+ */
+function applyParentOptions(safe: SafeClient): SafeClient {
+  if (safe.accountType === 'child' && safe.parentId) {
+    const parent = clientRepository.findById(safe.parentId);
+    if (parent?.options) {
+      return { ...safe, options: parent.options };
+    }
+  }
+  return safe;
+}
+
+/**
+ * I-5: clientRepository から取得した Client を SafeClient に剥がす。
+ * 画面側 state には SafeClient しか入れない方針のため境界用。
+ */
+function toSafeClient(c: Client): SafeClient {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { password, ...safe } = c;
+  return safe;
+}
+
 function filterDataByBase(data: ClientData, baseName: string): ClientData {
   // slotSettings は拠点別キーマップなので自拠点のみに絞る
   const ownSlot = data.slotSettings?.[baseName];
@@ -42,49 +85,45 @@ function filterDataByBase(data: ClientData, baseName: string): ClientData {
   };
 }
 
-const SESSION_KEY = 'risotto-client-session';
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // sessionStorage から復元（新しいタブを開いた時/F5時に維持）
-  const [client, setClient] = useState<Client | null>(() => {
+  // sessionStorage 復元 + 親オプション継承。
+  // I-2a:
+  //  - sessionStorage 直読みは authService.restoreSessionSync() に委譲。SafeClient で返る。
+  //  - 旧フォーマット (password 入り Client が sessionStorage に残っているケース) は restoreSessionSync 内で
+  //    SafeClient に書き直されるので、本ブロック以降に password 平文は sessionStorage に戻らない。
+  // I-5:
+  //  - state 型を SafeClient | null に変更。clientRepository から password を引き直すダンスを廃止。
+  //  - clientRepository.findById で「最新化」する処理は restoreSessionSync が常に latest を返すわけではないため
+  //    保険として残す (ステータス inactive 化 / 削除済の検知)。ただし戻り値は SafeClient に剥がす。
+  //  - 親オプション継承は applyParentOptions に切り出し。
+  const [client, setClient] = useState<SafeClient | null>(() => {
+    const session = authService.restoreSessionSync();
+    if (!session) return null;
     try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      return raw ? (JSON.parse(raw) as Client) : null;
-    } catch { return null; }
+      const fresh = clientRepository.findById(session.client.id);
+      if (!fresh) return null;
+      return applyParentOptions(toSafeClient(fresh));
+    } catch {
+      return null;
+    }
   });
   const [clientData, setClientData] = useState<ClientData | null>(null);
 
-  // client 変更時に sessionStorage を同期
+  // client 変更時の sessionStorage 同期は authService に集約。直接 setItem しない。
+  // I-5: state が SafeClient になったため persistSession に直接渡せる
+  // (persistSession の引数型は Client 互換だが SafeClient は構造的部分集合なので問題なし)。
   useEffect(() => {
-    try {
-      if (client) sessionStorage.setItem(SESSION_KEY, JSON.stringify(client));
-      else sessionStorage.removeItem(SESSION_KEY);
-    } catch { /* ignore */ }
+    if (client) authService.persistSession(client as Client);
+    else authService.clearSession();
   }, [client]);
 
-  // 復元された client がある場合、データを再ロード + 最新の Client(オプション含む) を反映
+  // 復元された client がある場合、clientData を初回ロード
+  // (client 自体の最新化は initState で完結)
   useEffect(() => {
     if (client && !clientData) {
-      const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const dataId = resolveDataOwnerIdShared(client);
       try {
-        // 最新の Client (権限/オプション) を storage から取り直す
-        const all = storage.getClients();
-        const fresh = all.find((c) => c.id === client.id);
-        if (fresh) {
-          let effective: Client = fresh;
-          // 子アカは親のオプションを継承
-          if (fresh.accountType === 'child' && fresh.parentId) {
-            const parent = all.find((c) => c.id === fresh.parentId);
-            if (parent?.options) {
-              effective = { ...fresh, options: parent.options };
-            }
-          }
-          // sessionStorage と state を最新化
-          if (JSON.stringify(effective) !== JSON.stringify(client)) {
-            setClient(effective);
-          }
-        }
-        let data = storage.getClientData(dataId);
+        let data = clientDataRepository.get(dataId);
         if (client.accountType === 'child' && client.baseName) {
           data = filterDataByBase(data, client.baseName);
         }
@@ -94,14 +133,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const resolveClientId = useCallback((c: Client): string => {
-    return c.accountType === 'child' && c.parentId ? c.parentId : c.id;
+  const resolveClientId = useCallback((c: SafeClient): string => {
+    return resolveDataOwnerIdShared(c);
   }, []);
 
   const loadClientData = useCallback(
-    (c: Client) => {
+    (c: SafeClient) => {
       const dataId = resolveClientId(c);
-      let data = storage.getClientData(dataId);
+      let data = clientDataRepository.get(dataId);
 
       // 子アカウントの場合、拠点でフィルタ
       if (c.accountType === 'child' && c.baseName) {
@@ -113,42 +152,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const login = useCallback(
-    (clientId: string, password: string): boolean => {
-      const clients = storage.getClients();
-      const found = clients.find((c) => c.id === clientId && c.password === password);
-      if (!found) return false;
-      if (found.status === 'inactive') return false;
+    (clientId: string, password: string): LoginResult => {
+      // I-2b: 認証照合 + sessionStorage 永続は authService に集約。
+      // I-4: 戻り値を boolean → LoginResult に変更し、Login.tsx 側で
+      //      inactive / invalid_credentials を区別したエラー表示が可能になった。
+      const result = authService.loginSync(clientId, password);
+      if (!result.ok) return result;
 
-      // 子アカウントは親のオプションを継承（オプションは親契約単位で管理）
-      let effective = found;
-      if (found.accountType === 'child' && found.parentId) {
-        const parent = clients.find((c) => c.id === found.parentId);
-        if (parent?.options) {
-          effective = { ...found, options: parent.options };
-        }
-      }
+      // I-5: state は SafeClient のまま保持。clientRepository から password を引き直すダンスを廃止。
+      // authService.loginSync 内で applyParentOptions 済みの SafeClient が返るので、そのまま使える。
+      const effective: SafeClient = result.session.client;
 
       setClient(effective);
       loadClientData(effective);
-      // ログ記録
-      const dataId = found.accountType === 'child' && found.parentId ? found.parentId : found.id;
-      const operator = found.accountType === 'parent'
-        ? (found.contactName || found.companyName)
-        : `${found.companyName}${found.baseName ? ' / ' + found.baseName : ''}`;
+
+      // ログ記録 (既存挙動踏襲)
+      const dataId = resolveDataOwnerIdShared(effective);
+      const operator = effective.accountType === 'parent'
+        ? (effective.contactName || effective.companyName)
+        : `${effective.companyName}${effective.baseName ? ' / ' + effective.baseName : ''}`;
       pushClientLog(dataId, {
         operator,
         category: 'auth',
         action: 'ログイン',
-        target: found.companyName,
+        target: effective.companyName,
       });
-      return true;
+      return result;
     },
     [loadClientData]
   );
 
   const logout = useCallback(() => {
     if (client) {
-      const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+      const dataId = resolveDataOwnerIdShared(client);
       const operator = client.accountType === 'parent'
         ? (client.contactName || client.companyName)
         : `${client.companyName}${client.baseName ? ' / ' + client.baseName : ''}`;
@@ -159,6 +195,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         target: client.companyName,
       });
     }
+    // I-2b: sessionStorage 破棄を authService.logout に委譲。
+    //  - LocalStorage 実装は body が同期処理 (this.clearSession) のため
+    //    void で fire-and-forget しても microtask 待ちなしに sessionStorage が消える
+    //  - 後続の setClient(null) によって [client] useEffect が再度 clearSession を呼ぶが冪等
+    void authService.logout();
     setClient(null);
     setClientData(null);
   }, [client]);
@@ -179,7 +220,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (updater: (data: ClientData) => ClientData) => {
       if (!client) return;
       const dataId = resolveClientId(client);
-      const current = storage.getClientData(dataId);
+      const current = clientDataRepository.get(dataId);
 
       // 子アカウントの場合、updater にはフィルタ済みデータを渡す
       // 結果から「自拠点のレコード」だけを取り出し、他拠点のデータと合算して保存
@@ -201,11 +242,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // slotSettings は filterDataByBase で自拠点だけに絞られているので、他拠点の slotSettings をマージ
           slotSettings: { ...(current.slotSettings || {}), ...(filteredUpdated.slotSettings || {}) },
         };
-        storage.saveClientData(dataId, merged);
+        clientDataRepository.save(dataId, merged);
         setClientData(filterDataByBase(merged, myBase));
       } else {
         const updated = updater(current);
-        storage.saveClientData(dataId, updated);
+        clientDataRepository.save(dataId, updated);
         setClientData(updated);
       }
     },
@@ -225,22 +266,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const refreshClient = useCallback(() => {
     if (!client) return;
-    const all = storage.getClients();
-    const fresh = all.find((c) => c.id === client.id);
+    const fresh = clientRepository.findById(client.id);
     if (!fresh) return;
-    let effective: Client = fresh;
-    if (fresh.accountType === 'child' && fresh.parentId) {
-      const parent = all.find((c) => c.id === fresh.parentId);
-      if (parent?.options) {
-        effective = { ...fresh, options: parent.options };
-      }
-    }
-    setClient(effective);
+    // I-5: state は SafeClient のため、最新 Client を SafeClient に剥がして親オプション継承を再適用。
+    setClient(applyParentOptions(toSafeClient(fresh)));
   }, [client]);
 
   // 初期化: デモ用にデフォルトクライアントが無い場合は作成
   useEffect(() => {
-    const clients = storage.getClients();
+    const clients = clientRepository.list();
     const hasDemo = clients.some(c => c.id === 'demo');
     if (!hasDemo) {
       const defaultClient: Client = {
@@ -275,8 +309,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       const updatedClients = clients.filter(c => c.id !== 'demo');
       updatedClients.push(defaultClient);
-      storage.saveClients(updatedClients);
-      storage.saveClientData('demo', getDefaultClientData());
+      clientRepository.saveAll(updatedClients);
+      clientDataRepository.save('demo', getDefaultClientData());
     }
   }, []);
 

@@ -6,6 +6,7 @@ import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
 import { ALL_CATEGORIES, categoryLabel, inferCategoryFromName } from '@/utils/statusCategory';
 import { STATUS_TEMPLATES, getTemplateById } from '@/utils/statusTemplates';
+import { applicantRepository, statusRepository, resolveDataOwnerId } from '@/repositories';
 
 const PAGE_SIZE = 10;
 
@@ -30,7 +31,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 });
 
 const StatusManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, client, reloadClientData } = useAuth();
   const [filterTab, setFilterTab] = useState<'all' | 'active' | 'inactive'>('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -71,130 +72,118 @@ const StatusManagement: React.FC = () => {
 
   const saveStatus = () => {
     if (!form.name.trim()) return;
-    updateClientData((data) => {
-      const list = [...data.statuses];
-      if (editId !== null) {
-        const idx = list.findIndex((s) => s.id === editId);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], name: form.name.trim(), color: form.color, category: form.category };
-        }
-      } else {
-        const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
-        const maxOrder = list.reduce((m, s) => Math.max(m, s.order), 0);
-        list.push({
-          id: maxId + 1,
-          name: form.name.trim(),
-          color: form.color,
-          active: true,
-          order: maxOrder + 1,
-          subStatuses: [],
-          category: form.category,
-        });
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+
+    const list = [...statuses];
+    if (editId !== null) {
+      const idx = list.findIndex((s) => s.id === editId);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], name: form.name.trim(), color: form.color, category: form.category };
       }
-      return { ...data, statuses: list };
-    });
+    } else {
+      const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
+      const maxOrder = list.reduce((m, s) => Math.max(m, s.order), 0);
+      list.push({
+        id: maxId + 1,
+        name: form.name.trim(),
+        color: form.color,
+        active: true,
+        order: maxOrder + 1,
+        subStatuses: [],
+        category: form.category,
+      });
+    }
+    // 編集時に rename が起きうるため、name ベース upsert ではなく save(list) で全差し替えする
+    statusRepository.save(ownerId, list);
+    reloadClientData();
     setModalOpen(false);
   };
 
   const toggleActive = (id: number) => {
-    updateClientData((data) => ({
-      ...data,
-      statuses: data.statuses.map((s) =>
-        s.id === id ? { ...s, active: !s.active } : s
-      ),
-    }));
+    if (!client) return;
+    const status = statuses.find((s) => s.id === id);
+    if (!status) return;
+    const ownerId = resolveDataOwnerId(client);
+    statusRepository.toggleActive(ownerId, status.name);
+    reloadClientData();
   };
 
   const moveOrder = (id: number, direction: 'up' | 'down') => {
-    updateClientData((data) => {
-      const list = [...data.statuses].sort((a, b) => a.order - b.order);
-      const idx = list.findIndex((s) => s.id === id);
-      if (idx < 0) return data;
-      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (swapIdx < 0 || swapIdx >= list.length) return data;
-      const tmpOrder = list[idx].order;
-      list[idx] = { ...list[idx], order: list[swapIdx].order };
-      list[swapIdx] = { ...list[swapIdx], order: tmpOrder };
-      return { ...data, statuses: list };
-    });
+    if (!client) return;
+    const status = statuses.find((s) => s.id === id);
+    if (!status) return;
+    const ownerId = resolveDataOwnerId(client);
+    statusRepository.moveOrder(ownerId, status.name, direction);
+    reloadClientData();
   };
 
   const deleteStatus = (id: number) => {
+    if (!client) return;
     const status = statuses.find((s) => s.id === id);
     if (!status) return;
     if (!window.confirm(`"${status.name}" を削除しますか？該当ステータスの応募者からも参照がクリアされます。`)) return;
-    updateClientData((data) => ({
-      ...data,
-      statuses: data.statuses.filter((s) => s.id !== id),
-      applicants: data.applicants.map((a) => {
-        const isMatchedStage = a.stage === status.name;
-        // stageHistory からも削除されたステータスのエントリを除去（孤立参照防止）
-        const cleanedHistory = a.stageHistory && a.stageHistory.length > 0
-          ? a.stageHistory.filter((h) => h.stage !== status.name)
-          : a.stageHistory;
-        if (!isMatchedStage && cleanedHistory === a.stageHistory) return a;
-        return {
-          ...a,
-          ...(isMatchedStage ? { stage: '', subStatus: '' } : {}),
-          stageHistory: cleanedHistory,
-        };
-      }),
-    }));
+    const ownerId = resolveDataOwnerId(client);
+    // Step 1: statuses 配列からの削除（責務: 定義削除のみ）
+    statusRepository.remove(ownerId, status.name);
+    // Step 2: applicants 側のカスケード処理（責務: stage クリア + stageHistory 掃除）
+    //   - stage === status.name の applicant は stage を '' にクリア
+    //   - stageHistory から stage / toStage が削除ステータス名のエントリを除去
+    //   - fromStage 参照のみのエントリは残す（履歴を残す処理ではないので新規エントリも追加しない）
+    applicantRepository.clearStageForDeletedStatus(ownerId, status.name);
+    reloadClientData();
   };
 
   const addSubStatus = (id: number) => {
+    if (!client) return;
     const val = (subInput[id] || '').trim();
     if (!val) return;
-    updateClientData((data) => ({
-      ...data,
-      statuses: data.statuses.map((s) =>
-        s.id === id && !s.subStatuses.includes(val)
-          ? { ...s, subStatuses: [...s.subStatuses, val] }
-          : s
-      ),
-    }));
+    const status = statuses.find((s) => s.id === id);
+    if (!status) return;
+    const ownerId = resolveDataOwnerId(client);
+    statusRepository.addSubStatus(ownerId, status.name, val);
+    reloadClientData();
     setSubInput((prev) => ({ ...prev, [id]: '' }));
   };
 
   const removeSubStatus = (id: number, sub: string) => {
-    updateClientData((data) => ({
-      ...data,
-      statuses: data.statuses.map((s) =>
-        s.id === id
-          ? { ...s, subStatuses: s.subStatuses.filter((ss) => ss !== sub) }
-          : s
-      ),
-    }));
+    if (!client) return;
+    const status = statuses.find((s) => s.id === id);
+    if (!status) return;
+    const ownerId = resolveDataOwnerId(client);
+    statusRepository.removeSubStatus(ownerId, status.name, sub);
+    reloadClientData();
   };
 
   const applyTemplate = () => {
     const tpl = getTemplateById(selectedTemplateId);
     if (!tpl) return;
+    if (!client) return;
     const confirmMsg = templateMode === 'replace'
       ? `テンプレート「${tpl.name}」で既存の全ステータスを置き換えますか？\n（応募者の現在のステータスは名前一致で維持されますが、不一致のものは空になります）`
       : `テンプレート「${tpl.name}」のステータスを末尾に追加します。重複名はスキップします。`;
     if (!window.confirm(confirmMsg)) return;
+    const ownerId = resolveDataOwnerId(client);
 
-    updateClientData((data) => {
-      const existingNames = new Set((data.statuses || []).map((s) => s.name));
-      const baseList = templateMode === 'replace' ? [] : [...(data.statuses || [])];
-      const baseMaxId = baseList.reduce((m, s) => Math.max(m, s.id), 0);
-      const baseMaxOrder = baseList.reduce((m, s) => Math.max(m, s.order), 0);
-      let nextId = baseMaxId;
-      let nextOrder = baseMaxOrder;
-      const added = tpl.items
-        .filter((it) => templateMode === 'replace' ? true : !existingNames.has(it.name))
-        .map((it) => ({
-          id: ++nextId,
-          name: it.name,
-          color: it.color,
-          active: true,
-          order: ++nextOrder,
-          subStatuses: it.subStatuses || [],
-          category: it.category,
-        }));
-      return { ...data, statuses: [...baseList, ...added] };
-    });
+    const existingNames = new Set(statuses.map((s) => s.name));
+    const baseList = templateMode === 'replace' ? [] : [...statuses];
+    const baseMaxId = baseList.reduce((m, s) => Math.max(m, s.id), 0);
+    const baseMaxOrder = baseList.reduce((m, s) => Math.max(m, s.order), 0);
+    let nextId = baseMaxId;
+    let nextOrder = baseMaxOrder;
+    const added = tpl.items
+      .filter((it) => templateMode === 'replace' ? true : !existingNames.has(it.name))
+      .map((it) => ({
+        id: ++nextId,
+        name: it.name,
+        color: it.color,
+        active: true,
+        order: ++nextOrder,
+        subStatuses: it.subStatuses || [],
+        category: it.category,
+      }));
+    statusRepository.save(ownerId, [...baseList, ...added]);
+    reloadClientData();
     setTemplateModalOpen(false);
   };
 

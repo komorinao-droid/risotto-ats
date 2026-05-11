@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Applicant, FilterCondition } from '@/types';
 import Modal from '@/components/Modal';
+import { applicantRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
+import { getClientOperatorLabel } from '@/utils/clientOperator';
 
 const inputStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -79,7 +81,7 @@ const defaultFC: FilterCondition = {
 };
 
 const FilterConditionSettings: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, reloadClientData, client } = useAuth();
   const [flagAgeInput, setFlagAgeInput] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<{ count: number; done: boolean } | null>(null);
@@ -156,21 +158,30 @@ const FilterConditionSettings: React.FC = () => {
       alert('除外ステータスを選択してください。');
       return;
     }
-    const count = affected.length;
-    updateClientData((data) => {
-      const currentFC = (data.filterConditions || {})[selectedBase] || data.filterCondition || defaultFC;
-      const affectedIds = new Set(
-        data.applicants
-          .filter((a) => a.active && a.base === selectedBase && matchesFilter(a, currentFC))
-          .map((a) => a.id)
-      );
-      return {
-        ...data,
-        applicants: data.applicants.map((a) =>
-          affectedIds.has(a.id) ? { ...a, stage: fc.excludeStatus, active: false } : a
-        ),
-      };
+    if (!client) return; // 通常 useAuth 経由でログイン済み前提だが防御的に
+    const targets = affected;
+    const count = targets.length;
+    if (count === 0) {
+      // 表示プレビューが 0 件のときはモーダル経由のみで来る想定。何もせず閉じる。
+      setConfirmOpen(false);
+      return;
+    }
+    const operator = getClientOperatorLabel(client);
+    const ownerId = resolveDataOwnerId(client);
+    const patches: BulkStageChangePatch[] = targets.map((a) => ({
+      applicantId: a.id,
+      toStage: fc.excludeStatus,
+      patch: { active: false },
+    }));
+    // changeStageBulk が内部で 1 回 save する。stageHistory に
+    //   { fromStage, toStage, operator, reason: 'filter_condition_applied', changedAt }
+    // が積まれる。
+    applicantRepository.changeStageBulk(ownerId, patches, {
+      operator,
+      reason: 'filter_condition_applied',
     });
+    // AuthContext の applicants と画面 state を最新の localStorage に揃える
+    reloadClientData();
     setResult({ count, done: true });
     setConfirmOpen(false);
   };

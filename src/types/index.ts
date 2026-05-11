@@ -115,14 +115,90 @@ export interface Applicant {
   screening?: ScreeningResult;
   /** ステージ変更履歴（リードタイム分析用）。新しい順または古い順（実装側で時刻順ソート）。 */
   stageHistory?: StageHistoryEntry[];
+
+  // ============================================================
+  // 分析用メタ情報（全て optional・後方互換）
+  // 既存データは欠落していても画面/集計が壊れない前提。
+  // 値の補完は @/utils/applicantLifecycle のヘルパで行う。
+  // ============================================================
+  /** 応募データ作成時刻 (ISO 8601)。未設定時は date 由来 → 現在時刻で補完。 */
+  createdAt?: string;
+  /** 直近の更新時刻 (ISO 8601)。Repository 経由の update で自動更新。 */
+  updatedAt?: string;
+  /** 直近のステータス変更時刻 (ISO 8601)。changeStage で自動更新。 */
+  stageChangedAt?: string;
+  /** 初回連絡時刻 (ISO 8601) */
+  firstContactedAt?: string;
+  /** 最終連絡時刻 (ISO 8601) */
+  lastContactedAt?: string;
+  /** 連絡試行回数 */
+  contactAttemptCount?: number;
+  /** 次回対応期限 (ISO 8601 / 日付のみ) */
+  nextActionAt?: string;
+  /** 担当メンバーID (Client.members[].id) */
+  assignedMemberId?: number;
+  /** 同一人物の過去応募ID（再応募の紐付け） */
+  sourceApplicantId?: number;
+  /** 求人票ID（媒体側の jobInfo.jobId とは別の社内ID） */
+  jobPostId?: string;
+  /** 採用キャンペーンID */
+  campaignId?: string;
+  /** NG理由カテゴリ */
+  ngReasonCategory?: 'skill' | 'condition' | 'culture' | 'experience' | 'document' | 'other';
+  /** 辞退理由カテゴリ */
+  declineReasonCategory?: 'salary' | 'location' | 'other_offer' | 'family' | 'schedule' | 'other';
+  /** 重複応募の本人(マスター)ID */
+  duplicateOfApplicantId?: number;
+  /** 個人情報利用同意ステータス */
+  consentStatus?: 'pending' | 'agreed' | 'withdrawn';
+  /** データ保持期限 (ISO 8601 / 日付のみ)。経過後は削除候補。 */
+  dataRetentionUntil?: string;
 }
 
-/** ステージ変更1件分のスナップショット */
+/**
+ * ステージ変更1件分のスナップショット。
+ *
+ * 後方互換: 旧形式 `{ stage, changedAt }` のみのデータも引き続き読める。
+ * 追加項目は全て optional。
+ */
+/**
+ * ステージ変更理由。
+ *
+ * 用途:
+ *  - stageHistory に「なぜそのステージへ動いたか」の意図を残す
+ *  - リードタイム集計や監査ログで、手動操作と自動処理を区別する
+ *
+ * 値の意味:
+ *  - manual_single: 単一応募者の手動変更（一覧/詳細/カンバン）
+ *  - manual_bulk: 管理画面等での明示的な一括手動変更（将来）
+ *  - filter_condition_applied: フィルタ条件「対象外に移動」実行
+ *  - exclusion_list_applied: 除外リスト追加に伴うマッチ済み応募者の一括移動
+ *  - interview_scheduled: 面接予約に伴う「面接確定」自動遷移
+ *  - csv_import: CSV インポート時の初期/上書き設定（将来）
+ *  - system: 上記いずれにも該当しないフォールバック
+ */
+export type StageChangeReason =
+  | 'manual_single'
+  | 'manual_bulk'
+  | 'filter_condition_applied'
+  | 'exclusion_list_applied'
+  | 'interview_scheduled'
+  | 'csv_import'
+  | 'system';
+
 export interface StageHistoryEntry {
   /** 変更後のステージ名 (Status.name) */
   stage: string;
   /** ISO 8601 タイムスタンプ ("2026-04-30T09:30:00.000Z") */
   changedAt: string;
+  /** 変更前ステージ名（任意） */
+  fromStage?: string;
+  /** 変更後ステージ名のスナップショット（任意。`stage` と同値） */
+  toStage?: string;
+  /** 操作者表示名（任意。Client.contactName 等） */
+  operator?: string;
+  /** 変更理由（任意） */
+  reason?: StageChangeReason;
 }
 
 // キャンセルされた面接履歴
@@ -247,7 +323,12 @@ export interface ClientOption {
 export interface Client {
   id: string;
   companyName: string;
-  password: string;
+  /**
+   * I-5: AuthContext.client (画面側 state) では password を保持しないため optional 化。
+   * password を持つのは clientRepository から直接取得した時だけ (認証照合 / 管理画面表示用)。
+   * 画面側で `client.password` を直接読まないこと。パスワード変更は authService.changePassword 経由のみ。
+   */
+  password?: string;
   accountType: 'parent' | 'child';
   parentId?: string;
   baseName?: string;
@@ -491,6 +572,12 @@ export interface ClientData {
   smsLogs?: SmsLog[];
   /** メール送信履歴（2026-05 追加） */
   emailLogs?: EmailLog[];
+  /**
+   * 統合連絡ログ（2026-05 追加）。
+   * SMS/メールを将来別サービス化する前提のチャネル抽象ログ。
+   * 既存の smsLogs / emailLogs は当面残す（破壊的変更を避けるため）。
+   */
+  messageLogs?: MessageLog[];
   /** Webhook 配信履歴（2026-05 追加） */
   webhookLogs?: WebhookLog[];
   /** Anthropic API 呼び出し履歴（2026-05 追加）。コスト集計用 */
@@ -536,6 +623,91 @@ export interface EmailLog {
   sentBy?: string;
   /** 何度目の送信か。リトライ時に増える */
   attempt?: number;
+}
+
+/**
+ * 連絡チャネル。将来 LINE / 電話 等を増やす場合はここに追加する。
+ */
+export type MessageChannel = 'email' | 'sms';
+
+/**
+ * 連絡方向。outbound = 自社→応募者、inbound = 応募者→自社（返信受信）。
+ */
+export type MessageDirection = 'outbound' | 'inbound';
+
+/**
+ * 連絡ステータス。プロバイダ側のイベントを統一表現するための語彙。
+ *  - draft: 下書き（未送信）
+ *  - queued: キュー投入済み（プロバイダ送信待ち）
+ *  - sent: プロバイダに送信完了（受信側到達は未確認）
+ *  - delivered: 受信側端末/MTA まで到達確認
+ *  - failed: 送信失敗
+ *  - opened: 開封確認（メール）
+ *  - clicked: リンククリック確認
+ *  - replied: 返信あり
+ *  - bounced: バウンス
+ *  - cancelled: 送信前にキャンセル
+ */
+export type MessageStatus =
+  | 'draft'
+  | 'queued'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'opened'
+  | 'clicked'
+  | 'replied'
+  | 'bounced'
+  | 'cancelled';
+
+/**
+ * 統合連絡ログ（2026-05 追加）。
+ *
+ * 設計方針:
+ *  - SMS/メール/将来チャネルを単一スキーマで扱う
+ *  - 実際の送信処理は ATS 内ではまだ持たない。将来別サービス（mailer/smsr）が
+ *    プロバイダ呼び出しを担い、このログを生成・更新する想定
+ *  - externalMessageId は Twilio SID / SendGrid X-Message-Id 等の外部 ID
+ *  - bodyPreview は本文の先頭プレビュー（全文は将来 BLOB ストレージ等へ）
+ */
+export interface MessageLog {
+  /** 文字列 ID（UUID 風）。Repository 側で自動生成。 */
+  id: string;
+  /** 関連応募者 ID */
+  applicantId: number;
+  channel: MessageChannel;
+  direction: MessageDirection;
+  status: MessageStatus;
+  /** 使用したテンプレート ID（手動送信なら未設定） */
+  templateId?: number;
+  /** 外部プロバイダ側のメッセージ ID（Twilio SID 等） */
+  externalMessageId?: string;
+  /** プロバイダ識別子: 'twilio' | 'sendgrid' | 'gmail' | ... */
+  provider?: string;
+  /** メール件名（SMS の場合は未設定） */
+  subject?: string;
+  /** 本文プレビュー（先頭 200 文字程度） */
+  bodyPreview?: string;
+  /** 送信時刻 (ISO 8601) */
+  sentAt?: string;
+  /** プロバイダ delivered イベント時刻 */
+  deliveredAt?: string;
+  /** 開封イベント時刻 */
+  openedAt?: string;
+  /** クリックイベント時刻 */
+  clickedAt?: string;
+  /** 返信受信時刻 */
+  repliedAt?: string;
+  /** 失敗時刻 */
+  failedAt?: string;
+  /** 失敗時のエラーメッセージ */
+  errorMessage?: string;
+  /** ログ作成時刻 (ISO 8601)。Repository 経由で自動付与。 */
+  createdAt: string;
+  /** ログ最終更新時刻 (ISO 8601)。Repository 経由で自動付与。 */
+  updatedAt: string;
+  /** 操作者表示名（クライアント側メンバー名 等） */
+  createdBy?: string;
 }
 
 /** Webhook 配信1件の記録（2026-05 追加） */

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Member } from '@/types';
-import { storage } from '@/utils/storage';
+import { clientRepository } from '@/repositories';
+import { authService } from '@/services/auth';
 import Modal from '@/components/Modal';
 
 const inputStyle: React.CSSProperties = {
@@ -46,7 +47,7 @@ const planLabels: Record<string, string> = {
 };
 
 const AccountSettings: React.FC = () => {
-  const { client } = useAuth();
+  const { client, refreshClient } = useAuth();
 
   // Company info
   const [companyName, setCompanyName] = useState(client?.companyName || '');
@@ -78,27 +79,25 @@ const AccountSettings: React.FC = () => {
   const members = client.members || [];
 
   const saveCompanyInfo = () => {
-    const clients = storage.getClients();
-    const idx = clients.findIndex((c) => c.id === client.id);
-    if (idx < 0) return;
-    clients[idx] = {
-      ...clients[idx],
-      companyName: companyName.trim() || clients[idx].companyName,
+    // M-2: clientRepository.update 経由。空 companyName は既存値を維持する既存挙動を踏襲。
+    const current = clientRepository.findById(client.id);
+    if (!current) return;
+    clientRepository.update(client.id, {
+      companyName: companyName.trim() || current.companyName,
       contactName: contactName.trim(),
       notificationEmail: notificationEmail.trim(),
       smsPhone: smsPhone.trim(),
-    };
-    storage.saveClients(clients);
+    });
     setCompanyMsg('保存しました');
     setTimeout(() => setCompanyMsg(''), 2000);
   };
 
-  const changePassword = () => {
+  const changePassword = async () => {
+    // I-3: 現行 PW 照合 + 平文保存は authService.changePassword に集約。
+    //  - client.password 直参照を排除 (state を SafeClient 化する前提整備)
+    //  - storage.saveClients への直接書込もここから除去
+    //  - UI 側でしか判定できない「6 文字以上」「確認 PW 一致」は事前に弾く
     setPwMsg(null);
-    if (currentPw !== client.password) {
-      setPwMsg({ type: 'error', text: '現在のパスワードが正しくありません。' });
-      return;
-    }
     if (newPw.length < 6) {
       setPwMsg({ type: 'error', text: 'パスワードは6文字以上にしてください。' });
       return;
@@ -107,23 +106,32 @@ const AccountSettings: React.FC = () => {
       setPwMsg({ type: 'error', text: '新しいパスワードと確認が一致しません。' });
       return;
     }
-    const clients = storage.getClients();
-    const idx = clients.findIndex((c) => c.id === client.id);
-    if (idx < 0) return;
-    clients[idx] = { ...clients[idx], password: newPw };
-    storage.saveClients(clients);
+    const result = await authService.changePassword(currentPw, newPw);
+    if (!result.ok) {
+      if (result.reason === 'invalid_current') {
+        setPwMsg({ type: 'error', text: '現在のパスワードが正しくありません。' });
+      } else if (result.reason === 'not_logged_in') {
+        setPwMsg({ type: 'error', text: 'ログイン状態を確認できませんでした。再ログインしてください。' });
+      } else {
+        setPwMsg({ type: 'error', text: 'パスワード変更に失敗しました。' });
+      }
+      return;
+    }
     setCurrentPw('');
     setNewPw('');
     setConfirmPw('');
     setPwMsg({ type: 'success', text: 'パスワードを変更しました。' });
+    // AuthContext.client.password を新値に同期 (state coherence; sessionStorage は SafeClient のまま)
+    refreshClient();
   };
 
   const addMember = () => {
     if (!memberForm.name.trim() || !memberForm.email.trim()) return;
-    const clients = storage.getClients();
-    const idx = clients.findIndex((c) => c.id === client.id);
-    if (idx < 0) return;
-    const maxId = (clients[idx].members || []).reduce((m, mem) => Math.max(m, mem.id), 0);
+    // M-2: clientRepository.update 経由。最新 members は findById で取得（AuthContext state より新鮮）。
+    const current = clientRepository.findById(client.id);
+    if (!current) return;
+    const currentMembers = current.members || [];
+    const maxId = currentMembers.reduce((m, mem) => Math.max(m, mem.id), 0);
     const newMember: Member = {
       id: maxId + 1,
       name: memberForm.name.trim(),
@@ -132,8 +140,9 @@ const AccountSettings: React.FC = () => {
       notifyEmail: memberForm.notifyEmail,
       notifySms: memberForm.notifySms,
     };
-    clients[idx] = { ...clients[idx], members: [...(clients[idx].members || []), newMember] };
-    storage.saveClients(clients);
+    clientRepository.update(client.id, {
+      members: [...currentMembers, newMember],
+    });
     setMemberForm({ name: '', email: '', phone: '', notifyEmail: true, notifySms: false });
     setMemberModalOpen(false);
     // Force re-render via a reload workaround
@@ -142,25 +151,22 @@ const AccountSettings: React.FC = () => {
 
   const deleteMember = (memberId: number) => {
     if (!window.confirm('このメンバーを削除しますか？')) return;
-    const clients = storage.getClients();
-    const idx = clients.findIndex((c) => c.id === client.id);
-    if (idx < 0) return;
-    clients[idx] = { ...clients[idx], members: (clients[idx].members || []).filter((m) => m.id !== memberId) };
-    storage.saveClients(clients);
+    const current = clientRepository.findById(client.id);
+    if (!current) return;
+    clientRepository.update(client.id, {
+      members: (current.members || []).filter((m) => m.id !== memberId),
+    });
     window.location.reload();
   };
 
   const toggleMemberNotify = (memberId: number, field: 'notifyEmail' | 'notifySms') => {
-    const clients = storage.getClients();
-    const idx = clients.findIndex((c) => c.id === client.id);
-    if (idx < 0) return;
-    clients[idx] = {
-      ...clients[idx],
-      members: (clients[idx].members || []).map((m) =>
+    const current = clientRepository.findById(client.id);
+    if (!current) return;
+    clientRepository.update(client.id, {
+      members: (current.members || []).map((m) =>
         m.id === memberId ? { ...m, [field]: !m[field] } : m
       ),
-    };
-    storage.saveClients(clients);
+    });
     window.location.reload();
   };
 

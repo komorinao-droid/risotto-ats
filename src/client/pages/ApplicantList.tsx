@@ -2,6 +2,8 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, CalendarDays, ClipboardList, FolderOpen } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { applicantRepository, resolveDataOwnerId } from '@/repositories';
+import { getClientOperatorLabel } from '@/utils/clientOperator';
 import Pagination from '@/components/Pagination';
 import SearchableSelect from '@/components/SearchableSelect';
 import AddApplicantModal from '@/client/components/AddApplicantModal';
@@ -160,7 +162,7 @@ const IMPORT_FIELDS = [
 // ─── Main component ───
 const ApplicantList: React.FC = () => {
   const navigate = useNavigate();
-  const { clientData, updateClientData, logAction, client } = useAuth();
+  const { clientData, reloadClientData, logAction, client } = useAuth();
 
   // ─── State ───
   const [page, setPage] = useState(1);
@@ -340,24 +342,24 @@ const ApplicantList: React.FC = () => {
   };
 
   // ─── Inline status change ───
+  // Repository 経由で stage を変更し、stageHistory / stageChangedAt / updatedAt を一括更新する。
+  // ApplicantDetail.handleStatusChange と同じ operator フォーマットで履歴を残す。
   const handleStatusChange = useCallback(
     (applicantId: number, newStatus: string) => {
-      let prevStage = '';
-      let applicantName = '';
-      updateClientData((data) => {
-        const target = data.applicants.find((a) => a.id === applicantId);
-        prevStage = target?.stage || '';
-        applicantName = target?.name || String(applicantId);
-        return {
-          ...data,
-          applicants: data.applicants.map((a) =>
-            a.id === applicantId ? { ...a, stage: newStatus } : a
-          ),
-        };
-      });
+      if (!client || !clientData) return;
+      const target = clientData.applicants.find((a) => a.id === applicantId);
+      if (!target) return;
+      const prevStage = target.stage || '';
+      if (prevStage === newStatus) return;
+      const applicantName = target.name || String(applicantId);
+      const operator = getClientOperatorLabel(client);
+      const ownerId = resolveDataOwnerId(client);
+      const updated = applicantRepository.changeStage(ownerId, applicantId, newStatus, { operator, reason: 'manual_single' });
+      if (!updated) return;
+      reloadClientData();
       logAction('applicant', 'ステータス変更', applicantName, `${prevStage} → ${newStatus}`);
     },
-    [updateClientData, logAction]
+    [client, clientData, reloadClientData, logAction]
   );
 
   // ─── Apply / Reset filters ───
@@ -455,8 +457,15 @@ const ApplicantList: React.FC = () => {
   };
 
   const doImport = () => {
-    const maxId = applicants.reduce((max, a) => Math.max(max, a.id), 0);
-    const newApplicants: Applicant[] = [];
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    // 採番起点は Repository 経由で取得した最新 list の最大 ID。
+    // 子アカウントでも ownerId は親に解決済みなので親側 applicants の全 ID を見る。
+    const baseList = applicantRepository.list(ownerId);
+    const baseMaxId = baseList.reduce((max, a) => Math.max(max, a.id), 0);
+    const operator = getClientOperatorLabel(client);
+    // CSV 行ごとに「stage が明示されていたか」を保持するため、Applicant と stageExplicit を組で持つ
+    const pendingItems: Array<{ applicant: Applicant; stageExplicit: boolean }> = [];
 
     importRows.forEach((row, idx) => {
       const a: Record<string, string> = {};
@@ -469,48 +478,68 @@ const ApplicantList: React.FC = () => {
 
       if (!a.name) return;
 
-      newApplicants.push({
-        id: maxId + idx + 1,
-        name: a.name || '',
-        furigana: a.furigana || '',
-        email: a.email || '',
-        phone: (a.phone || '').replace(/[-\s]/g, ''),
-        gender: a.gender || '',
-        age: (() => {
-          if (!a.age) return '';
-          const n = parseInt(a.age, 10);
-          return Number.isNaN(n) ? '' : n;
-        })(),
-        birthDate: a.birthDate || '',
-        currentJob: a.currentJob || '',
-        date: a.date || new Date().toISOString().slice(0, 10),
-        job: a.job || '',
-        src: a.src || '',
-        stage: a.stage || (statuses[0]?.name || ''),
-        subStatus: a.subStatus || '',
-        base: a.base || '',
-        note: a.note || '',
-        needsAction: false,
-        actionDate: '',
-        actionTime: '',
-        actionMemo: '',
-        prefDates: [],
-        intResult: '',
-        intMethod: '',
-        active: true,
-        duplicate: false,
-        files: [],
-        jobInfo: { jobId: '', jobNumber: '', productName: '', jobName: '', publishedJobType: '', companyName: '' },
-        chatAnswers: [],
+      // 「ステータス」列が CSV に存在し、かつ trim 後に値が残っているときだけ「明示行」と扱う。
+      // 空欄 → statuses[0] フォールバックは履歴を残さない（フェーズ2 仕様）。
+      const csvStage = a.stage || '';
+      const stageExplicit = !!csvStage;
+      const finalStage = csvStage || (statuses[0]?.name || '');
+
+      pendingItems.push({
+        stageExplicit,
+        applicant: {
+          id: baseMaxId + idx + 1,
+          name: a.name || '',
+          furigana: a.furigana || '',
+          email: a.email || '',
+          phone: (a.phone || '').replace(/[-\s]/g, ''),
+          gender: a.gender || '',
+          age: (() => {
+            if (!a.age) return '';
+            const n = parseInt(a.age, 10);
+            return Number.isNaN(n) ? '' : n;
+          })(),
+          birthDate: a.birthDate || '',
+          currentJob: a.currentJob || '',
+          date: a.date || new Date().toISOString().slice(0, 10),
+          job: a.job || '',
+          src: a.src || '',
+          stage: finalStage,
+          subStatus: a.subStatus || '',
+          base: a.base || '',
+          note: a.note || '',
+          needsAction: false,
+          actionDate: '',
+          actionTime: '',
+          actionMemo: '',
+          prefDates: [],
+          intResult: '',
+          intMethod: '',
+          active: true,
+          duplicate: false,
+          files: [],
+          jobInfo: { jobId: '', jobNumber: '', productName: '', jobName: '', publishedJobType: '', companyName: '' },
+          chatAnswers: [],
+        },
       });
     });
 
-    if (newApplicants.length > 0) {
-      updateClientData((data) => ({
-        ...data,
-        applicants: [...data.applicants, ...newApplicants],
-      }));
-      logAction('applicant', '応募者一括取込', `${newApplicants.length}件`);
+    if (pendingItems.length > 0) {
+      // applicantRepository.create を 1 件ずつ呼ぶことで withCreatedMeta が当たり、
+      // createdAt / updatedAt / stageChangedAt が自動付与される。
+      // stage が CSV で明示されていた行のみ initialStageReason='csv_import' を渡し、
+      // stageHistory に 1 件「初期 stage」エントリを残す。
+      for (const item of pendingItems) {
+        if (item.stageExplicit) {
+          applicantRepository.create(ownerId, item.applicant, {
+            initialStageReason: 'csv_import',
+            operator,
+          });
+        } else {
+          applicantRepository.create(ownerId, item.applicant);
+        }
+      }
+      reloadClientData();
+      logAction('applicant', '応募者一括取込', `${pendingItems.length}件`);
     }
 
     setImportModalOpen(false);

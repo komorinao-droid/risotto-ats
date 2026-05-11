@@ -4,6 +4,9 @@ import { resolveJobs, resolveSources, resolveScreeningCriteria, hasScreeningJobO
 import { hasActiveOption, incrementOptionUsage, isOptionLimitReached, getOptionRemaining, getOptionUsageThisMonth } from '@/utils/clientOptions';
 import { apiPost } from '@/utils/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
+import { applicantRepository, eventRepository, messageRepository, resolveDataOwnerId } from '@/repositories';
+import { withContactMeta } from '@/utils/applicantLifecycle';
+import { getClientOperatorLabel } from '@/utils/clientOperator';
 import Tabs from '@/components/Tabs';
 import Modal from '@/components/Modal';
 import SearchableSelect from '@/components/SearchableSelect';
@@ -12,7 +15,7 @@ import ScheduleInterviewModal from '@/client/components/ScheduleInterviewModal';
 import { normalizeFurigana } from '@/utils/furigana';
 import { warekiToDate, dateToWareki } from '@/utils/wareki';
 import { calcAge, formatDateJP, today, dayOfWeekJP } from '@/utils/date';
-import type { Applicant, InterviewEvent, ClientData, PrefDateTime } from '@/types';
+import type { Applicant, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
 function normalizePrefDate(d: PrefDateTime | string): PrefDateTime {
@@ -139,7 +142,7 @@ interface ApplicantDetailProps {
 }
 
 const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, onBack }) => {
-  const { clientData, updateClientData, logAction, client } = useAuth();
+  const { clientData, logAction, client, reloadClientData } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(propId ?? getApplicantIdFromURL());
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -170,26 +173,48 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
 
   const updateApplicant = useCallback(
     (updater: (a: Applicant) => Applicant) => {
+      // G-1: 通常編集経路を applicantRepository.update 経由に集約。
+      //  - callsite 側 API (updater 関数) は不変。
+      //  - applicant と updater 結果の差分のみ Partial<Applicant> として Repository に渡す。
+      //  - 差分なしなら no-op（withUpdatedMeta の不要発火防止）。
+      //  - stage 変更は本経路ではサポートしない（changeStage 経路に分離）。
+      //    現状 callsite では stage を書き換えていないが、安全側で検出時は console.warn。
       if (!applicant) return;
-      updateClientData((data) => ({
-        ...data,
-        applicants: data.applicants.map((a) => (a.id === applicant.id ? updater(a) : a)),
-      }));
+      if (!client) return;
+      const ownerId = resolveDataOwnerId(client);
+      const next = updater(applicant);
+      const patch: Partial<Applicant> = {};
+      (Object.keys(next) as (keyof Applicant)[]).forEach((k) => {
+        if (next[k] !== applicant[k]) {
+          (patch as Record<string, unknown>)[k as string] = next[k];
+        }
+      });
+      if (Object.keys(patch).length === 0) return;
+      // stage を patch に含む呼出は本経路の責務外。検出して警告し、stage は除外して残りを適用。
+      if ('stage' in patch) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[updateApplicant] stage change detected via updater. stage transitions must use applicantRepository.changeStage. Stripping stage from patch.',
+          { applicantId: applicant.id, fromStage: applicant.stage, toStage: (patch as Partial<Applicant>).stage }
+        );
+        delete (patch as Partial<Applicant>).stage;
+        if (Object.keys(patch).length === 0) return;
+      }
+      applicantRepository.update(ownerId, applicant.id, patch);
+      reloadClientData();
     },
-    [applicant, updateClientData]
+    [applicant, client, reloadClientData]
   );
 
   const handleDelete = useCallback(() => {
-    if (!applicant) return;
-    updateClientData((data) => ({
-      ...data,
-      // 応募者本体を削除（screening/files/stageHistory/chatAnswers などはオブジェクト内なので一緒に消える）
-      applicants: data.applicants.filter((a) => a.id !== applicant.id),
-      // 関連する面接イベント
-      events: data.events.filter((e) => e.applicantId !== applicant.id),
-      // 除外リストの参照(applicantIdベース) があればクリア
-      exclusionList: (data.exclusionList || []).filter((ex: any) => ex?.applicantId !== applicant.id),
-    }));
+    // G-2: 応募者削除を applicantRepository.delete 経由に集約。
+    //  - applicants / events / exclusionList の 3 配列カスケードは Repository 内に閉じ込め（1 saveClientData）
+    //  - messageLogs は別 localStorage キー保管のため意図的にカスケード対象外（既存挙動維持）
+    //  - logAction / setDeleteConfirm / onBack / URL クリアの UI 挙動は不変
+    if (!applicant || !client) return;
+    const ownerId = resolveDataOwnerId(client);
+    applicantRepository.delete(ownerId, applicant.id);
+    reloadClientData();
     logAction('applicant', '応募者削除', applicant.name || String(applicant.id));
     setDeleteConfirm(false);
     if (onBack) onBack();
@@ -197,30 +222,11 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
       setSelectedId(null);
       setApplicantIdInURL(null);
     }
-  }, [applicant, updateClientData, onBack]);
-
-  // (needsAction handling moved below with action modal state)
-
-  if (!clientData) {
-    return <div style={{ padding: '2rem', color: '#6B7280' }}>Loading...</div>;
-  }
-
-  if (!applicant) {
-    return (
-      <div style={{ padding: '2rem' }}>
-        <div style={{ color: '#6B7280', marginBottom: '1rem' }}>Applicant not found.</div>
-        {onBack && (
-          <button onClick={onBack} style={btnSecondary}>
-            Back
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  const events = clientData.events.filter((e) => e.applicantId === applicant.id);
+  }, [applicant, client, reloadClientData, logAction, onBack]);
 
   // Duplicate check (with count)
+  // 注意: 早期リターンより前に呼ぶ必要がある（React Hooks ルール）。
+  // applicant / clientData が null の場合は空集計を返してフックの呼び出し順を維持する。
   const { isDuplicate, duplicateCount } = useMemo(() => {
     if (!applicant || !clientData) return { isDuplicate: false, duplicateCount: 0 };
     const normalizedPhone = applicant.phone?.replace(/[-\s]/g, '') || '';
@@ -233,7 +239,7 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
     return { isDuplicate: matches.length > 0, duplicateCount: matches.length + 1 };
   }, [applicant, clientData]);
 
-  // Action modal state
+  // Action modal state（早期リターンより前で宣言）
   const [actionModalOpen, setActionModalOpen] = useState(false);
   const [actionDate, setActionDate] = useState('');
   const [actionTime, setActionTime] = useState('');
@@ -272,6 +278,25 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
     }));
     setActionModalOpen(false);
   }, [actionDate, actionTime, actionMemo, updateApplicant]);
+
+  if (!clientData) {
+    return <div style={{ padding: '2rem', color: '#6B7280' }}>Loading...</div>;
+  }
+
+  if (!applicant) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <div style={{ color: '#6B7280', marginBottom: '1rem' }}>Applicant not found.</div>
+        {onBack && (
+          <button onClick={onBack} style={btnSecondary}>
+            Back
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const events = clientData.events.filter((e) => e.applicantId === applicant.id);
 
   return (
     <div style={{ padding: '0' }}>
@@ -344,7 +369,6 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
                   isDuplicate={isDuplicate}
                   duplicateCount={duplicateCount}
                   updateApplicant={updateApplicant}
-                  updateClientData={updateClientData}
                 />
               ),
             },
@@ -466,6 +490,200 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
 };
 
 /* =======================================
+   Contact history (read-only)
+   - 実送信処理は持たない。messageRepository から読むだけ。
+   - clientData を依存に入れて、AuthContext 経由で更新があった際に再取得する。
+   ======================================= */
+const channelLabel: Record<MessageChannel, string> = {
+  email: 'メール',
+  sms: 'SMS',
+};
+
+const directionLabel: Record<MessageDirection, string> = {
+  outbound: '送信',
+  inbound: '受信',
+};
+
+const statusLabel: Record<MessageStatus, string> = {
+  draft: '下書き',
+  queued: '送信待ち',
+  sent: '送信済み',
+  delivered: '到達',
+  failed: '失敗',
+  opened: '開封',
+  clicked: 'クリック',
+  replied: '返信あり',
+  bounced: 'バウンス',
+  cancelled: 'キャンセル',
+};
+
+const statusColor: Record<MessageStatus, { bg: string; fg: string }> = {
+  draft:     { bg: '#F3F4F6', fg: '#6B7280' },
+  queued:    { bg: '#EEF2FF', fg: '#4338CA' },
+  sent:      { bg: '#E0F2FE', fg: '#0369A1' },
+  delivered: { bg: '#DCFCE7', fg: '#15803D' },
+  opened:    { bg: '#DCFCE7', fg: '#15803D' },
+  clicked:   { bg: '#DCFCE7', fg: '#15803D' },
+  replied:   { bg: '#DBEAFE', fg: '#1D4ED8' },
+  failed:    { bg: '#FEE2E2', fg: '#B91C1C' },
+  bounced:   { bg: '#FEE2E2', fg: '#B91C1C' },
+  cancelled: { bg: '#F3F4F6', fg: '#6B7280' },
+};
+
+function formatLogTimestamp(log: MessageLog): string {
+  const iso = log.sentAt || log.createdAt;
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}`;
+}
+
+interface ContactHistoryCardProps {
+  applicantId: number;
+  /** clientData が更新された時に再評価するためのトリガとして渡す */
+  clientDataKey: ClientData;
+}
+
+const ContactHistoryCard: React.FC<ContactHistoryCardProps> = ({ applicantId, clientDataKey }) => {
+  const { client } = useAuth();
+  const logs = useMemo<MessageLog[]>(() => {
+    if (!client) return [];
+    const ownerId = resolveDataOwnerId(client);
+    return messageRepository.listByApplicant(ownerId, applicantId);
+    // clientDataKey は AuthContext の clientData 変更検知用。
+    // 中身は使わないが依存に入れて再取得を促す。
+  }, [client, applicantId, clientDataKey]);
+
+  return (
+    <div style={cardStyle}>
+      <div style={cardHeaderStyle}>
+        <h3 style={cardTitleStyle}>連絡履歴</h3>
+        <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>{logs.length}件</span>
+      </div>
+      <div style={cardBodyStyle}>
+        {logs.length === 0 ? (
+          <div
+            style={{
+              fontSize: '0.8125rem',
+              color: '#9CA3AF',
+              textAlign: 'center',
+              padding: '1.25rem 0',
+            }}
+          >
+            連絡履歴はまだありません。
+          </div>
+        ) : (
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+            }}
+          >
+            {logs.map((log) => {
+              const sc = statusColor[log.status] ?? { bg: '#F3F4F6', fg: '#6B7280' };
+              const titleText = log.subject || log.bodyPreview || '(本文なし)';
+              return (
+                <li
+                  key={log.id}
+                  style={{
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '6px',
+                    padding: '0.5rem 0.625rem',
+                    fontSize: '0.75rem',
+                    backgroundColor: '#FAFAFA',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.375rem',
+                      flexWrap: 'wrap',
+                      marginBottom: '0.25rem',
+                    }}
+                  >
+                    <span style={{ color: '#6B7280' }}>{formatLogTimestamp(log)}</span>
+                    <span
+                      style={{
+                        padding: '0.0625rem 0.375rem',
+                        borderRadius: '4px',
+                        backgroundColor: '#F3F4F6',
+                        color: '#374151',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {channelLabel[log.channel]}
+                    </span>
+                    <span
+                      style={{
+                        padding: '0.0625rem 0.375rem',
+                        borderRadius: '4px',
+                        backgroundColor: '#F3F4F6',
+                        color: '#374151',
+                      }}
+                    >
+                      {directionLabel[log.direction]}
+                    </span>
+                    <span
+                      style={{
+                        padding: '0.0625rem 0.375rem',
+                        borderRadius: '4px',
+                        backgroundColor: sc.bg,
+                        color: sc.fg,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {statusLabel[log.status]}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      color: '#111827',
+                      fontSize: '0.8125rem',
+                      lineHeight: 1.45,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                    }}
+                  >
+                    {titleText}
+                  </div>
+                  {(log.provider || log.externalMessageId) && (
+                    <div
+                      style={{
+                        marginTop: '0.25rem',
+                        color: '#9CA3AF',
+                        fontSize: '0.6875rem',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      }}
+                    >
+                      {log.provider && <span>{log.provider}</span>}
+                      {log.provider && log.externalMessageId && <span> · </span>}
+                      {log.externalMessageId && <span>{log.externalMessageId}</span>}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* =======================================
    Tab 1: Info (2-column layout)
    ======================================= */
 interface InfoTabProps {
@@ -475,7 +693,6 @@ interface InfoTabProps {
   isDuplicate: boolean;
   duplicateCount: number;
   updateApplicant: (updater: (a: Applicant) => Applicant) => void;
-  updateClientData: (updater: (data: ClientData) => ClientData) => void;
 }
 
 const InfoTab: React.FC<InfoTabProps> = ({
@@ -485,9 +702,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
   isDuplicate,
   duplicateCount,
   updateApplicant,
-  updateClientData,
 }) => {
-  const { logAction, client } = useAuth();
+  const { logAction, client, reloadClientData } = useAuth();
   const isChild = client?.accountType === 'child';
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Applicant>>({});
@@ -509,6 +725,13 @@ const InfoTab: React.FC<InfoTabProps> = ({
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
   const [cancelConfirmEvent, setCancelConfirmEvent] = useState<InterviewEvent | null>(null);
+
+  // 連絡ログ作成（ドライラン: 実送信なし）モーダル
+  const [dryRunOpen, setDryRunOpen] = useState(false);
+  const [dryRunChannel, setDryRunChannel] = useState<MessageChannel>('email');
+  const [dryRunSubject, setDryRunSubject] = useState('');
+  const [dryRunBody, setDryRunBody] = useState('');
+  const [dryRunSubmitting, setDryRunSubmitting] = useState(false);
 
   // Sync memo with prop
   useEffect(() => {
@@ -617,20 +840,84 @@ const InfoTab: React.FC<InfoTabProps> = ({
     memoTimer.current = setTimeout(() => saveMemo(newText), 1200);
   }
 
+  /* ─────────────────────────────────────────────────────────────
+   * 連絡ログ作成（ドライラン）
+   *
+   * 実送信は一切行わない。messageRepository に1件追加 + 応募者の連絡メタを
+   * withContactMeta 由来のロジックで進めるだけ。
+   * 将来 mailer / smsr サービスに差し替えるときは、この handler 内の
+   * "ログ作成 + 連絡メタ更新" を残し、外部送信呼び出しを前段に挿入する想定。
+   * ───────────────────────────────────────────────────────────── */
+  function openDryRun(channel: MessageChannel) {
+    setDryRunChannel(channel);
+    setDryRunSubject(channel === 'email' ? `${applicant.name || ''} さんへのご連絡` : '');
+    setDryRunBody('');
+    setDryRunOpen(true);
+  }
+
+  async function handleDryRunCreate() {
+    if (!client) return;
+    if (dryRunSubmitting) return;
+    setDryRunSubmitting(true);
+    try {
+      const ownerId = resolveDataOwnerId(client);
+      const operator = client.contactName || client.companyName || '';
+      const trimmedBody = dryRunBody.trim();
+      const trimmedSubject = dryRunSubject.trim();
+      // 本文プレビューは先頭 200 文字までに制限
+      const bodyPreview = trimmedBody.slice(0, 200) || (
+        dryRunChannel === 'email'
+          ? '(本文未入力 / ドライラン)'
+          : '(本文未入力 / ドライラン)'
+      );
+      const log = messageRepository.create(ownerId, {
+        applicantId: applicant.id,
+        channel: dryRunChannel,
+        direction: 'outbound',
+        // 実送信していないことが分かるように draft で記録
+        status: 'draft',
+        subject: dryRunChannel === 'email' ? (trimmedSubject || undefined) : undefined,
+        bodyPreview,
+        createdBy: operator || undefined,
+      });
+      // 連絡メタを更新。
+      // 計算ロジックは applicantLifecycle.withContactMeta に集約し、
+      // ここでは差分フィールドだけ Repository.update に渡す。
+      // 将来 mailer/smsr サービスから呼ぶ際も同じ helper を再利用できる。
+      const withContact = withContactMeta(applicant, { contactedAt: log.createdAt });
+      applicantRepository.update(ownerId, applicant.id, {
+        firstContactedAt: withContact.firstContactedAt,
+        lastContactedAt: withContact.lastContactedAt,
+        contactAttemptCount: withContact.contactAttemptCount,
+      });
+      reloadClientData();
+      logAction(
+        'email',
+        dryRunChannel === 'email' ? 'メール連絡ログ作成（ドライラン）' : 'SMS連絡ログ作成（ドライラン）',
+        applicant.name || '(名前なし)',
+        trimmedSubject || trimmedBody.slice(0, 40) || undefined,
+      );
+      setDryRunOpen(false);
+    } finally {
+      setDryRunSubmitting(false);
+    }
+  }
+
   function handleStatusChange(newStatus: string) {
     const prev = applicant.stage;
     if (prev === newStatus) return;
-    updateApplicant((a) => {
-      // 二重チェック: race condition で同じステージへの遷移なら何もしない
-      if (a.stage === newStatus) return a;
-      const history = [...(a.stageHistory || [])];
-      // 初回変更時、応募日 = 初期ステージの設定
-      if (history.length === 0 && a.stage) {
-        history.push({ stage: a.stage, changedAt: new Date(a.date || Date.now()).toISOString() });
-      }
-      history.push({ stage: newStatus, changedAt: new Date().toISOString() });
-      return { ...a, stage: newStatus, subStatus: '', stageHistory: history };
-    });
+    if (!client) return;
+    // logAction と同じ operator フォーマットを Repository 側にも渡し、
+    // StageHistoryEntry.operator として履歴に積む。
+    const operator = getClientOperatorLabel(client);
+    const ownerId = resolveDataOwnerId(client);
+    // Repository 経由で stage / stageChangedAt / stageHistory / updatedAt を一括更新。
+    // 既存挙動互換: 履歴空かつ既存 stage がある場合は date 由来の初期エントリを積む（withStageChange 内で実装）。
+    const updated = applicantRepository.changeStage(ownerId, applicant.id, newStatus, { operator, reason: 'manual_single' });
+    if (!updated) return; // 応募者が見つからなかった等の異常系（通常は到達しない）
+    // AuthContext.clientData を localStorage の最新状態と同期。
+    // 子アカウントなら拠点フィルタが reloadClientData 内で再適用される。
+    reloadClientData();
     logAction('applicant', 'ステータス変更', applicant.name || String(applicant.id), `${prev} → ${newStatus}`);
   }
 
@@ -642,50 +929,49 @@ const InfoTab: React.FC<InfoTabProps> = ({
     updateApplicant((a) => ({ ...a, intResult: result }));
   }
 
+  // H-5: 面接設定を eventRepository.scheduleInterview 経由に集約。
+  //  - events 追加 + stage='面接確定' 遷移を Repository 内で 1 saveClientData に集約
+  //  - 既に '面接確定' の場合は stageHistory を汚染しない（withStageChange の同参照返却で no-op）
+  //  - reason='interview_scheduled' / operator はここで採取して Repository へ渡す
+  //  - id は ScheduleInterviewModal が Date.now() で採番済みのものを尊重（既存挙動互換）
+  //  - client 未取得時は no-op
   function handleScheduled(event: InterviewEvent) {
-    updateClientData((data) => ({
-      ...data,
-      events: [...data.events, event],
-      applicants: data.applicants.map((a) =>
-        a.id === applicant.id ? { ...a, stage: '面接確定' } : a
-      ),
-    }));
+    if (!client) return;
+    const operator = getClientOperatorLabel(client);
+    const ownerId = resolveDataOwnerId(client);
+    eventRepository.scheduleInterview(ownerId, applicant.id, event, {
+      operator,
+      reason: 'interview_scheduled',
+    });
+    reloadClientData();
   }
 
+  // H-4: 面接キャンセル経路を eventRepository.removeWithCancelRecord 経由に集約。
+  //  - events 削除 + applicant.cancelledInterviews append を 1 saveClientData にまとめて Repository 内で実施
+  //  - cancelledAt の生成（locale 文字列）も Repository 側に移動（既存挙動互換）
+  //  - stage / stageHistory / updatedAt は触らない（既存挙動互換）
+  //  - confirm modal の閉じ操作は呼出側で維持
+  //  - client 未取得時は no-op（modal だけ閉じる）
   function handleCancelEvent(eventId: number) {
-    const ev = events.find((e) => e.id === eventId);
-    updateClientData((data) => {
-      const cancelledEntry = ev ? {
-        date: ev.date,
-        start: ev.start,
-        end: ev.end,
-        base: ev.base,
-        method: ev.method || '',
-        cancelledAt: new Date().toLocaleString('ja-JP'),
-      } : null;
-      return {
-        ...data,
-        events: data.events.filter((e) => e.id !== eventId),
-        applicants: data.applicants.map((a) =>
-          a.id === applicant.id
-            ? {
-                ...a,
-                cancelledInterviews: cancelledEntry
-                  ? [...(a.cancelledInterviews || []), cancelledEntry]
-                  : (a.cancelledInterviews || []),
-              }
-            : a
-        ),
-      };
-    });
+    if (!client) {
+      setCancelConfirmEvent(null);
+      return;
+    }
+    const ownerId = resolveDataOwnerId(client);
+    eventRepository.removeWithCancelRecord(ownerId, eventId, applicant.id);
+    reloadClientData();
     setCancelConfirmEvent(null);
   }
 
+  // H-3: 再調整時の events 削除を eventRepository.remove 経由に集約。
+  //  - applicant 連動なし（stage / stageHistory / cancelledInterviews は触らない）
+  //  - 削除後は ScheduleInterviewModal を開いて再 schedule 入力に戻す既存フロー維持
+  //  - client 未取得時は no-op（更新不能状態でモーダルだけ開く事故を避ける）
   function handleReschedule(event: InterviewEvent) {
-    updateClientData((data) => ({
-      ...data,
-      events: data.events.filter((e) => e.id !== event.id),
-    }));
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    eventRepository.remove(ownerId, event.id);
+    reloadClientData();
     setScheduleDate('');
     setScheduleTime('');
     setScheduleOpen(true);
@@ -730,8 +1016,24 @@ const InfoTab: React.FC<InfoTabProps> = ({
                   </button>
                 </>
               )}
-              <button style={{ ...btnOrange, fontSize: '0.75rem', padding: '0.25rem 0.625rem' }} disabled>
-                SMS/メール送信
+              {/*
+                連絡ログ作成（ドライラン）。
+                実際の SMS/メール送信は行わず、連絡履歴に1件記録するだけ。
+                将来の mailer/smsr サービス連携時に、ここから外部送信を呼ぶ。
+              */}
+              <button
+                onClick={() => openDryRun('sms')}
+                title="実送信は行わず、連絡履歴に1件追加します"
+                style={{ ...btnSecondary, fontSize: '0.75rem', padding: '0.25rem 0.625rem' }}
+              >
+                SMSログ作成
+              </button>
+              <button
+                onClick={() => openDryRun('email')}
+                title="実送信は行わず、連絡履歴に1件追加します"
+                style={{ ...btnSecondary, fontSize: '0.75rem', padding: '0.25rem 0.625rem' }}
+              >
+                メールログ作成
               </button>
             </div>
           </div>
@@ -967,6 +1269,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
             </div>
           </div>
         </div>
+
+        {/* === Contact History Card (read-only) === */}
+        <ContactHistoryCard applicantId={applicant.id} clientDataKey={clientData} />
       </div>
 
       {/* RIGHT COLUMN - 40% */}
@@ -1326,6 +1631,88 @@ const InfoTab: React.FC<InfoTabProps> = ({
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
             <button onClick={() => setCancelConfirmEvent(null)} style={btnSecondary}>戻る</button>
             <button onClick={() => cancelConfirmEvent && handleCancelEvent(cancelConfirmEvent.id)} style={btnDanger}>キャンセルする</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 連絡ログ作成（ドライラン）モーダル */}
+      <Modal
+        isOpen={dryRunOpen}
+        onClose={() => { if (!dryRunSubmitting) setDryRunOpen(false); }}
+        title={dryRunChannel === 'email' ? 'メール連絡ログを作成' : 'SMS連絡ログを作成'}
+        width="480px"
+      >
+        <div>
+          <div
+            style={{
+              backgroundColor: '#FEF3C7',
+              color: '#92400E',
+              border: '1px solid #FDE68A',
+              borderRadius: '6px',
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.75rem',
+              marginBottom: '0.75rem',
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>実送信は行いません。</strong>
+            連絡履歴に下書き（draft）として1件追加するのみです。
+          </div>
+          {dryRunChannel === 'email' && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+                件名
+              </label>
+              <input
+                type="text"
+                value={dryRunSubject}
+                onChange={(e) => setDryRunSubject(e.target.value)}
+                placeholder="メール件名"
+                style={{ ...smallInputStyle, width: '100%' }}
+              />
+            </div>
+          )}
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+              本文プレビュー（任意）
+            </label>
+            <textarea
+              value={dryRunBody}
+              onChange={(e) => setDryRunBody(e.target.value)}
+              placeholder={dryRunChannel === 'email'
+                ? '本文の冒頭をメモしておけます（任意）。実際の本文は将来の送信サービスで管理します。'
+                : 'SMS本文の冒頭をメモしておけます（任意）。実際の送信は将来のサービスで行います。'}
+              rows={4}
+              style={{
+                ...smallInputStyle,
+                width: '100%',
+                resize: 'vertical',
+                fontFamily: 'inherit',
+              }}
+            />
+            <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.25rem' }}>
+              先頭 200 文字までを bodyPreview として保存します。
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setDryRunOpen(false)}
+              disabled={dryRunSubmitting}
+              style={btnSecondary}
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={handleDryRunCreate}
+              disabled={dryRunSubmitting}
+              style={{
+                ...btnOrange,
+                opacity: dryRunSubmitting ? 0.6 : 1,
+                cursor: dryRunSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {dryRunSubmitting ? '作成中...' : 'ログを作成'}
+            </button>
           </div>
         </div>
       </Modal>

@@ -61,18 +61,18 @@ export function getOptionRemaining(option: ClientOption | undefined): number | n
 }
 
 /**
- * 当月の使用回数を+1して storage に保存
+ * 当月の使用回数を+1して保存
  * 子アカウントは親側のオプションをカウントアップする
+ *
+ * M-7b: storage.getClients/saveClients 直叩きから clientRepository 経由に移行。
+ * password は ClientRepository.update が strip するため触られない (Password Case A)。
+ * dynamic import は AuthContext → clientOptions → repositories の起動順循環を避けるため維持。
  */
 export async function incrementOptionUsage(client: Client, key: ClientOptionKey): Promise<void> {
   const ownerId = resolveOptionOwnerId(client);
-  // dynamic import を避けるため呼び出し元で storage を渡す方式にしてもよいが、
-  // ここは依存を集約するため直接 import
-  const { storage } = await import('@/utils/storage');
-  const all = storage.getClients();
-  const idx = all.findIndex((c) => c.id === ownerId);
-  if (idx < 0) return;
-  const target = all[idx];
+  const { clientRepository } = await import('@/repositories');
+  const target = clientRepository.findById(ownerId);
+  if (!target) return;
   const opt: ClientOption = target.options?.[key]
     ? { ...target.options[key]! }
     : { key, status: 'active', usageByMonth: {} };
@@ -80,6 +80,7 @@ export async function incrementOptionUsage(client: Client, key: ClientOptionKey)
   const usage = { ...(opt.usageByMonth || {}) };
   usage[ym] = (usage[ym] || 0) + 1;
   opt.usageByMonth = usage;
-  all[idx] = { ...target, options: { ...(target.options || {}), [key]: opt } };
-  storage.saveClients(all);
+  clientRepository.update(ownerId, {
+    options: { ...(target.options || {}), [key]: opt },
+  });
 }

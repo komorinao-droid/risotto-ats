@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Copy, X } from 'lucide-react';
 import Modal from '@/components/Modal';
 import SearchableSelect from '@/components/SearchableSelect';
 import { useAuth } from '@/contexts/AuthContext';
@@ -6,6 +7,7 @@ import { warekiToDate } from '@/utils/wareki';
 import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
 import { resolveJobs, resolveSources } from '@/utils/baseScope';
+import { applicantRepository, resolveDataOwnerId } from '@/repositories';
 import type { Applicant, ClientData } from '@/types';
 
 interface AddApplicantModalProps {
@@ -46,7 +48,7 @@ const requiredMark: React.CSSProperties = {
 };
 
 const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }) => {
-  const { clientData, updateClientData, logAction, client } = useAuth();
+  const { clientData, updateClientData, reloadClientData, logAction, client } = useAuth();
   const isChild = client?.accountType === 'child';
   const lockedBaseName = isChild ? (client?.baseName || '') : '';
 
@@ -68,6 +70,11 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [exclusionAlert, setExclusionAlert] = useState('');
 
+  // 過去応募者からの複製（再応募用）
+  const [prefillOpen, setPrefillOpen] = useState(false);
+  const [prefillQuery, setPrefillQuery] = useState('');
+  const [prefilledFromName, setPrefilledFromName] = useState<string | null>(null);
+
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -88,6 +95,9 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       setNote('');
       setErrors({});
       setExclusionAlert('');
+      setPrefillOpen(false);
+      setPrefillQuery('');
+      setPrefilledFromName(null);
     }
   }, [isOpen, clientData]);
 
@@ -270,8 +280,8 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       chatAnswers: [],
     };
 
+    // 既存応募者の重複フラグだけは updateClientData 経由で更新（子アカウントのbase絞込ロジックを尊重）
     updateClientData((data) => {
-      // Also mark existing duplicates
       const updatedApplicants = data.applicants.map((a) => {
         if (
           (a.name === applicant.name && applicant.name) ||
@@ -281,8 +291,15 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         }
         return a;
       });
-      return { ...data, applicants: [...updatedApplicants, applicant] };
+      return { ...data, applicants: updatedApplicants };
     });
+
+    // 新規応募者は Repository 経由で作成。createdAt/updatedAt/stageChangedAt が自動付与される
+    if (client) {
+      const ownerId = resolveDataOwnerId(client);
+      applicantRepository.create(ownerId, applicant);
+      reloadClientData();
+    }
     logAction('applicant', '応募者追加', applicant.name || '(名前なし)', applicant.job || undefined);
 
     if (exclusionMsg) {
@@ -296,8 +313,144 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
     }
   };
 
+  // 過去応募者の検索候補（氏名/フリガナ/電話/メールで部分一致）
+  const prefillCandidates = useMemo(() => {
+    if (!clientData || !prefillQuery.trim()) return [];
+    const q = prefillQuery.trim().toLowerCase();
+    const qPhone = q.replace(/[-\s]/g, '');
+    // 同名複数応募の最新を上位にしたいので、id 降順でソート
+    const sorted = [...clientData.applicants].sort((a, b) => b.id - a.id);
+    const seen = new Set<string>();
+    const matched: Applicant[] = [];
+    for (const a of sorted) {
+      const phoneNorm = (a.phone || '').replace(/[-\s]/g, '');
+      const hit =
+        (a.name && a.name.toLowerCase().includes(q)) ||
+        (a.furigana && a.furigana.toLowerCase().includes(q)) ||
+        (a.email && a.email.toLowerCase().includes(q)) ||
+        (qPhone && phoneNorm && phoneNorm.includes(qPhone));
+      if (!hit) continue;
+      // 同一人物の重複表示を避けるため (氏名+電話) で uniq
+      const key = `${a.name}__${phoneNorm}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matched.push(a);
+      if (matched.length >= 8) break;
+    }
+    return matched;
+  }, [clientData, prefillQuery]);
+
+  const handlePrefill = (src: Applicant) => {
+    setName(src.name || '');
+    setFurigana(src.furigana || '');
+    setEmail(src.email || '');
+    setPhone(src.phone || '');
+    setBirthDateInput(src.birthDate || '');
+    setAge(src.age != null ? String(src.age) : '');
+    setAgeManual(true);
+    setGender(src.gender || '');
+    setCurrentJob(src.currentJob || '');
+    // 応募固有フィールド (date/job/src/stage/base/note) は新規入力扱いで触らない
+    setPrefilledFromName(src.name || '(名前なし)');
+    setPrefillOpen(false);
+    setPrefillQuery('');
+    setErrors({});
+  };
+
+  const clearPrefill = () => {
+    setName('');
+    setFurigana('');
+    setEmail('');
+    setPhone('');
+    setBirthDateInput('');
+    setAge('');
+    setAgeManual(false);
+    setGender('');
+    setCurrentJob('');
+    setPrefilledFromName(null);
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="応募者を追加" width="680px">
+      {/* 過去応募者から複製（再応募） */}
+      <div style={{ marginBottom: '0.875rem', padding: '0.625rem 0.75rem', backgroundColor: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: '6px' }}>
+        {!prefillOpen && !prefilledFromName && (
+          <button
+            type="button"
+            onClick={() => setPrefillOpen(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', padding: '0.25rem 0.5rem', border: 'none', backgroundColor: 'transparent', color: '#374151', fontSize: '0.8125rem', cursor: 'pointer' }}
+            title="過去に登録済みの応募者から個人情報をコピーして再応募として登録します"
+          >
+            <Copy size={14} />
+            過去応募者から複製
+          </button>
+        )}
+
+        {prefillOpen && !prefilledFromName && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.375rem' }}>
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151' }}>過去応募者を検索（氏名・フリガナ・電話・メール）</span>
+              <button
+                type="button"
+                onClick={() => { setPrefillOpen(false); setPrefillQuery(''); }}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#6B7280', display: 'inline-flex', alignItems: 'center' }}
+                aria-label="検索を閉じる"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={prefillQuery}
+              onChange={(e) => setPrefillQuery(e.target.value)}
+              placeholder="例: 山田 / ヤマダ / 09012345678"
+              autoFocus
+              style={inputStyle}
+            />
+            {prefillQuery.trim() && (
+              <div style={{ marginTop: '0.5rem', maxHeight: '220px', overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: '6px', backgroundColor: '#fff' }}>
+                {prefillCandidates.length === 0 ? (
+                  <div style={{ padding: '0.625rem 0.75rem', fontSize: '0.8125rem', color: '#9CA3AF' }}>該当なし</div>
+                ) : (
+                  prefillCandidates.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handlePrefill(c)}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.5rem 0.75rem', border: 'none', borderBottom: '1px solid #F3F4F6', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.8125rem' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F9FAFB')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#fff')}
+                    >
+                      <div style={{ fontWeight: 600, color: '#111827' }}>
+                        {c.name || '(名前なし)'} <span style={{ fontWeight: 400, color: '#6B7280', fontSize: '0.75rem' }}>{c.furigana ? `（${c.furigana}）` : ''}</span>
+                      </div>
+                      <div style={{ color: '#6B7280', fontSize: '0.75rem', marginTop: '0.125rem' }}>
+                        {[c.phone, c.email, c.date && `前回応募: ${c.date}`, c.job].filter(Boolean).join(' / ')}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {prefilledFromName && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.8125rem', color: '#1F2937' }}>
+            <span>
+              <strong>{prefilledFromName}</strong> さんの過去情報を複製しました（応募日・職種・媒体・ステータス・拠点は新規入力）
+            </span>
+            <button
+              type="button"
+              onClick={clearPrefill}
+              style={{ border: '1px solid #D1D5DB', backgroundColor: '#fff', borderRadius: '4px', padding: '0.125rem 0.5rem', fontSize: '0.75rem', color: '#374151', cursor: 'pointer' }}
+            >
+              クリア
+            </button>
+          </div>
+        )}
+      </div>
+
       {exclusionAlert && (
         <div
           style={{

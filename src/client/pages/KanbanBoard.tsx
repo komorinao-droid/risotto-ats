@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Applicant, ClientData } from '@/types';
+import { applicantRepository, resolveDataOwnerId } from '@/repositories';
+import { getClientOperatorLabel } from '@/utils/clientOperator';
+import type { Applicant } from '@/types';
 
 /* ============================
    KanbanBoard - カンバンボード
@@ -44,7 +46,7 @@ function applicantMatchesMonth(a: Applicant, ym: string): boolean {
 // ---------- component ----------
 
 const KanbanBoard: React.FC = () => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [monthFilter, setMonthFilter] = useState('');
   const [dragApplicantId, setDragApplicantId] = useState<number | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
@@ -137,17 +139,19 @@ const KanbanBoard: React.FC = () => {
       const idStr = e.dataTransfer.getData('text/plain');
       const applicantId = Number(idStr);
       if (!applicantId) return;
-
-      updateClientData((data: ClientData) => {
-        const idx = data.applicants.findIndex((a) => a.id === applicantId);
-        if (idx === -1) return data;
-        if (data.applicants[idx].stage === targetStatus) return data;
-        const updated = [...data.applicants];
-        updated[idx] = { ...updated[idx], stage: targetStatus };
-        return { ...data, applicants: updated };
-      });
+      if (!client || !clientData) return;
+      const target = clientData.applicants.find((a) => a.id === applicantId);
+      if (!target) return;
+      if (target.stage === targetStatus) return;
+      // Repository 経由で stage / stageChangedAt / stageHistory / updatedAt を一括更新。
+      // ApplicantDetail / ApplicantList と同じ operator フォーマットで stageHistory に積む。
+      const operator = getClientOperatorLabel(client);
+      const ownerId = resolveDataOwnerId(client);
+      const updated = applicantRepository.changeStage(ownerId, applicantId, targetStatus, { operator, reason: 'manual_single' });
+      if (!updated) return;
+      reloadClientData();
     },
-    [updateClientData]
+    [client, clientData, reloadClientData]
   );
 
   if (!clientData) {

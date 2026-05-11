@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { ExclusionEntry } from '@/types';
 import Modal from '@/components/Modal';
+import { applicantRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
+import { getClientOperatorLabel } from '@/utils/clientOperator';
 
 const PAGE_SIZE = 30;
 
@@ -32,7 +34,7 @@ const typeLabels: Record<ExclusionEntry['type'], string> = {
 };
 
 const ExclusionList: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, updateClientData, client, reloadClientData } = useAuth();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<{ email: boolean; phone: boolean; name_birth: boolean }>({
     email: true,
@@ -110,36 +112,42 @@ const ExclusionList: React.FC = () => {
       return;
     }
 
-    let matchCount = 0;
-
+    // Step 1: exclusionList へのエントリ追加のみ（applicants には触らない）
     updateClientData((data) => {
       const maxId = data.exclusionList.reduce((m, e) => Math.max(m, e.id), 0);
       const newEntry: ExclusionEntry = { id: maxId + 1, ...entry };
-
-      // Check existing applicants for matches
-      const updatedApplicants = data.applicants.map((a) => {
-        let matches = false;
-        if (formType === 'email' && a.email === entry.email) matches = true;
-        if (formType === 'phone' && a.phone === entry.phone) matches = true;
-        if (formType === 'name_birth' && a.name === entry.name && a.birthDate === entry.birthDate) matches = true;
-
-        if (matches && a.active) {
-          matchCount++;
-          return {
-            ...a,
-            stage: excludeStatus?.name || '対象外',
-            active: false,
-          };
-        }
-        return a;
-      });
-
       return {
         ...data,
         exclusionList: [...data.exclusionList, newEntry],
-        applicants: updatedApplicants,
       };
     });
+
+    // Step 2: 該当 applicants は changeStageBulk 経由で履歴を残しつつ一括除外
+    let matchCount = 0;
+    if (client) {
+      const matched = (clientData?.applicants || []).filter((a) => {
+        if (!a.active) return false;
+        if (formType === 'email' && a.email === entry.email) return true;
+        if (formType === 'phone' && a.phone === entry.phone) return true;
+        if (formType === 'name_birth' && a.name === entry.name && a.birthDate === entry.birthDate) return true;
+        return false;
+      });
+      if (matched.length > 0) {
+        const ownerId = resolveDataOwnerId(client);
+        const toStageName = excludeStatus?.name || '対象外';
+        const patches: BulkStageChangePatch[] = matched.map((a) => ({
+          applicantId: a.id,
+          toStage: toStageName,
+          patch: { active: false },
+        }));
+        const result = applicantRepository.changeStageBulk(ownerId, patches, {
+          operator: getClientOperatorLabel(client),
+          reason: 'exclusion_list_applied',
+        });
+        matchCount = result.updatedCount;
+        reloadClientData();
+      }
+    }
 
     setAddResult(
       matchCount > 0

@@ -1,0 +1,70 @@
+/**
+ * Repository シングルトン エクスポート
+ *
+ * 使い方:
+ *   import { clientRepository, clientDataRepository, reportRepository } from '@/repositories';
+ *
+ * 将来:
+ *   バックエンドを差し替える時はここで実装クラスを切り替えるだけで済む。
+ *   例) Firestore 移行時:
+ *     export const clientRepository = new FirestoreClientRepository();
+ *
+ * Phase 1 では AuthContext / RecruitmentReport の参照箇所のみが利用する。
+ * 他画面は引き続き storage.ts を直接使う（段階移行）。
+ */
+import { LocalStorageClientRepository } from './localStorage/clientRepository';
+import { LocalStorageClientDataRepository } from './localStorage/clientDataRepository';
+import { LocalStorageReportRepository } from './localStorage/reportRepository';
+import { LocalStorageApplicantRepository } from './localStorage/applicantRepository';
+import { LocalStorageMessageRepository } from './localStorage/messageRepository';
+import { LocalStorageStatusRepository } from './localStorage/statusRepository';
+import { LocalStorageEventRepository } from './localStorage/eventRepository';
+import { LocalStorageSlotRepository } from './localStorage/slotRepository';
+import { LocalStorageBaseRepository } from './localStorage/baseRepository';
+import type { Client } from '@/types';
+
+export const clientRepository = new LocalStorageClientRepository();
+export const clientDataRepository = new LocalStorageClientDataRepository();
+export const reportRepository = new LocalStorageReportRepository();
+export const applicantRepository = new LocalStorageApplicantRepository();
+export const messageRepository = new LocalStorageMessageRepository();
+export const statusRepository = new LocalStorageStatusRepository();
+export const eventRepository = new LocalStorageEventRepository();
+export const slotRepository = new LocalStorageSlotRepository();
+export const baseRepository = new LocalStorageBaseRepository();
+
+/**
+ * 子アカウントの場合は親clientId に変換するヘルパ。
+ * 現状 AuthContext / RecruitmentReport の両方で同じロジックが重複していたため集約。
+ */
+export function resolveDataOwnerId(client: Pick<Client, 'id' | 'accountType' | 'parentId'>): string {
+  return client.accountType === 'child' && client.parentId ? client.parentId : client.id;
+}
+
+export type {
+  ClientRepository,
+  ClientDataRepository,
+  ReportRepository,
+  ApplicantRepository,
+  MessageRepository,
+  StatusRepository,
+  EventRepository,
+  SlotRepository,
+  BaseRepository,
+  DeleteBaseCascadeResult,
+  BulkStageChangePatch,
+  BulkStageChangeOptions,
+  BulkStageChangeResult,
+  ClearStageForDeletedStatusResult,
+  DeleteApplicantResult,
+  DeleteClientResult,
+  DetachChildBaseNameResult,
+  ListEventsByDateRangeParams,
+  RemoveEventResult,
+  RemoveWithCancelRecordResult,
+  ScheduleInterviewResult,
+  SlotDayCapacity,
+  SlotBulkPatch,
+  BulkSetCapacityResult,
+  RemoveBaseSlotsResult,
+} from './types';

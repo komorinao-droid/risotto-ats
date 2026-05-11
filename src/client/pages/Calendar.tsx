@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ChevronDown, Pencil } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { eventRepository, slotRepository, baseRepository, resolveDataOwnerId } from '@/repositories';
 import { formatDate, dayOfWeekJP, timeToMinutes, minutesToTime } from '@/utils/date';
 import type { InterviewEvent, Base, SlotSetting, Applicant } from '@/types';
 import Modal from '@/components/Modal';
@@ -640,7 +641,7 @@ const EventDetailModal: React.FC<{
 
 // ── メインコンポーネント ──
 const Calendar: React.FC = () => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, client, reloadClientData } = useAuth();
 
   // 週の基準日
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()));
@@ -683,13 +684,21 @@ const Calendar: React.FC = () => {
   }, [bases]);
 
   // 設定保存
+  // L-2: bases 直書き → baseRepository.update。slotInterval / startTime / endTime のみ patch する
+  // （他フィールドは触らない既存挙動互換）。同値時 baseRepository は saveClientData を呼ばないため
+  //  reload も不要だが、画面側状態と整合させるため呼出後 reloadClientData する
   const saveBaseSettings = useCallback((interval: number, start: string, end: string) => {
-    if (!selectedBase) return;
-    updateClientData(data => ({
-      ...data,
-      bases: data.bases.map(b => b.name === selectedBase ? { ...b, slotInterval: interval, startTime: start, endTime: end } : b),
-    }));
-  }, [selectedBase, updateClientData]);
+    if (!selectedBase || !client) return;
+    const target = bases.find(b => b.name === selectedBase);
+    if (!target) return;
+    const ownerId = resolveDataOwnerId(client);
+    baseRepository.update(ownerId, target.id, {
+      slotInterval: interval,
+      startTime: start,
+      endTime: end,
+    });
+    reloadClientData();
+  }, [selectedBase, client, bases, reloadClientData]);
 
   const handleIntervalChange = (v: number) => { setSlotInterval(v); saveBaseSettings(v, startTime, endTime); };
   const handleStartChange = (v: string) => { setStartTime(v); saveBaseSettings(slotInterval, v, endTime); };
@@ -720,17 +729,16 @@ const Calendar: React.FC = () => {
 
   const getBookedCount = (dateStr: string, timeStr: string) => getEventsAt(dateStr, timeStr).length;
 
-  // 枠操作
+  // 枠操作（K-2: slotRepository.setCapacity 経由に集約。
+  //  - 同値書込時は Repository 側で saveClientData が抑制される（無駄な書込防止）
+  //  - applyCapacityEdit / toggleSlot / drag 操作は引き続きこの setSlotCapacity を呼ぶ
+  //  - selectedBase / client が無い場合は no-op）
   const setSlotCapacity = useCallback((dateStr: string, timeStr: string, capacity: number) => {
-    updateClientData(data => {
-      const ss = { ...data.slotSettings };
-      if (!ss[selectedBase]) ss[selectedBase] = {};
-      const dateSlots = { ...ss[selectedBase][dateStr] };
-      dateSlots[timeStr] = capacity;
-      ss[selectedBase] = { ...ss[selectedBase], [dateStr]: dateSlots };
-      return { ...data, slotSettings: ss };
-    });
-  }, [selectedBase, updateClientData]);
+    if (!client || !selectedBase) return;
+    const ownerId = resolveDataOwnerId(client);
+    slotRepository.setCapacity(ownerId, selectedBase, dateStr, timeStr, capacity);
+    reloadClientData();
+  }, [client, selectedBase, reloadClientData]);
 
   const toggleSlot = useCallback((dateStr: string, timeStr: string) => {
     const current = getCapacity(dateStr, timeStr);
@@ -782,49 +790,61 @@ const Calendar: React.FC = () => {
     dragRef.current = false;
   }, []);
 
-  // 一括操作
+  // 一括操作（K-3: slotRepository.bulkSetCapacity 経由に集約。
+  //  - weekdaysOnly の判定は Calendar 側で行い、対象 date のみ cells に積む
+  //  - 既存実装と同じく「対象日 × timeSlots」を全て capacity で上書きする
+  //    （既存日に他時刻のエントリがあれば Repository 側 shallow merge で保持される）
+  //  - cells が空 / 全セル同値なら Repository 側で saveClientData 抑制される
+  //  - client / selectedBase 不在時は no-op）
   const bulkSetAllSlots = (capacity: number, weekdaysOnly: boolean) => {
-    updateClientData(data => {
-      const ss = { ...data.slotSettings };
-      if (!ss[selectedBase]) ss[selectedBase] = {};
-      weekDates.forEach(dt => {
-        if (weekdaysOnly && isWeekend(dt)) return;
-        const dateStr = formatDate(dt);
-        const dateSlots: Record<string, number> = {};
-        timeSlots.forEach(ts => { dateSlots[ts] = capacity; });
-        ss[selectedBase] = { ...ss[selectedBase], [dateStr]: { ...ss[selectedBase][dateStr], ...dateSlots } };
-      });
-      return { ...data, slotSettings: ss };
+    if (!client || !selectedBase) return;
+    const cells = weekDates.flatMap(dt => {
+      if (weekdaysOnly && isWeekend(dt)) return [];
+      const dateStr = formatDate(dt);
+      return timeSlots.map(ts => ({ date: dateStr, time: ts, capacity }));
     });
+    if (cells.length === 0) return;
+    const ownerId = resolveDataOwnerId(client);
+    slotRepository.bulkSetCapacity(ownerId, selectedBase, cells);
+    reloadClientData();
   };
 
+  // K-4: slotRepository.bulkSetCapacity 経由に集約。
+  //  - 引数 dates × timeSlots を SlotBulkPatch[] に展開
+  //  - 既存日に他時刻のエントリがあれば Repository 側 shallow merge で保持される
+  //  - cells が空 / 全セル同値なら Repository 側で saveClientData 抑制される
+  //  - client / selectedBase 不在時、dates 空配列時は no-op
+  //  - ダイアログ開閉・選択状態リセット等は呼出側 (BulkApplyModal) の責務として維持
   const handleBulkApply = (dates: string[], capacity: number) => {
-    updateClientData(data => {
-      const ss = { ...data.slotSettings };
-      if (!ss[selectedBase]) ss[selectedBase] = {};
-      dates.forEach(dateStr => {
-        const dateSlots: Record<string, number> = {};
-        timeSlots.forEach(ts => { dateSlots[ts] = capacity; });
-        ss[selectedBase] = { ...ss[selectedBase], [dateStr]: { ...ss[selectedBase][dateStr], ...dateSlots } };
-      });
-      return { ...data, slotSettings: ss };
-    });
+    if (!client || !selectedBase) return;
+    if (dates.length === 0) return;
+    const cells = dates.flatMap(dateStr =>
+      timeSlots.map(ts => ({ date: dateStr, time: ts, capacity })),
+    );
+    if (cells.length === 0) return;
+    const ownerId = resolveDataOwnerId(client);
+    slotRepository.bulkSetCapacity(ownerId, selectedBase, cells);
+    reloadClientData();
   };
 
-  // 予約
+  // 予約（H-2: eventRepository.create 経由に集約。
+  //  - id 採番は Repository 内部で max+1 を行う（既存ロジック互換）
+  //  - applicant の stage / cancelledInterviews は触らない（既存挙動どおり）
+  //  - slotSettings は触らない）
   const handleBook = (ev: Omit<InterviewEvent, 'id'>) => {
-    updateClientData(data => {
-      const maxId = data.events.reduce((mx, e) => Math.max(mx, e.id), 0);
-      return { ...data, events: [...data.events, { ...ev, id: maxId + 1 }] };
-    });
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    eventRepository.create(ownerId, ev);
+    reloadClientData();
   };
 
-  // イベント削除
+  // イベント削除（H-2: eventRepository.remove 経由に集約。
+  //  - applicant 連動なしの単純削除のみ。Repository 内部で該当なしなら no-op）
   const handleCancelEvent = (id: number) => {
-    updateClientData(data => ({
-      ...data,
-      events: data.events.filter(e => e.id !== id),
-    }));
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    eventRepository.remove(ownerId, id);
+    reloadClientData();
   };
 
   // ナビゲーション

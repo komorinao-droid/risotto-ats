@@ -115,6 +115,16 @@ export interface LeadTimeStats {
   minDays: number;
   /** 最遅 */
   maxDays: number;
+  /**
+   * stageHistory の実履歴のみで算出できた件数（データ品質バッジ用）。
+   * 後方互換のため optional。`historyBasedCount + estimatedCount === count` を満たす。
+   */
+  historyBasedCount?: number;
+  /**
+   * stageChangedAt / createdAt / date / InterviewEvent などの推定フォールバックで
+   * 算出した件数。後方互換のため optional。
+   */
+  estimatedCount?: number;
 }
 
 export interface LeadTimeColumn {

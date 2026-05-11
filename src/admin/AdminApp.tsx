@@ -46,6 +46,8 @@ import {
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
 import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, fetchNotificationLogs, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags, type NotificationLogEntry, type NotificationType } from './adminApi';
 import { storage } from '@/utils/storage';
+import { clientRepository } from '@/repositories';
+import { authService } from '@/services/auth';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog, InvoiceLog, InvoiceLine } from '@/types';
 import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
@@ -3261,7 +3263,9 @@ const ClientFormModal: React.FC<{
     if (!form.companyName.trim()) e.companyName = '会社名は必須です';
     if (!form.id.trim()) e.id = 'クライアントIDは必須です';
     else if (!isEdit && clients.some(c => c.id === form.id)) e.id = 'このIDは既に使用されています';
-    if (!form.password.trim()) e.password = 'パスワードは必須です';
+    // I-5: Client.password を optional 化したため form.password も undefined 可。
+    // 管理画面のクライアント新規作成/編集フォームでは必須入力なので空 / undefined をエラー扱い。
+    if (!form.password || !form.password.trim()) e.password = 'パスワードは必須です';
     else if (form.password.length < 6) e.password = 'パスワードは6文字以上で入力してください';
     if (form.accountType === 'child' && !form.parentId) e.parentId = '親アカウントを選択してください';
     // 自己参照禁止：parentId が自分自身を指していると本部リストから親が消える致命バグになる
@@ -4038,14 +4042,125 @@ const ContractPage: React.FC<{
 /* ============================================================
    初期データ設定
    ============================================================ */
-const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
+const InitDataPage: React.FC<{
+  clients: Client[];
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ clients, onLog }) => {
   const [srcId, setSrcId] = useState('');
   const [dstIds, setDstIds] = useState<string[]>([]);
   const [copyItems, setCopyItems] = useState({ statuses: true, sources: true, bases: true, jobs: true, hearingItems: true, mailTemplates: false, filterConditions: false });
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // ===== 応募者コピー (運営限定・検証/デモ用途) =====
+  const [appSrcId, setAppSrcId] = useState('');
+  const [appDstId, setAppDstId] = useState('');
+  const [appPeriodFrom, setAppPeriodFrom] = useState('');
+  const [appPeriodTo, setAppPeriodTo] = useState('');
+  const [appFilterStage, setAppFilterStage] = useState('');
+  const [appFilterBase, setAppFilterBase] = useState('');
+  const [appFilterSource, setAppFilterSource] = useState('');
+  const [appLimit, setAppLimit] = useState(100);
+  const [appMask, setAppMask] = useState(true);
+  const [appConfirmed, setAppConfirmed] = useState(false);
+  const [appResult, setAppResult] = useState<string | null>(null);
+  const [appError, setAppError] = useState<string | null>(null);
+  const [appPreviewCount, setAppPreviewCount] = useState<number | null>(null);
+
   const parents = clients.filter(c => c.accountType === 'parent');
+
+  // コピー元データの読み込み（プレビュー件数算出用）
+  const loadAppData = (id: string): ClientData | null => {
+    try {
+      const raw = localStorage.getItem(`hireflow:client:${id}:data`);
+      return raw ? (JSON.parse(raw) as ClientData) : null;
+    } catch { return null; }
+  };
+
+  const filteredApplicants = (data: ClientData | null) => {
+    if (!data?.applicants) return [];
+    let list = [...data.applicants];
+    if (appPeriodFrom) list = list.filter(a => a.date && a.date >= appPeriodFrom);
+    if (appPeriodTo) list = list.filter(a => a.date && a.date <= appPeriodTo);
+    if (appFilterStage) list = list.filter(a => a.stage === appFilterStage);
+    if (appFilterBase) list = list.filter(a => a.base === appFilterBase);
+    if (appFilterSource) list = list.filter(a => a.src === appFilterSource);
+    return list.slice(0, Math.min(appLimit, 1000));
+  };
+
+  // srcId 変更時に件数プレビュー
+  useEffect(() => {
+    if (!appSrcId) { setAppPreviewCount(null); return; }
+    const d = loadAppData(appSrcId);
+    setAppPreviewCount(filteredApplicants(d).length);
+    setAppConfirmed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSrcId, appPeriodFrom, appPeriodTo, appFilterStage, appFilterBase, appFilterSource, appLimit]);
+
+  // コピー元の選択肢収集（フィルタ用 stage/base/source）
+  const appSrcData = appSrcId ? loadAppData(appSrcId) : null;
+  const stageOptions = Array.from(new Set((appSrcData?.applicants || []).map(a => a.stage).filter(Boolean)));
+  const baseOptions = Array.from(new Set((appSrcData?.applicants || []).map(a => a.base).filter(Boolean)));
+  const sourceOptions = Array.from(new Set((appSrcData?.applicants || []).map(a => a.src).filter(Boolean)));
+
+  const maskApplicant = (a: import('@/types').Applicant, idx: number): import('@/types').Applicant => {
+    if (!appMask) return a;
+    const tag = String(idx + 1).padStart(3, '0');
+    return {
+      ...a,
+      name: `応募者-${tag}`,
+      furigana: `オウボシャ-${tag}`,
+      email: `masked-${tag}@example.invalid`,
+      phone: '',
+      birthDate: '',
+      // age はそのまま保持
+      note: '',
+      actionMemo: '',
+    };
+  };
+
+  const handleAppExecute = () => {
+    setAppResult(null); setAppError(null);
+    if (!appSrcId) { setAppError('コピー元クライアントを選択してください'); return; }
+    if (!appDstId) { setAppError('コピー先クライアントを選択してください'); return; }
+    if (appSrcId === appDstId) { setAppError('コピー元とコピー先が同一です'); return; }
+    if (!appConfirmed) { setAppError('内容を確認してチェックを入れてください'); return; }
+
+    const srcData = loadAppData(appSrcId);
+    if (!srcData) { setAppError('コピー元のデータが見つかりません'); return; }
+    const dstData = loadAppData(appDstId);
+    if (!dstData) { setAppError('コピー先のデータが見つかりません'); return; }
+
+    const picked = filteredApplicants(srcData);
+    if (picked.length === 0) { setAppError('コピー対象の応募者がいません'); return; }
+
+    // 採番: コピー先の現行 max id + 1 から連番
+    const existingIds = (dstData.applicants || []).map(a => Number(a.id) || 0);
+    const baseId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+
+    const transformed = picked.map((a, i) => {
+      const masked = maskApplicant(a, i);
+      return { ...masked, id: baseId + i };
+    });
+
+    const updated: ClientData = {
+      ...dstData,
+      applicants: [...(dstData.applicants || []), ...transformed],
+    };
+
+    try {
+      localStorage.setItem(`hireflow:client:${appDstId}:data`, JSON.stringify(updated));
+    } catch (e) {
+      setAppError('保存に失敗しました（容量上限の可能性）');
+      return;
+    }
+
+    const srcName = parents.find(c => c.id === appSrcId)?.companyName || appSrcId;
+    const dstName = parents.find(c => c.id === appDstId)?.companyName || appDstId;
+    setAppResult(`${dstName} に ${transformed.length} 件の応募者を追加しました（マスキング: ${appMask ? 'ON' : 'OFF'}）`);
+    onLog?.('応募者データコピー', dstName, `元: ${srcName} / 件数: ${transformed.length} / マスキング: ${appMask ? 'ON' : 'OFF'}${appPeriodFrom || appPeriodTo ? ` / 期間: ${appPeriodFrom || '*'}〜${appPeriodTo || '*'}` : ''}${appFilterStage ? ` / ステージ: ${appFilterStage}` : ''}${appFilterBase ? ` / 拠点: ${appFilterBase}` : ''}${appFilterSource ? ` / 媒体: ${appFilterSource}` : ''}`);
+    setAppConfirmed(false);
+  };
 
   const toggleDst = (id: string) => {
     setDstIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -4174,6 +4289,118 @@ const InitDataPage: React.FC<{ clients: Client[] }> = ({ clients }) => {
         >
           コピー実行
         </button>
+      </div>
+
+      {/* ====== 応募者データコピー（検証/デモ用） ====== */}
+      <div style={{ marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '2px dashed #E5E7EB' }}>
+        <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.125rem', fontWeight: 700, color: '#111827' }}>応募者データコピー</h2>
+        <p style={{ margin: '0 0 1rem', fontSize: '0.8125rem', color: '#6b7280' }}>
+          既存クライアントの応募者データを別クライアントへ複製します。検証・デモ・テスト用途を想定しています。<strong style={{ color: '#DC2626' }}>個人情報の取扱いに注意</strong>。
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          {/* コピー元 */}
+          <div style={{ ...cardStyle, padding: '1rem' }}>
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.875rem', fontWeight: 600 }}>コピー元クライアント</h3>
+            <select aria-label="応募者コピー元クライアント" value={appSrcId} onChange={e => setAppSrcId(e.target.value)} style={inputStyle}>
+              <option value="">選択してください</option>
+              {parents.map(c => <option key={c.id} value={c.id}>{c.companyName} ({c.id})</option>)}
+            </select>
+          </div>
+          {/* コピー先 */}
+          <div style={{ ...cardStyle, padding: '1rem' }}>
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.875rem', fontWeight: 600 }}>コピー先クライアント</h3>
+            <select aria-label="応募者コピー先クライアント" value={appDstId} onChange={e => setAppDstId(e.target.value)} style={inputStyle}>
+              <option value="">選択してください</option>
+              {parents.filter(c => c.id !== appSrcId).map(c => <option key={c.id} value={c.id}>{c.companyName} ({c.id})</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* 抽出条件 */}
+        <div style={{ ...cardStyle, padding: '1rem', marginTop: '1rem' }}>
+          <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', fontWeight: 600 }}>抽出条件</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              応募日 FROM
+              <input type="date" value={appPeriodFrom} onChange={e => setAppPeriodFrom(e.target.value)} style={{ ...inputStyle, marginTop: '0.25rem' }} />
+            </label>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              応募日 TO
+              <input type="date" value={appPeriodTo} onChange={e => setAppPeriodTo(e.target.value)} style={{ ...inputStyle, marginTop: '0.25rem' }} />
+            </label>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              ステージ
+              <select value={appFilterStage} onChange={e => setAppFilterStage(e.target.value)} style={{ ...inputStyle, marginTop: '0.25rem' }}>
+                <option value="">すべて</option>
+                {stageOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              拠点
+              <select value={appFilterBase} onChange={e => setAppFilterBase(e.target.value)} style={{ ...inputStyle, marginTop: '0.25rem' }}>
+                <option value="">すべて</option>
+                {baseOptions.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              応募媒体
+              <select value={appFilterSource} onChange={e => setAppFilterSource(e.target.value)} style={{ ...inputStyle, marginTop: '0.25rem' }}>
+                <option value="">すべて</option>
+                {sourceOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'block', fontSize: '0.8125rem', color: '#374151' }}>
+              上限件数（最大1000）
+              <input type="number" min={1} max={1000} value={appLimit} onChange={e => setAppLimit(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))} style={{ ...inputStyle, marginTop: '0.25rem' }} />
+            </label>
+          </div>
+          {appPreviewCount !== null && (
+            <div style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: appPreviewCount === 0 ? '#DC2626' : '#059669' }}>
+              抽出対象: <strong>{appPreviewCount}</strong> 件
+            </div>
+          )}
+        </div>
+
+        {/* マスキング & 確認 */}
+        <div style={{ ...cardStyle, padding: '1rem', marginTop: '1rem', backgroundColor: appMask ? '#F0FDF4' : '#FEF2F2', borderColor: appMask ? '#86EFAC' : '#FCA5A5' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer' }}>
+            <input type="checkbox" checked={appMask} onChange={e => { setAppMask(e.target.checked); setAppConfirmed(false); }} />
+            個人情報をマスキングする（推奨）
+          </label>
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#6b7280', lineHeight: 1.5 }}>
+            ON: 氏名→「応募者-XXX」、フリガナ→「オウボシャ-XXX」、メール→「masked-XXX@example.invalid」、電話/生年月日→空、メモ→空。年齢は保持。<br />
+            OFF: <strong style={{ color: '#DC2626' }}>個人情報を実データのままコピーします</strong>。法務・コンプライアンス確認の上で使用してください。
+          </p>
+        </div>
+
+        {appError && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', color: '#DC2626', borderRadius: '6px', fontSize: '0.875rem' }}>{appError}</div>}
+        {appResult && <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#F0FDF4', color: '#059669', borderRadius: '6px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}><Check size={14} strokeWidth={3} /> {appResult}</div>}
+
+        <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: '6px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={appConfirmed} onChange={e => setAppConfirmed(e.target.checked)} style={{ marginTop: '0.125rem' }} />
+            <span>
+              上記の条件で <strong>{appPreviewCount ?? 0} 件</strong> の応募者を <strong>{parents.find(c => c.id === appDstId)?.companyName || '未選択'}</strong> へ追加することを確認しました
+              {!appMask && <span style={{ color: '#DC2626', fontWeight: 600 }}>（マスキングOFF: 個人情報そのまま）</span>}
+            </span>
+          </label>
+        </div>
+
+        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleAppExecute}
+            disabled={!appConfirmed || !appSrcId || !appDstId || (appPreviewCount ?? 0) === 0}
+            aria-disabled={!appConfirmed || !appSrcId || !appDstId || (appPreviewCount ?? 0) === 0}
+            style={{
+              ...btnPrimary,
+              opacity: (!appConfirmed || !appSrcId || !appDstId || (appPreviewCount ?? 0) === 0) ? 0.5 : 1,
+              cursor: (!appConfirmed || !appSrcId || !appDstId || (appPreviewCount ?? 0) === 0) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            応募者をコピー実行
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -4935,18 +5162,20 @@ const AdminApp: React.FC = () => {
   const isSuper = currentAccount?.role === 'super';
 
   // クライアント読み込み
+  // M-4: 読み取り経路を clientRepository.list() に寄せる。
+  // write 経路 (saveAndReload / handleDelete の clientData / :logs クリア / invoices)
+  // は M-5 以降で順次 Repository / authService に移す予定。
   const loadClients = useCallback(() => {
-    setClients(storage.getClients());
+    setClients(clientRepository.list());
   }, []);
 
   useEffect(() => {
     if (isLoggedIn) loadClients();
   }, [isLoggedIn, loadClients]);
 
-  const saveAndReload = (updated: Client[]) => {
-    storage.saveClients(updated);
-    setClients(updated);
-  };
+  // M-7a: saveAndReload は M-5a 〜 M-7a で全 callsite が Repository / authService 経由に
+  //   移管され未使用になったため削除。各ハンドラは個別に
+  //   `setClients(clientRepository.list())` で state を再フェッチする。
 
   // ナビゲーション
   const navigate = (view: string, id?: string) => {
@@ -4987,17 +5216,20 @@ const AdminApp: React.FC = () => {
   }, [currentAccount]);
 
   // 保存
+  // M-5b: clientRepository.create / update 経由に置換。
+  //   - 新規: create(client) — password はモーダルで設定された初期値が書かれる
+  //   - 編集: update(id, client) — update 側で id / password を strip するため
+  //           既存パスワードは保持される（password 変更は handleUpdatePassword 経由のみ）
+  //   - 親 companyName 変更時の子追従は listChildren + update を順次呼ぶ
+  //     （LocalStorage では同期。Firestore 化時は batch / runTransaction 候補）
   const handleSave = (client: Client) => {
-    let updated: Client[];
-    const existing = clients.findIndex(c => c.id === client.id);
-    const isNew = existing < 0;
-    const previous = existing >= 0 ? clients[existing] : null;
+    const previous = clientRepository.findById(client.id);
+    const isNew = !previous;
 
-    if (existing >= 0) {
-      updated = [...clients];
-      updated[existing] = client;
+    if (isNew) {
+      clientRepository.create(client);
     } else {
-      updated = [...clients, client];
+      clientRepository.update(client.id, client);
     }
 
     // 本部の会社名が変わった場合、子アカウントの companyName も追従させる
@@ -5008,14 +5240,13 @@ const AdminApp: React.FC = () => {
       client.accountType === 'parent' &&
       previous.companyName !== client.companyName
     ) {
-      updated = updated.map((c) =>
-        c.accountType === 'child' && c.parentId === client.id
-          ? { ...c, companyName: client.companyName }
-          : c
-      );
+      const children = clientRepository.listChildren(client.id);
+      for (const child of children) {
+        clientRepository.update(child.id, { companyName: client.companyName });
+      }
     }
 
-    saveAndReload(updated);
+    setClients(clientRepository.list());
     setModalOpen(false);
     setEditingClient(null);
     setDefaultParentId(undefined);
@@ -5037,6 +5268,8 @@ const AdminApp: React.FC = () => {
   };
 
   // ステータストグル
+  // M-5a: clientRepository.update 経由に置換。saveAndReload は使わず、
+  //   update 後に clientRepository.list() で再フェッチして setClients する。
   const handleToggleStatus = (id: string) => {
     const c = clients.find(cl => cl.id === id);
     if (!c) return;
@@ -5044,8 +5277,8 @@ const AdminApp: React.FC = () => {
     setConfirmDialog({
       message: `${c.companyName} を ${newStatus === 'active' ? '有効' : '無効'} にしますか？`,
       onConfirm: () => {
-        const updated = clients.map(cl => cl.id === id ? { ...cl, status: newStatus as 'active' | 'inactive' } : cl);
-        saveAndReload(updated);
+        clientRepository.update(id, { status: newStatus as 'active' | 'inactive' });
+        setClients(clientRepository.list());
         setConfirmDialog(null);
         logAdminAction(newStatus === 'active' ? 'クライアント有効化' : 'クライアント無効化', c.companyName, `ID: ${c.id}`);
       },
@@ -5053,21 +5286,27 @@ const AdminApp: React.FC = () => {
   };
 
   // 削除（super のみ）
+  // M-6: clients 配列の親+子削除を clientRepository.delete に集約。
+  //   clientData / :logs の片付けは orchestration として AdminApp 側に残す
+  //   （ClientRepository は Client コレクションのみを責務とする方針 / README §13）。
   const handleDelete = (id: string) => {
     if (!isSuper) {
       window.alert('削除はsuper権限のみ可能です。管理者にお問い合わせください。');
       return;
     }
-    const c = clients.find(cl => cl.id === id);
+    const c = clientRepository.findById(id);
     if (!c) return;
-    const children = clients.filter(cl => cl.parentId === id);
+    // 削除前に child を取得しておく: ダイアログ表示文 / clientData ・ logs 片付け / selectedClientId 判定で使用
+    const children = clientRepository.listChildren(id);
     setConfirmDialog({
       message: `${c.companyName} を削除しますか？${children.length > 0 ? `（子アカウント ${children.length} 件も削除されます）` : ''}`,
       onConfirm: () => {
         const idsToDelete = new Set([id, ...children.map(ch => ch.id)]);
-        const updated = clients.filter(cl => !idsToDelete.has(cl.id));
-        saveAndReload(updated);
+        // ClientRepository が親+子を一括削除（既存挙動と同等）
+        clientRepository.delete(id);
+        setClients(clientRepository.list());
         // 親アカウントの ClientData と操作ログも削除（孤立データ防止）
+        // ※ 子アカウント単体削除時は parentId 配下の ClientData は親側にあるため触らない
         if (c.accountType === 'parent') {
           try {
             storage.deleteClientData(c.id);
@@ -5090,10 +5329,22 @@ const AdminApp: React.FC = () => {
   };
 
   // パスワード更新
-  const handleUpdatePassword = (id: string, newPw: string) => {
-    const c = clients.find(cl => cl.id === id);
-    const updated = clients.map(cl => cl.id === id ? { ...cl, password: newPw } : cl);
-    saveAndReload(updated);
+  // M-7a: authService.adminResetPassword 経由に置換。
+  //   - 平文 password の write は authService 内に閉じ込め (Password Case A 方針)
+  //   - clientRepository.update は password を strip するため、Repository 経由では更新不可
+  //   - 成功後 setClients(clientRepository.list()) で state を再フェッチ
+  const handleUpdatePassword = async (id: string, newPw: string) => {
+    const c = clientRepository.findById(id);
+    const result = await authService.adminResetPassword(id, newPw);
+    if (!result.ok) {
+      if (result.reason === 'not_found') {
+        window.alert('対象のクライアントが見つかりません。');
+      } else if (result.reason === 'weak_new') {
+        window.alert('新しいパスワードは 6 文字以上で入力してください。');
+      }
+      return;
+    }
+    setClients(clientRepository.list());
     if (c) logAdminAction('クライアントパスワード変更', c.companyName, `ID: ${c.id}`);
   };
 
@@ -5205,8 +5456,17 @@ const AdminApp: React.FC = () => {
             onEdit={handleEdit}
             onUpdatePassword={handleUpdatePassword}
             onUpdateClient={(id, mutator) => {
-              const updated = clients.map((cl) => (cl.id === id ? mutator(cl) : cl));
-              saveAndReload(updated);
+              // M-5a: ClientRepository.update 経由に置換。
+              //   prop シグネチャ (id, mutator) は維持し、内部で current → next →
+              //   patch として clientRepository.update に渡す。
+              //   ClientRepository.update は id / password を strip するので、
+              //   mutator が返した Client 全体を patch として渡しても安全。
+              //   update 側の同値判定で全フィールド一致なら save をスキップする。
+              const current = clientRepository.findById(id);
+              if (!current) return;
+              const next = mutator(current);
+              clientRepository.update(id, next);
+              setClients(clientRepository.list());
             }}
             onLogAdminAction={logAdminAction}
           />
@@ -5215,7 +5475,7 @@ const AdminApp: React.FC = () => {
           <ContractPage clients={clients} statsMap={statsMap} onLogAdminAction={logAdminAction} />
         )}
         {currentView === 'initdata' && (
-          <InitDataPage clients={clients} />
+          <InitDataPage clients={clients} onLog={logAdminAction} />
         )}
         {currentView === 'adminaccounts' && isSuper && (
           <AdminAccountsPage currentAccount={currentAccount} onLog={logAdminAction} />

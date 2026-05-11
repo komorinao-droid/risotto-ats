@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { storage } from '@/utils/storage';
+import { baseRepository, clientRepository, resolveDataOwnerId } from '@/repositories';
 import type { Base } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
@@ -126,7 +126,7 @@ const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) =
 // ── メイン ──
 const BaseManagement: React.FC = () => {
   const navigate = useNavigate();
-  const { clientData, updateClientData, client, logAction } = useAuth();
+  const { clientData, client, logAction, reloadClientData } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -198,24 +198,24 @@ const BaseManagement: React.FC = () => {
 
   const save = () => {
     if (!form.name.trim()) return;
+    if (!client) return;
     const isNew = editId === null;
-    updateClientData((data) => {
-      const list = [...data.bases];
-      const baseData: Base = {
-        id: editId ?? (list.reduce((m, b) => Math.max(m, b.id), 0) + 1),
-        name: form.name.trim(), nameKana: form.nameKana.trim(), address: form.address.trim(),
-        phone: form.phone.trim(), matchingCondition: form.matchingCondition.trim(),
-        notes: form.notes.trim(), registeredDate: form.registeredDate,
-        color: form.color, slotInterval: form.slotInterval, startTime: form.startTime, endTime: form.endTime,
-      };
-      if (editId !== null) {
-        const idx = list.findIndex((b) => b.id === editId);
-        if (idx >= 0) list[idx] = baseData;
-      } else {
-        list.push(baseData);
-      }
-      return { ...data, bases: list };
-    });
+    const ownerId = resolveDataOwnerId(client);
+    const fields: Omit<Base, 'id'> = {
+      name: form.name.trim(), nameKana: form.nameKana.trim(), address: form.address.trim(),
+      phone: form.phone.trim(), matchingCondition: form.matchingCondition.trim(),
+      notes: form.notes.trim(), registeredDate: form.registeredDate,
+      color: form.color, slotInterval: form.slotInterval, startTime: form.startTime, endTime: form.endTime,
+    };
+    if (editId !== null) {
+      // L-2: rename 時に applicants/events/slotSettings/*ByBase は追従させない既存挙動を維持
+      //      （baseRepository.update も rename カスケードを実装していない）
+      baseRepository.update(ownerId, editId, fields);
+    } else {
+      baseRepository.create(ownerId, fields);
+    }
+    // ClientData を再読込して画面に反映
+    reloadClientData();
     logAction('setting', isNew ? '拠点追加' : '拠点編集', form.name.trim());
     setModalOpen(false);
   };
@@ -223,58 +223,34 @@ const BaseManagement: React.FC = () => {
   const deleteBase = (id: number) => {
     const base = bases.find((b) => b.id === id);
     if (!base) return;
-    // 関連データの件数を確認
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    // 関連データの件数を確認（confirm dialog 表示用）
     const relatedApplicants = clientData?.applicants.filter((a) => a.base === base.name).length || 0;
     const relatedEvents = clientData?.events.filter((e) => e.base === base.name).length || 0;
-    // この拠点専用の子アカウント数
-    const relatedChildAccounts = (() => {
-      if (!client) return 0;
-      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
-      const all = storage.getClients();
-      return all.filter((c) => c.accountType === 'child' && c.parentId === ownerId && c.baseName === base.name).length;
-    })();
+    // この拠点専用の子アカウント数（confirm dialog 表示用）
+    // M-8: storage.getClients() 直叩きから clientRepository.listChildren() 経由に置換。
+    //   listChildren は accountType==='child' && parentId===ownerId を内部で絞るため、
+    //   ここでは baseName 一致だけを追加でフィルタする。
+    const relatedChildAccounts = clientRepository
+      .listChildren(ownerId)
+      .filter((c) => c.baseName === base.name).length;
     const warning = relatedApplicants || relatedEvents || relatedChildAccounts
       ? `\n\n⚠ 関連データもクリアされます:\n・応募者の拠点指定: ${relatedApplicants}件\n・面接予定: ${relatedEvents}件${relatedChildAccounts ? `\n・子アカウント: ${relatedChildAccounts}件（拠点指定が外れます。アカウント自体は残ります）` : ''}\n（応募者・面接イベント自体は削除されず、拠点情報のみクリアされます）`
       : '';
     if (!window.confirm(`"${base.name}" を削除しますか？${warning}`)) return;
-    updateClientData((data) => {
-      // slotSettings から該当拠点を除去
-      const nextSlots = { ...(data.slotSettings || {}) };
-      delete nextSlots[base.name];
-      // 拠点別オーバーライドからも除去
-      const nextJobsByBase = { ...(data.jobsByBase || {}) };
-      delete nextJobsByBase[base.name];
-      const nextSourcesByBase = { ...(data.sourcesByBase || {}) };
-      delete nextSourcesByBase[base.name];
-      const nextEmailTplByBase = { ...(data.emailTemplatesByBase || {}) };
-      delete nextEmailTplByBase[base.name];
-      const nextFilterConditions = { ...(data.filterConditions || {}) };
-      delete nextFilterConditions[base.name];
-      return {
-        ...data,
-        bases: data.bases.filter((b) => b.id !== id),
-        // 応募者・面接イベントは残すが、拠点情報はクリア（履歴として残す）
-        applicants: data.applicants.map((a) => (a.base === base.name ? { ...a, base: '' } : a)),
-        events: data.events.filter((e) => e.base !== base.name), // 未来の面接は削除
-        slotSettings: nextSlots,
-        jobsByBase: nextJobsByBase,
-        sourcesByBase: nextSourcesByBase,
-        emailTemplatesByBase: nextEmailTplByBase,
-        filterConditions: nextFilterConditions,
-      };
-    });
-    // 該当拠点の子アカウントの baseName をクリア（無効な拠点を参照させない）
-    if (relatedChildAccounts > 0 && client) {
-      const ownerId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
-      const all = storage.getClients();
-      const updated = all.map((c) =>
-        (c.accountType === 'child' && c.parentId === ownerId && c.baseName === base.name)
-          ? { ...c, baseName: undefined }
-          : c
-      );
-      storage.saveClients(updated);
-    }
-    logAction('setting', '拠点削除', base.name, `応募者${relatedApplicants}件・面接${relatedEvents}件・子アカ${relatedChildAccounts}件のbase指定もクリア`);
+
+    // L-3: 8 配列カスケード + 子アカウント baseName クリアを Repository に集約
+    const result = baseRepository.deleteWithCascade(ownerId, id);
+    // removed=false は base 不在のレース（同時に他タブで削除された等）。no-op 扱い
+    if (!result.removed) return;
+    reloadClientData();
+    logAction(
+      'setting',
+      '拠点削除',
+      base.name,
+      `応募者${result.clearedApplicantBaseCount}件・面接${result.removedEventCount}件・子アカ${result.detachedChildAccountCount}件のbase指定もクリア`,
+    );
     if (selectedBaseId === id) goList();
   };
 

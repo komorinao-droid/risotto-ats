@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { storage } from '@/utils/storage';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
@@ -16,18 +15,16 @@ const Login: React.FC = () => {
       setError('');
       setIsLoading(true);
 
-      // Check if account is inactive before attempting login
-      const clients = storage.getClients();
-      const found = clients.find((c) => c.id === clientId);
-      if (found && found.status === 'inactive') {
-        setError('このアカウントは無効化されています。管理者にお問い合わせください。');
-        setIsLoading(false);
-        return;
-      }
-
-      const success = login(clientId, password);
-      if (!success) {
-        setError('クライアントIDまたはパスワードが正しくありません。');
+      // I-4: storage.getClients() による事前 inactive チェックを廃止し、
+      //      認証ストレージ詳細は AuthContext.login (= authService.loginSync) に隠蔽。
+      //      戻り値の reason で inactive / invalid_credentials を出し分ける。
+      const result = login(clientId, password);
+      if (!result.ok) {
+        if (result.reason === 'inactive') {
+          setError('このアカウントは無効化されています。管理者にお問い合わせください。');
+        } else {
+          setError('クライアントIDまたはパスワードが正しくありません。');
+        }
       }
       setIsLoading(false);
     },
