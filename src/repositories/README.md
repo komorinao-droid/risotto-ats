@@ -203,6 +203,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-5** | **既存 reportRepository を拡張（getReportSchedule / saveReportSchedule を追加）。ReportScheduleSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。singleton 設定型 / 保存ボタン式 / debounce なし。新規 ReportScheduleRepository は作らず recruitmentGoals と同居（Firestore `/tenants/{tid}/settings/global` doc 設計と整合）。ReportScheduleSetting 型・データ形状・UI・文言・DEFAULT_SETTING・email validation は無変更。lastRunAt / lastRunStatus / lastRunError は将来サーバー配信エンジン用で N-5 では専用 API を作らない（読取り経路のみ提供）** | **✅ 完了** |
 | **N-6** | **ExclusionRepository 型 + LocalStorage 実装（list / add / remove）+ ExclusionList.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / tenant 全体共有 / dedup 判定（email lowercase / phone strip / name_birth exact）を Repository 内に集約。add 成功後の `applicantRepository.changeStageBulk` 連携は画面側 orchestrator として維持。applicantRepository.delete 内の `applicantId?` 一致 cleanup は据え置き（cleanupByApplicantId 等は ExclusionRepository に作らない）。ExclusionEntry 型は無変更（`applicantId?` は旧データ互換隠しフィールドのまま）** | **✅ 完了** |
 | **N-7** | **MediaCostRepository 型 + LocalStorage 実装（getAll / saveDraft / removeSource）+ MediaCostManagement.tsx の `updateClientData` 2 箇所を Repository 経由に置換。ネストマップ型 `[ym][src] -> number` を扱う初の N-7 ケース。parseAmount（全角→半角 / カンマ・空白除去 / 1〜1 億円範囲）/ 月キー pruning / invalidCount 集計を Repository 内に集約。saveDraft は partial merge（draft に含まれない月/cell は触らない）/ 全 cell no-op の場合は saveClientData を呼ばない。removeSource は媒体名で全月横断 cascade 削除。Source rename/delete と mediaCosts の連動は pre-existing orphan として据え置き（別フェーズ）** | **✅ 完了** |
+| **N-8** | **FilterConditionRepository 型 + LocalStorage 実装（getLegacy / getByBaseMap / getEffective / updateForBase）+ FilterConditionSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。base 別 `filterConditions[baseName]` のみを更新し、legacy `filterCondition` は読み取り fallback 専用（書換 API なし）。fallback 解決ロジック（base 別 → legacy → defaultFC）を Repository 内に集約。`applicantRepository.changeStageBulk(..., reason:'filter_condition_applied')` 連携は画面側 orchestrator として維持。AddApplicantModal / ApplicantList / AdminApp の legacy 直接参照はスコープ外として現状維持** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -212,7 +213,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository / N-8 = FilterConditionRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -810,7 +811,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-5**: 既存 `reportRepository` 拡張（getReportSchedule / saveReportSchedule 追加） + ReportScheduleSettings.tsx 移行（singleton 設定型 / 保存ボタン式 / debounce なし、新規 Repository は作らず採用目標と同居）
 - [x] **N-6**: `ExclusionRepository` 型 + LocalStorage 実装 + ExclusionList.tsx 移行（base-override なし / tenant 全体共有 / dedup 判定 Repository 内集約 / `applicantRepository.changeStageBulk` は画面側 orchestrator として維持）
 - [x] **N-7**: `MediaCostRepository` 型 + LocalStorage 実装 + MediaCostManagement.tsx 移行（ネストマップ型 `[ym][src] -> number` / parseAmount + 月キー pruning + invalidCount 集計を Repository 内集約 / saveDraft は partial merge / removeSource は媒体名で全月横断 cascade）
-- [ ] **N-8**: `FilterConditionRepository`（base 別 + legacy `filterCondition` フォールバック）
+- [x] **N-8**: `FilterConditionRepository` 型 + LocalStorage 実装 + FilterConditionSettings.tsx 移行（base 別 + legacy fallback を Repository 内集約 / legacy `filterCondition` は読み取り専用 / `updateForBase` のみ提供 / `applicantRepository.changeStageBulk` は画面側 orchestrator 維持）
 - [ ] **N-9**: `ScreeningRepository`（byJob override + axes migration）
 - [ ] **N-10**: `ChatbotRepository`（scenarios / questionGroups / leadSettings の 3 配列原子性）
 
@@ -1075,12 +1076,62 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - 部分更新は `merge: true` で各月 doc を更新（lastRunAt の race 問題と類似）
 - Source rename / delete と mediaCosts の連動も Cloud Functions（または `sourceRepository.deleteWithCascade` の拡張）で transaction 内に追加検討
 
-### 14.10 残タスク
+### 14.10 N-8: FilterConditionRepository（legacy + base override の 2 系統 / legacy 不変）
 
-- **N-8 以降**: §14.2 の通り、設定系 3 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-8 候補は FilterCondition / Screening / Chatbot
+#### 責務
+
+- `data.filterCondition` (legacy 全社共通) の **読み取り fallback 専用**
+- `data.filterConditions[baseName]` (base 別) の `updateForBase` による partial merge
+- `getLegacy` / `getByBaseMap` / `getEffective` / `updateForBase` の 4 API
+
+#### N-1〜N-7 との差分
+
+- **legacy + base override の 2 系統だが構造は単純**: Job / Source / EmailTemplate のような「base 別配列 + 全社配列」ではなく、**「単一オブジェクト + base 別オブジェクト」** の組合せ
+- **legacy 不変を強制**: 他の base-override パターン (N-1〜N-3) は legacy を `update` / `add` で更新する API を持つが、FilterConditionRepository は **legacy 書換 API を提供しない**（AdminApp の設定コピー経路が別経路として存在するため、Repository 経由を強制すると壊れる）
+- **partial merge の base 解決を Repository に集約**: `current = filterConditions[baseName] || legacy || defaultFC` の解決ロジックを Repository に移動（既存 FilterConditionSettings.updateFC L107-116 と完全一致）
+- **defaultFC は画面側と同等**: `ageEnabled:false / 18-65 / 空配列 / excludeStatus:''` 。`storage.ts` の新規 client 初期化値（`ageEnabled:true / 18-55 / excludeStatus:'対象外' / flagAges:[18,19,50,55]`) とは**意図的に異なる**（legacy も base 別も無いときの最終 fallback 用途）
+
+#### updateForBase の挙動
+
+- baseName が空文字なら `{ok:false, reason:'no_base_selected'}` を返し saveClientData を呼ばない
+- 初回 update（base override 未存在から作成）の場合 `promotedToBaseOverride: true`、2 回目以降は `false`
+- legacy `filterCondition` は **絶対に touch しない**
+- next FilterCondition は呼出側に shallow copy で返す（呼出側 mutate が localStorage に漏れない）
+
+#### 移行先
+
+- `src/client/pages/settings/FilterConditionSettings.tsx`
+  - `useAuth` から `updateClientData` 除去（`reloadClientData` に統一）
+  - `fc` 取得を `filterConditionRepository.getEffective(ownerId, selectedBase)` に集約（useMemo + `client / selectedBase / filterConditions / filterCondition` 依存）
+  - `updateFC` を `filterConditionRepository.updateForBase(ownerId, selectedBase, partial)` に置換 → `reloadClientData()`
+  - **一括除外実行 (`executeExclusion`) は既存通り画面側で `applicantRepository.changeStageBulk(..., reason:'filter_condition_applied')` を呼ぶ**（Repository に取り込まない）
+  - UI / 文言 / `canEdit` / `bases.length === 0` 早期 return / `affected` プレビュー / Modal 文言は変更しない
+
+#### 既存挙動の厳密維持
+
+- 「拠点別未設定」表示 (`(デフォルト設定を継承中 — 保存すると拠点専用になります)`) は `filterConditions[selectedBase]` の存在チェックを継続。`promotedToBaseOverride` は将来 UX 強化用に予約
+- `flagAges` の base 別 fallback（`ApplicantList.flagAgesByBase`）は **N-8 スコープ外**として現状維持（clientData 直参照のまま）
+- `AddApplicantModal.checkExclusion` の legacy 直接参照（base 別を見ない既存バグ的挙動）も N-8 スコープ外
+- `AdminApp` の設定コピー機能（`dstData.filterCondition = ...`）も N-8 スコープ外
+- `applicantRepository.changeStageBulk` の reason 文字列 `'filter_condition_applied'` は変更しない（stageHistory の既存レコードとの整合）
+- `baseRepository.deleteBase` 内の `filterConditions[baseName]` 削除（baseRepository.ts L148-151）は既存集約済み、N-8 で重複呼出はしない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- legacy: `/tenants/{tid}/settings/global` doc の `filterCondition` field（screeningCriteria / recruitmentGoals / mediaCosts / reportSchedule と同居、firestore-design §6.2）
+- base 別: `/tenants/{tid}/baseOverrides/{baseName}` doc の `filterCondition` field（jobs / sources / emailTemplates と同居、firestore-design §6.3）
+- `updateForBase` は `/tenants/{tid}/baseOverrides/{baseName}` を `merge: true` で部分更新
+- `getEffective` は 2 doc fetch（baseOverrides → settings/global の順、片方欠落時に他方で fallback）
+
+### 14.11 残タスク
+
+- **N-9 以降**: §14.2 の通り、設定系 2 種が残着手対象。N-9 = Screening（byJob override + axes migration） / N-10 = Chatbot（scenarios / questionGroups / leadSettings の 3 配列原子性）
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing / N-5 ReportSchedule / N-6 Exclusion / N-7 MediaCost は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型で構造が異なるため別系統。N-9 Screening の `byJob override` を待って共通化を再検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **AddApplicantModal / ApplicantList / AdminApp の filterCondition 直参照**: N-8 スコープ外として現状維持。`AddApplicantModal.checkExclusion` は legacy のみ参照（base 別を見ない既存バグ的挙動）、`ApplicantList.flagAgesByBase` は clientData 直参照、`AdminApp` 設定コピーは `dstData.filterCondition` 直書き。Repository 経由化は別フェーズ（後続のリファクタ判断で実施）
+- **FilterConditionRepository の base override 削除 API**: 現状「拠点専用 → legacy 継承戻し」UX が UI に存在しないため未実装。要件として上がった時点で `removeBaseOverride(clientId, baseName)` を新設（baseRepository.deleteBase 内の `filterConditions[baseName]` 削除とは別経路）
+- **FilterConditionRepository の updateLegacy API**: AdminApp 設定コピー経路を Repository 経由化する時に追加検討。現状は legacy 不変ポリシー（書換 API なし）で防衛
 - **ExclusionRepository の `addAndExclude` composite API**: 現状 ExclusionList.tsx で `exclusionRepository.add` → `applicantRepository.changeStageBulk` の 2 段呼びを維持。Firestore 化（Phase J）時に 1 transaction 化が必要なら composite API を新設（firestore-design §4.1 既知の検討事項）
 - **ExclusionEntry 型への `applicantId?` 追加**: 「特定 applicant を直接 exclusion 登録する UI」を実装する時に併せて型追加。現状は旧データ互換隠しフィールドのまま維持
 - **Source rename / delete と mediaCosts の orphan**: pre-existing（`sourceRepository.deleteWithCascade` は mediaCosts を touch しない）。N-7 では据え置き。連携を入れる場合は SourceRepository.deleteWithCascade の拡張 + `mediaCostRepository.removeSource` 呼出 or Cloud Functions（Firestore 化時）

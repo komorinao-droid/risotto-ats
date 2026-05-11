@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Applicant, FilterCondition } from '@/types';
 import Modal from '@/components/Modal';
-import { applicantRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
+import { applicantRepository, filterConditionRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
 import { getClientOperatorLabel } from '@/utils/clientOperator';
 
 const inputStyle: React.CSSProperties = {
@@ -81,7 +81,7 @@ const defaultFC: FilterCondition = {
 };
 
 const FilterConditionSettings: React.FC = () => {
-  const { clientData, updateClientData, reloadClientData, client } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [flagAgeInput, setFlagAgeInput] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<{ count: number; done: boolean } | null>(null);
@@ -90,10 +90,13 @@ const FilterConditionSettings: React.FC = () => {
   const [selectedBase, setSelectedBase] = useState<string>(() => bases[0]?.name || '');
 
   const filterConditions = clientData?.filterConditions || {};
-  const legacyFC = clientData?.filterCondition;
 
-  // 選択中拠点のフィルタ: 拠点別設定 → 旧グローバル → デフォルト の順にフォールバック
-  const fc: FilterCondition = filterConditions[selectedBase] || legacyFC || defaultFC;
+  // 選択中拠点のフィルタ: 拠点別設定 → legacy → defaultFC の fallback を Repository に集約
+  // useMemo 依存に clientData?.filterConditions / filterCondition を残し、編集後 reloadClientData() で再評価される
+  const fc: FilterCondition = useMemo(() => {
+    if (!client) return defaultFC;
+    return filterConditionRepository.getEffective(resolveDataOwnerId(client), selectedBase);
+  }, [client, selectedBase, clientData?.filterConditions, clientData?.filterCondition]);
 
   const applicants = clientData?.applicants || [];
   const sources = clientData?.sources || [];
@@ -103,17 +106,10 @@ const FilterConditionSettings: React.FC = () => {
   const canEdit = !client || client.accountType === 'parent' || client.permissions.filtercond;
 
   const updateFC = (partial: Partial<FilterCondition>) => {
-    if (!selectedBase) return;
-    updateClientData((data) => {
-      const current = (data.filterConditions || {})[selectedBase] || data.filterCondition || defaultFC;
-      return {
-        ...data,
-        filterConditions: {
-          ...(data.filterConditions || {}),
-          [selectedBase]: { ...current, ...partial },
-        },
-      };
-    });
+    if (!selectedBase || !client) return;
+    const ownerId = resolveDataOwnerId(client);
+    filterConditionRepository.updateForBase(ownerId, selectedBase, partial);
+    reloadClientData();
   };
 
   // Preview: 選択中拠点の応募者のみを対象

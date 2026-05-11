@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1472,4 +1472,110 @@ export interface MediaCostRepository {
    *  - sources 配列（`data.sources`）や `extraSources` ローカル state には触らない
    */
   removeSource(clientId: string, sourceName: string): RemoveMediaCostSourceResult;
+}
+
+/**
+ * フィルタ条件 base 別更新 (`FilterConditionRepository.updateForBase`) の結果。
+ *  - ok=true:
+ *      - next: 反映後の FilterCondition（partial merge 適用後）
+ *      - promotedToBaseOverride: 今回の更新で `filterConditions[baseName]` が新規作成された（= legacy 継承中から拠点別へ昇格）
+ *  - ok=false:
+ *      - reason='no_base_selected': baseName が空文字（UI 側で base 未選択のまま呼ばれた防御的ケース）
+ */
+export type UpdateFilterConditionResult =
+  | { ok: true; next: FilterCondition; promotedToBaseOverride: boolean }
+  | { ok: false; reason: 'no_base_selected' };
+
+/**
+ * フィルタ条件 (filterCondition / filterConditions) の CRUD を扱う Repository（Phase N-8 で追加）。
+ *
+ * 想定する移行先:
+ *  - `FilterConditionSettings.tsx` の `updateClientData` 経由更新（`updateFC`）を本 API 経由に置換
+ *
+ * 方針:
+ *  - **legacy `filterCondition` は読み取り fallback 専用**:
+ *      本 Repository からは絶対に書き換えない（`updateLegacy` は提供しない）。
+ *      legacy を更新する経路は AdminApp の「設定コピー」（`dstData.filterCondition = ...`）のみで、
+ *      これは別経路として N-8 スコープ外。
+ *  - **base 別 `filterConditions[baseName]` の partial merge のみ提供**:
+ *      `current = filterConditions[baseName] || legacy || defaultFC` を base にして `{ ...current, ...partial }`。
+ *      画面側の現挙動（`updateFC` L107-116）と完全一致。
+ *  - **getEffective に fallback を集約**:
+ *      `filterConditions[baseName] → legacy filterCondition → defaultFC` の 3 段 fallback を 1 関数化。
+ *      ApplicantList の flagAgesByBase / FilterConditionSettings の fc 取得で重複していたロジックを統合可能（N-8 では FilterConditionSettings のみ移行）。
+ *  - **defaultFC は画面側 defaultFC と同等**:
+ *      `{ ageEnabled:false, ageMin:18, ageMax:65, genderFilter:[], sourceFilter:[], jobFilter:[], excludeStatus:'', flagAges:[] }`
+ *      `storage.ts` の初期値（ageEnabled:true / ageMin:18 / ageMax:55 / excludeStatus:'対象外' / flagAges:[18,19,50,55]）とは**意図的に異なる**
+ *      （storage.ts は新規 client 初期化用、defaultFC は legacy も拠点別も無いときの最終 fallback 用）
+ *  - **promotedToBaseOverride を返却**:
+ *      初回 update で legacy 継承 → 拠点別化したかを UI に通知できる。
+ *      現 UI は `filterConditions[selectedBase]` の存在チェックで再判定しているため必須ではないが、将来 UX 強化用に予約。
+ *  - **戻り値の deep copy**:
+ *      `getLegacy` / `getEffective` は `{...obj}` shallow copy（FilterCondition は配列フィールドも持つが top-level shallow で十分。
+ *      呼出側で配列 mutate するケースは現状なし。必要なら追加 phase で deep copy 化）。
+ *      `getByBaseMap` は 2 階層 deep copy（マップなので第 1 階層 + 第 2 階層 shallow）。
+ *
+ * N-1〜N-7 との差分:
+ *  - **legacy + base override の 2 系統**:
+ *      Job/Source/EmailTemplate は base override（base 別配列）と legacy（全社配列）の組合せだが、
+ *      FilterCondition は「単一オブジェクト + base 別オブジェクト」の組合せで構造が単純。
+ *  - **legacy は不変**:
+ *      Job/Source/EmailTemplate は legacy を `update` / `add` で更新する API を持つが、
+ *      FilterConditionRepository は legacy 不変を強制（書き換え API を提供しない）。
+ *  - **changeStageBulk は呼ばない**:
+ *      N-6 ExclusionRepository と同型。画面側 (`FilterConditionSettings.executeExclusion`) が
+ *      `applicantRepository.changeStageBulk(ownerId, patches, {operator, reason:'filter_condition_applied'})` を直接呼ぶ既存 orchestrator パターンを維持。
+ *      理由: (1) Repository 間の依存逆流回避 (2) Firestore 化時に transaction 境界を別途設計 (3) reason/operator のような UI 文脈を Repository に渡さない。
+ *
+ * スコープ外（N-8 では触らない）:
+ *  - `AddApplicantModal.checkExclusion` の legacy 直接参照（base 別を見ない既存バグ的挙動）
+ *  - `ApplicantList.flagAgesByBase` の fallback ロジック（Repository.getEffective で代替可能だが UI 触らない方針）
+ *  - `AdminApp` の設定コピー機能（`dstData.filterCondition` 直書き）
+ *  - `applicantRepository.changeStageBulk` 既存連携の変更
+ *  - legacy filterCondition の更新 API（updateLegacy）
+ *  - base override 削除 API（removeBaseOverride / 「拠点専用 → legacy 継承戻し」UX が現状存在しない）
+ *  - `baseRepository.deleteBase` 内の `filterConditions[baseName]` 削除（既存集約済み、重複呼出はしない）
+ *
+ * Firestore マッピング（Phase J / firestore-design §6.2, §6.3）:
+ *  - legacy: `/tenants/{tid}/settings/global` doc の `filterCondition` field（screeningCriteria/recruitmentGoals/mediaCosts/reportSchedule と同居）
+ *  - base 別: `/tenants/{tid}/baseOverrides/{baseName}` doc の `filterCondition` field（jobs/sources/emailTemplates と同居）
+ *  - `updateForBase` は `/tenants/{tid}/baseOverrides/{baseName}` を `merge:true` で部分更新
+ *  - `getEffective` は 2 doc fetch（baseOverrides → settings/global の順、片方欠落時にもう一方で fallback）
+ */
+export interface FilterConditionRepository {
+  /**
+   * legacy 全社共通設定を返す（shallow copy）。
+   *  - `data.filterCondition` は `storage.ts` で初期化されるため常に defined
+   *  - 戻り値の mutate が localStorage に漏れないように `{...obj}` で複製
+   */
+  getLegacy(clientId: string): FilterCondition;
+  /**
+   * 拠点別オーバーライド全体マップ（key=baseName）を 2 階層 deep copy で返す。
+   *  - undefined の場合は `{}` を返す
+   *  - 並び順は保存時のまま
+   */
+  getByBaseMap(clientId: string): { [baseName: string]: FilterCondition };
+  /**
+   * 拠点別 fallback 解決済みの effective FilterCondition を返す（shallow copy）。
+   *  継承順:
+   *    1. `filterConditions[baseName]` が存在すれば最優先
+   *    2. `legacy filterCondition` が存在すればそれを返す
+   *    3. どちらも欠落していれば `defaultFC` を返す
+   *  - baseName が空文字でも legacy → defaultFC の fallback は機能する
+   *  - 戻り値の mutate が localStorage に漏れないように `{...obj}` で複製
+   */
+  getEffective(clientId: string, baseName: string): FilterCondition;
+  /**
+   * 拠点別オーバーライドを partial update する（常に `filterConditions[baseName]` に書く）。
+   *  - baseName が空文字なら `{ok:false, reason:'no_base_selected'}` を返し、saveClientData を呼ばない
+   *  - current = `filterConditions[baseName] || legacy filterCondition || defaultFC`
+   *  - next = `{ ...current, ...partial }`
+   *  - legacy `filterCondition` は絶対に書き換えない
+   *  - 初回 update（base override 未存在から作成）の場合 `promotedToBaseOverride: true`
+   */
+  updateForBase(
+    clientId: string,
+    baseName: string,
+    partial: Partial<FilterCondition>
+  ): UpdateFilterConditionResult;
 }

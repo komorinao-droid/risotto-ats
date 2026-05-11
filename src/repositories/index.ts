@@ -27,6 +27,7 @@ import { LocalStorageEmailTemplateRepository } from './localStorage/emailTemplat
 import { LocalStorageHearingRepository } from './localStorage/hearingRepository';
 import { LocalStorageExclusionRepository } from './localStorage/exclusionRepository';
 import { LocalStorageMediaCostRepository } from './localStorage/mediaCostRepository';
+import { LocalStorageFilterConditionRepository } from './localStorage/filterConditionRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -44,6 +45,7 @@ export const emailTemplateRepository = new LocalStorageEmailTemplateRepository()
 export const hearingRepository = new LocalStorageHearingRepository();
 export const exclusionRepository = new LocalStorageExclusionRepository();
 export const mediaCostRepository = new LocalStorageMediaCostRepository();
+export const filterConditionRepository = new LocalStorageFilterConditionRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -78,6 +80,8 @@ export type {
   MediaCostRepository,
   SaveMediaCostDraftResult,
   RemoveMediaCostSourceResult,
+  FilterConditionRepository,
+  UpdateFilterConditionResult,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,
