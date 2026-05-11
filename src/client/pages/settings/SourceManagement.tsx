@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Source, ClientData } from '@/types';
+import type { Source } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
+import { sourceRepository, resolveDataOwnerId } from '@/repositories';
 
 const inputStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -28,7 +29,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 const SHARED = '__shared__';
 
 const SourceManagement: React.FC = () => {
-  const { clientData, updateClientData, client, logAction } = useAuth();
+  const { clientData, reloadClientData, client, logAction } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<Omit<Source, 'id'>>({
     name: '',
@@ -59,16 +60,13 @@ const SourceManagement: React.FC = () => {
   const canEdit = !client || client.accountType === 'parent' || client.permissions.source;
   const editingScope = scope;
 
-  const writeSources = (mutator: (list: Source[]) => Source[]) => {
-    updateClientData((data) => {
-      if (editingScope === SHARED) return { ...data, sources: mutator(data.sources) };
-      const current = data.sourcesByBase?.[editingScope] ?? data.sources;
-      return {
-        ...data,
-        sourcesByBase: { ...(data.sourcesByBase || {}), [editingScope]: mutator(current) },
-      };
-    });
-  };
+  // sourceRepository への書き込みは parent の clientId で行う（updateClientData と同じ責務境界）。
+  // applicantBaseFilter は子アカウント呼出時の applicants[].src クリア対象絞り込み用
+  //   （AuthContext.filterDataByBase の挙動を Repository 経由でも維持するため）。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
+  const applicantBaseFilter =
+    client?.accountType === 'child' && client.baseName ? client.baseName : undefined;
+  const targetBaseName = editingScope === SHARED ? undefined : editingScope;
 
   const openAddModal = () => {
     setForm({ name: '', color: COLORS[0].main, monthlyCost: 0, loginId: '', password: '', url: '' });
@@ -79,10 +77,13 @@ const SourceManagement: React.FC = () => {
 
   const addSource = () => {
     if (!form.name.trim()) return;
-    writeSources((list) => {
-      const maxId = list.reduce((m, s) => Math.max(m, s.id), 0);
-      return [...list, { id: maxId + 1, ...form, name: form.name.trim() }];
-    });
+    if (!ownerId) return;
+    sourceRepository.create(
+      ownerId,
+      { ...form, name: form.name.trim() },
+      targetBaseName,
+    );
+    reloadClientData();
     logAction('setting', '応募媒体追加', form.name.trim(), scopeDetail());
     setModalOpen(false);
   };
@@ -94,7 +95,10 @@ const SourceManagement: React.FC = () => {
 
   const saveEdit = () => {
     if (!editRow || !editRow.name.trim()) return;
-    writeSources((list) => list.map((s) => (s.id === editRow.id ? { ...editRow, name: editRow.name.trim() } : s)));
+    if (!ownerId) return;
+    const { id: _id, ...patch } = { ...editRow, name: editRow.name.trim() };
+    sourceRepository.update(ownerId, editRow.id, patch, targetBaseName);
+    reloadClientData();
     logAction('setting', '応募媒体編集', editRow.name.trim(), scopeDetail());
     setEditingId(null);
     setEditRow(null);
@@ -109,28 +113,21 @@ const SourceManagement: React.FC = () => {
     const source = sources.find((s) => s.id === id);
     if (!source) return;
     if (!window.confirm(`"${source.name}" を削除しますか？該当媒体の応募者からも参照がクリアされます。`)) return;
-    updateClientData((data) => {
-      const next: ClientData = { ...data };
-      if (editingScope === SHARED) {
-        next.sources = data.sources.filter((s) => s.id !== id);
-      } else {
-        const current = data.sourcesByBase?.[editingScope] ?? data.sources;
-        next.sourcesByBase = { ...(data.sourcesByBase || {}), [editingScope]: current.filter((s) => s.id !== id) };
-      }
-      next.applicants = data.applicants.map((a) => (a.src === source.name ? { ...a, src: '' } : a));
-      return next;
+    if (!ownerId) return;
+    sourceRepository.deleteWithCascade(ownerId, id, {
+      baseName: targetBaseName,
+      applicantBaseFilter,
     });
+    reloadClientData();
     logAction('setting', '応募媒体削除', source.name, scopeDetail());
   };
 
   const removeOverride = () => {
     if (!isBaseScope) return;
     if (!window.confirm(`「${scope}」の拠点別媒体設定を削除し、全社共通に戻しますか？`)) return;
-    updateClientData((data) => {
-      const next = { ...(data.sourcesByBase || {}) };
-      delete next[scope];
-      return { ...data, sourcesByBase: next };
-    });
+    if (!ownerId) return;
+    sourceRepository.removeBaseOverride(ownerId, scope);
+    reloadClientData();
   };
 
   const togglePw = (id: number) => setShowPw((prev) => ({ ...prev, [id]: !prev[id] }));

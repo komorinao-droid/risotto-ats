@@ -197,6 +197,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **M-7b** | **`src/utils/clientOptions.ts` の `incrementOptionUsage` を `clientRepository.findById / update` 経由に置換。`storage.getClients/saveClients` 直叩きを除去（dynamic import は AuthContext → clientOptions → repositories の起動順循環回避のため維持）** | **✅ 完了** |
 | **M-8** | **BaseManagement の削除確認ダイアログ用 child 件数取得を `clientRepository.listChildren` 経由に置換。BaseManagement.tsx 内の `storage` 直叩き消滅** | **✅ 完了** |
 | **N-1** | **JobRepository 型 + LocalStorage 実装（list / create / update / deleteWithCascade / removeBaseOverride）+ JobManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。jobs / jobsByBase の形状を維持。設定系 Repository 化（Phase N）の参照実装（base-override 型）** | **✅ 完了** |
+| **N-2** | **SourceRepository 型 + LocalStorage 実装 + SourceManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1 JobRepository の base-override 型を機械的に横展開（`sources` / `sourcesByBase` + `applicants[].src` カスケード）。Source 型・データ形状・UI・文言は無変更** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -206,7 +207,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -798,7 +799,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 ### 14.2 進捗
 
 - [x] **N-1**: `JobRepository` 型 + LocalStorage 実装 + JobManagement.tsx 移行
-- [ ] **N-2**: `SourceRepository`（SourceManagement.tsx）
+- [x] **N-2**: `SourceRepository` 型 + LocalStorage 実装 + SourceManagement.tsx 移行
 - [ ] **N-3**: `EmailTemplateRepository`（EmailTemplateManagement.tsx、auto-save 800-1000ms 維持）
 - [ ] **N-4**: `HearingRepository`（HearingManagement.tsx、job-keyed singleton 型）
 - [ ] **N-5**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
@@ -835,9 +836,31 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - 拠点別オーバーライドは案 A（doc に `baseName?: string | null` フィールド + 単一 collection）/ 案 B（`/tenants/{tid}/baseOverrides/{baseName}/jobs/{jobId}` 別 subcollection）から選択。クエリ性と Firestore Rules の書きやすさから案 A 寄り（決定は Phase J 時）
 - `deleteWithCascade` は jobs collection の doc 削除 + applicants collection の対象 doc 更新を `runTransaction` / `WriteBatch` で 1 atomic 化
 
-### 14.4 残タスク
+### 14.4 N-2: SourceRepository（base-override 型の横展開）
 
-- **N-2 以降**: §14.2 の通り、設定系 9 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」
+#### 責務
+
+- `data.sources` / `data.sourcesByBase[baseName]` の CRUD と削除カスケード
+- API は N-1 と完全同型: `list` / `create` / `update` / `deleteWithCascade(opts?: { baseName?, applicantBaseFilter? })` / `removeBaseOverride`
+- 実装は `LocalStorageJobRepository` を機械的に横展開（`jobs` → `sources`, `jobsByBase` → `sourcesByBase`, `applicants[].job` → `applicants[].src`、結果型のフィールド名差し替え）
+
+#### 既存挙動との差分
+
+- 既存 `SourceManagement.deleteSource` は applicants[].src クリア時に **base 絞り込みをしていなかった**（全 applicants 横断）。Repository 化に際しては JobRepository に揃え `applicantBaseFilter` opt を提供し、呼出側 (SourceManagement.tsx) は child account のみ `client.baseName` を渡す
+- 子アカ時は AuthContext.filterDataByBase が applicants を自拠点のみに絞っているため、既存挙動でも結果は「自拠点 applicants のみクリア」と等価。Repository 化後も振る舞いは保たれる
+- inline editing (`saveEdit`) は full Source patch を渡すため、`update` の no-op 短絡（patch == current && overrideExists）に当たりやすい。データ的には等価（既存 writeSources はその場合も save していた = 余分書込が消える方向の差分のみ）
+
+#### 移行先
+
+- `src/client/pages/settings/SourceManagement.tsx` の `writeSources` ヘルパは削除、`addSource` / `saveEdit` / `deleteSource` / `removeOverride` を Repository 経由に置換
+- 画面側は `updateClientData` を撤去し、`reloadClientData()` で state 同期する
+- UI / 文言 / バリデーション / logAction / showPw（パスワード表示トグル）は変更しない
+- `Source.password` は本フェーズでは平文のまま流通させる（既存仕様維持）
+
+### 14.5 残タスク
+
+- **N-3 以降**: §14.2 の通り、設定系 8 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-3 候補は EmailTemplate（base-override + job-keyed 混在型）
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
-- **正規化（Job 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-2 (Source) / N-3 (EmailTemplate) / N-8 (FilterCondition) で同じ pickLayer / writeLayer パターンが繰り返される。3 個出揃った段階で共通化を検討（早すぎる抽象化を避ける）
+- **正規化（Job / Source 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) で同じ `pickLayer` / `writeLayer` パターンが既に 2 個。N-3 (EmailTemplate) / N-8 (FilterCondition) を待って 3〜4 個揃った段階で共通化検討（早すぎる抽象化を避ける）
+- **`Source.password` の暗号化 / 秘匿化**: 既存仕様維持で本フェーズ対象外。Firestore 化（Phase J）と合わせて検討（client-side encryption / Cloud KMS / 別 collection 分離など）

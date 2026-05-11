@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -948,4 +948,140 @@ export interface JobRepository {
    *  - applicants は触らない（override を消すと全社共通レイヤにフォールバックする = 名前一致は維持される）
    */
   removeBaseOverride(clientId: string, baseName: string): RemoveJobBaseOverrideResult;
+}
+
+/**
+ * `SourceRepository.deleteWithCascade` の戻り値（Phase N-2 で追加）。
+ *
+ * カスケード方針:
+ *  - 対象レイヤ (sources または sourcesByBase[baseName]) から sourceId 一致を除去
+ *  - applicants[].src === removedSourceName を '' にクリア
+ *      - opts.applicantBaseFilter 指定時はその base 一致 applicants のみ対象
+ *      - 未指定時は全 applicants 横断（既存 SourceManagement.deleteSource の挙動を維持）
+ *  - applicants[].updatedAt は touch しない（既存 deleteSource 互換）
+ *  - 上記 2 配列の更新を 1 saveClientData にまとめる
+ *  - sourceId 不一致なら no-op で removed: false を返す（saveClientData も呼ばない）
+ */
+export interface DeleteSourceCascadeResult {
+  /** 対象レイヤから sourceId が実際に除去されたか */
+  removed: boolean;
+  /** 除去した source の name（applicants クリア判定に使用した値）。removed=false なら undefined */
+  removedSourceName?: string;
+  /** applicants[].src === removedSourceName を '' にクリアした件数 */
+  clearedApplicantSrcCount: number;
+}
+
+/** `SourceRepository.removeBaseOverride` の戻り値（Phase N-2 で追加）。 */
+export interface RemoveSourceBaseOverrideResult {
+  /** sourcesByBase[baseName] キーが存在して削除されたか（不在なら false / save も呼ばない） */
+  removed: boolean;
+}
+
+/**
+ * 応募媒体 (Source) 設定の CRUD ＋ 拠点別オーバーライド ＋ 削除カスケードを扱う Repository（Phase N-2 で追加）。
+ *
+ * 想定する移行先:
+ *  - `SourceManagement.tsx` の updateClientData 直更新を本 API 経由に置換
+ *
+ * 方針:
+ *  - Phase N-1 JobRepository の base-override 型を機械的に横展開した実装
+ *  - 既存データ形状を維持する（Source 型に baseName を追加する正規化は本フェーズで行わない）
+ *      - `data.sources`               : 全社共通レイヤ
+ *      - `data.sourcesByBase[baseName]` : 拠点別オーバーライドレイヤ
+ *  - baseName 未指定 = 全社共通レイヤを対象
+ *  - baseName 指定 = 拠点別レイヤを対象
+ *      - 対象レイヤ未作成時は `data.sources` をコピーして開始（既存 writeSources と互換、編集すると override が新規作成される）
+ *  - deleteWithCascade は対象レイヤの更新と applicants[].src クリアを 1 saveClientData にまとめる
+ *  - 子アカウント呼出時は opts.applicantBaseFilter で「自拠点 applicants のみ」絞り込みを可能にする
+ *    （AuthContext.filterDataByBase が applicants を base 絞り込みしていた挙動の再現）
+ *
+ * 既存挙動メモ:
+ *  - SourceManagement.deleteSource は applicants[].src クリア時に base 絞り込みをしていなかったが、
+ *    子アカ時は AuthContext.filterDataByBase が applicants を自拠点のみに絞っているため
+ *    結果的に「見えている applicants = 自拠点のみ」となり実害なし。
+ *    Repository 化に際しては JobRepository に揃え applicantBaseFilter opt を提供。
+ *    呼出側 (SourceManagement.tsx) は child account のみ applicantBaseFilter を渡す。
+ *
+ * スコープ外:
+ *  - Source 型への baseName 追加（Firestore 化時に再設計）
+ *  - Source.password の暗号化 / 秘匿化（既存仕様維持）
+ *  - rename / 並び替え / 並列重複名チェック（必要になったら別フェーズで検討）
+ *  - EmailTemplateRepository / FilterConditionRepository（Phase N-3 以降）
+ *
+ * Firestore マッピング:
+ *  - 全社共通レイヤ: `/tenants/{tid}/sources/{sourceId}` doc（baseName フィールドなし or null）
+ *  - 拠点別レイヤ: `/tenants/{tid}/sources/{sourceId}` doc（baseName フィールド指定）or
+ *    `/tenants/{tid}/baseOverrides/{baseName}/sources/{sourceId}`（設計判断は Phase J 時に確定）
+ *  - deleteWithCascade は sources collection の doc 削除 + applicants collection の対象 doc 更新を
+ *    runTransaction / WriteBatch で 1 atomic 化
+ */
+export interface SourceRepository {
+  /**
+   * 応募媒体一覧を返す。
+   *  - baseName 未指定: `data.sources`（全社共通）
+   *  - baseName 指定 + `data.sourcesByBase[baseName]` あり: `data.sourcesByBase[baseName]`
+   *  - baseName 指定 + `data.sourcesByBase[baseName]` 未作成: `data.sources`（フォールバック、既存 UI 表示互換）
+   *  - 並び順は保存時のまま
+   */
+  list(clientId: string, baseName?: string): Source[];
+  /**
+   * 応募媒体を 1 件追加する。
+   *  - id は対象レイヤの `max(s.id) + 1` で採番（既存 SourceManagement.addSource と互換。
+   *    既存挙動: 0 件レイヤなら id=1 から開始）
+   *  - baseName 指定 + 対象レイヤ未作成: `data.sources` をコピーして開始 → 末尾に追加し
+   *    `data.sourcesByBase[baseName]` として保存（既存 writeSources 互換、override 新規作成）
+   *  - 重複名チェックは行わない（呼出側責務）
+   *  - 戻り値は採番後の Source
+   */
+  create(
+    clientId: string,
+    source: Omit<Source, 'id'>,
+    baseName?: string,
+  ): Source;
+  /**
+   * 応募媒体を部分更新する。
+   *  - 対象 sourceId が見つからなければ undefined を返す（saveClientData を呼ばない）
+   *  - patch に id が混入しても無視（id は不変）
+   *  - 対象レイヤが既存 + 全フィールドが現状と一致なら saveClientData を呼ばない（無駄な書込防止）
+   *  - 対象レイヤが未作成 (= baseName 指定で `data.sourcesByBase[baseName]` が無い) の場合:
+   *      patch 内容が現状と一致しても saveClientData を呼んで override を新規作成する
+   *      （既存 writeSources 挙動互換: 「base 未設定で編集 = override 作成」）
+   *  - 戻り値は更新後 Source（または既存値一致時の current）
+   */
+  update(
+    clientId: string,
+    sourceId: number,
+    patch: Partial<Omit<Source, 'id'>>,
+    baseName?: string,
+  ): Source | undefined;
+  /**
+   * 応募媒体削除と applicants[].src クリアを 1 saveClientData に集約する。
+   *
+   * 動作:
+   *  - 対象レイヤ (`data.sources` または `data.sourcesByBase[baseName]`) から sourceId 一致を除去
+   *      - baseName 指定 + 対象レイヤ未作成: `data.sources` をコピーして開始 → 削除（既存 writeSources/deleteSource 互換）
+   *  - 対象 sourceId が見つからなければ no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - applicants[].src === removedSourceName を '' にクリア
+   *      - `opts.applicantBaseFilter` 指定時: `a.base === applicantBaseFilter` のみ対象
+   *      - 未指定時: 全 applicants 横断（既存 SourceManagement.deleteSource の挙動を維持）
+   *  - applicants[].updatedAt は touch しない（既存 deleteSource 互換）
+   *  - 上記 2 配列の更新を 1 saveClientData にまとめる
+   */
+  deleteWithCascade(
+    clientId: string,
+    sourceId: number,
+    opts?: {
+      /** 対象レイヤ。undefined = 全社共通 / 指定 = 拠点別 */
+      baseName?: string;
+      /** applicants[].src クリア対象の base 絞り込み。undefined = 全 applicants 横断 */
+      applicantBaseFilter?: string;
+    },
+  ): DeleteSourceCascadeResult;
+  /**
+   * 拠点別応募媒体オーバーライドレイヤをまるごと削除する（既存 SourceManagement.removeOverride 互換）。
+   *  - `data.sourcesByBase[baseName]` キーを delete
+   *  - キー不在なら no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - applicants は触らない（override を消すと全社共通レイヤにフォールバックする = 名前一致は維持される）
+   */
+  removeBaseOverride(clientId: string, baseName: string): RemoveSourceBaseOverrideResult;
 }
