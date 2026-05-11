@@ -200,6 +200,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-2** | **SourceRepository 型 + LocalStorage 実装 + SourceManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1 JobRepository の base-override 型を機械的に横展開（`sources` / `sourcesByBase` + `applicants[].src` カスケード）。Source 型・データ形状・UI・文言は無変更** | **✅ 完了** |
 | **N-3** | **EmailTemplateRepository 型 + LocalStorage 実装 + EmailTemplateManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1/N-2 と同じ base-override 型だが cascade なし（applicants 触らない）。1000ms debounce auto-save は呼出側責務として既存挙動維持。EmailTemplate 型・データ形状・UI・文言・auto-save タイミングは無変更** | **✅ 完了** |
 | **N-4** | **HearingRepository 型 + LocalStorage 実装（list / upsert のみ）+ HearingManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / jobName キー型 / cascade なし / 削除 API なし。800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持。HearingTemplate 型・データ形状・UI・文言・debounce タイミングは無変更** | **✅ 完了** |
+| **N-5** | **既存 reportRepository を拡張（getReportSchedule / saveReportSchedule を追加）。ReportScheduleSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。singleton 設定型 / 保存ボタン式 / debounce なし。新規 ReportScheduleRepository は作らず recruitmentGoals と同居（Firestore `/tenants/{tid}/settings/global` doc 設計と整合）。ReportScheduleSetting 型・データ形状・UI・文言・DEFAULT_SETTING・email validation は無変更。lastRunAt / lastRunStatus / lastRunError は将来サーバー配信エンジン用で N-5 では専用 API を作らない（読取り経路のみ提供）** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -209,7 +210,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張）完了。詳細は §14 を参照
 
 ---
 
@@ -804,8 +805,8 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-2**: `SourceRepository` 型 + LocalStorage 実装 + SourceManagement.tsx 移行
 - [x] **N-3**: `EmailTemplateRepository` 型 + LocalStorage 実装 + EmailTemplateManagement.tsx 移行（cascade なし、1000ms debounce auto-save は呼出側責務として既存挙動維持）
 - [x] **N-4**: `HearingRepository` 型 + LocalStorage 実装 + HearingManagement.tsx 移行（base-override なし / jobName キー / cascade なし / 削除 API なし、800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持）
-- [ ] **N-5**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
-- [ ] **N-6**: `ReportScheduleRepository` または reportRepository 拡張
+- [x] **N-5**: 既存 `reportRepository` 拡張（getReportSchedule / saveReportSchedule 追加） + ReportScheduleSettings.tsx 移行（singleton 設定型 / 保存ボタン式 / debounce なし、新規 Repository は作らず採用目標と同居）
+- [ ] **N-6**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
 - [ ] **N-7**: `MediaCostRepository`（ネスト map `[ym][src]`）
 - [ ] **N-8**: `FilterConditionRepository`（base 別 + legacy `filterCondition` フォールバック）
 - [ ] **N-9**: `ScreeningRepository`（byJob override + axes migration）
@@ -928,12 +929,56 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - docId 候補: sanitized jobName（衝突リスクあり）/ random id + jobName field（Job rename 時に jobName field 更新が必要、または jobId 外部キー化）→ 設計判断は Phase J 時
 - `upsert` は `Promise<HearingTemplate>` 化し、画面側は async/await + saveState を Promise 完了まで延長。Job rename / delete カスケード連携もこのタイミングで検討（jobs collection の rename listener / cloud function での bulk update）
 
-### 14.7 残タスク
+### 14.7 N-5: ReportSchedule（reportRepository 拡張 / singleton 設定型 / 保存ボタン式）
 
-- **N-5 以降**: §14.2 の通り、設定系 6 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-5 候補は Exclusion（global 単一配列、シンプル）/ MediaCost / ReportSchedule / FilterCondition / Screening / Chatbot
+#### 責務
+
+- `data.reportSchedule` の get / save（singleton な ReportScheduleSetting オブジェクト）
+- API: `getReportSchedule(clientId)` / `saveReportSchedule(clientId, setting)` を **既存 reportRepository に追加**（新規 Repository は作らない）
+- `saveReportSchedule` は全置換（partial update なし、no-op 短絡なし、saveClientData 1 回）
+
+#### 別 Repository を新設せず reportRepository 拡張にした理由
+
+- ドメインが近い（どちらも採用レポート関連設定 / 利用画面は別だが論理ドメインは同じ）
+- 既存 `LocalStorageReportRepository` が 2 メソッドのみと薄く、singleton 設定追加で適度な責務範囲に成長する
+- Firestore マッピング（`/tenants/{tid}/settings/global` doc 内に `recruitmentGoals` と `reportSchedule` を同居させる設計、firestore-design.md §6.2/§6.4）と整合
+- handoff checklist L128 / firestore-design.md L379 で「reportRepository 拡張でも可」と既に明記済
+
+#### N-1〜N-4 との差分
+
+- **singleton 設定型**: id なし / jobName なし / base-override なし / 配列ですらない（オブジェクト 1 個）。`upsert` 等のキー操作 API は不要、`save` で全置換するだけ
+- **保存ボタン式（debounce なし）**: フィールド変更は local state (`setting`) のみ更新、「保存」ボタンクリック時に 1 回だけ Repository を呼ぶ。EmailTemplate (1000ms) / Hearing (800ms) のような auto-save タイミング維持の考慮は不要
+- **新規 Repository を作らない**: 既存 reportRepository を拡張する初の N-5 ケース（singleton + 既存薄 Repository への追加というパターン）
+- **lastRunAt / lastRunStatus / lastRunError の扱い**: ReportScheduleSetting に含まれるが、現状クライアント側で書込する経路はない（将来サーバー側配信エンジンが書き込む想定）。読取りは `getReportSchedule` で setting 全体に同居する形で取得され、`saveReportSchedule` は呼出側の state.setting にこれらが含まれていれば保持する。**N-5 では lastRun* 専用 API は作らない**
+
+#### 既知の挙動メモ（既存仕様、本フェーズで触らない）
+
+- **権限ガードなし**: ReportScheduleSettings.tsx は `canEdit` / `permissions.*` チェックを持たない。ルーティング側の `reportEnabled = hasActiveOption(client, 'recruitmentReport')` でアクセスを絞っているのみ。N-5 でも追加しない
+- **logAction なし**: 設定保存時の operationLogs 追記なし。N-5 でも追加しない
+- **DEFAULT_SETTING フォールバックは呼出側責務**: `useEffect` で `clientData.reportSchedule` が unset の場合に state はそのまま `DEFAULT_SETTING` のまま。save すると DEFAULT_SETTING が永続化される（既存挙動）。Repository 側はフォールバックしない
+- **lastRun* と recipients の同時編集の race（将来）**: サーバー配信エンジン稼働後は Cloud Functions が `lastRunAt` を書込中にユーザーが「保存」を押すと、saveReportSchedule の全置換で `lastRunAt` が古い値で上書きされる可能性。N-5 では未対応（Phase J で `merge: true` / 部分更新 API / トランザクションで対処）
+
+#### 移行先
+
+- `src/client/pages/settings/ReportScheduleSettings.tsx` の `save()` 関数を Repository 経由に置換（1 関数のみ変更）
+- `useAuth` 分割代入は `updateClientData` → `reloadClientData` + `client` に差し替え
+- `ownerId = resolveDataOwnerId(client)` を save() 内で参照（書込は parent clientId に統一、既存責務境界と同じ）
+- UI / 文言 / DEFAULT_SETTING / 保存ボタン / saved 表示 / email validation (regex) / next 配信予定計算 (`nextScheduledRun`) は変更しない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- 案 A: `/tenants/{tid}/settings/global` doc 内 `reportSchedule` フィールド（recruitmentGoals / filterCondition / screeningCriteria / mediaCosts と同居）
+- 案 B: `/tenants/{tid}/reportSchedule` 専用 doc（lastRun* を Cloud Functions が頻繁に書込するなら分離が合理的）
+- `saveReportSchedule` は `Promise<void>` 化、画面側は async/await。`merge: true` で部分更新化し lastRun* の race を回避
+- 配信エンジン用 API（markRunSuccess / markRunFailure）は Cloud Functions 専用書込権限 + Security Rules で `recipients` / `enabled` 等の編集権限と分離する設計余地あり
+
+### 14.8 残タスク
+
+- **N-6 以降**: §14.2 の通り、設定系 5 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-6 候補は Exclusion（global 単一配列、シンプル）/ MediaCost / FilterCondition / Screening / Chatbot
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing / N-5 ReportSchedule は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
 - **`Source.password` の暗号化 / 秘匿化**: 既存仕様維持で本フェーズ対象外。Firestore 化（Phase J）と合わせて検討（client-side encryption / Cloud KMS / 別 collection 分離など）
 - **EmailTemplateManagement の closure off-by-one / アンマウント時 flush**: 既存挙動。改善する場合は別フェーズ（useRef で最新値を参照する pattern / useEffect cleanup で flush 等）
 - **HearingManagement の Job 切替時 flush / Job rename・delete カスケード**: 既存挙動。改善する場合は別フェーズ（切替 useEffect で `clearTimeout` + 即時 doSave / jobRepository.deleteWithCascade 連携）
+- **ReportScheduleSettings の lastRun* 専用書込 API**: サーバー配信エンジン稼働時に追加（markRunSuccess / markRunFailure）。Firestore 化（Phase J）と合わせて Cloud Functions 書込権限分離も検討

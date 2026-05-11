@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -805,7 +805,14 @@ export interface BaseRepository {
 
 /**
  * レポート関連の永続化操作。
- * 現状は採用目標 (recruitmentGoals) のみ。将来は monthlyStats キャッシュも追加する。
+ * 採用目標 (recruitmentGoals) とレポート定期配信設定 (reportSchedule) を扱う。
+ * 将来は monthlyStats キャッシュも追加する。
+ *
+ * N-5 で reportSchedule の get/save を追加（singleton 設定型 / 保存ボタン式 / debounce なし）。
+ * 別 Repository に分けず本 Repository を拡張した理由:
+ *  - ドメインが近い（どちらも採用レポート関連設定）
+ *  - 既存 LocalStorageReportRepository が薄く、singleton 設定追加で適度な責務範囲に成長する
+ *  - Firestore マッピング（`/tenants/{tid}/settings/global` doc 内に同居）と整合
  */
 export interface ReportRepository {
   /** 月次採用目標を取得 */
@@ -816,6 +823,30 @@ export interface ReportRepository {
    * 既存の他フィールドは破壊しない。
    */
   updateRecruitmentGoal(clientId: string, yearMonth: string, value: number): void;
+  /**
+   * レポート定期配信設定を返す（N-5 で追加）。
+   *  - 未保存時は undefined を返す
+   *  - DEFAULT_SETTING のフォールバックは呼出側（ReportScheduleSettings.tsx）の責務（既存挙動維持）
+   *  - lastRunAt / lastRunStatus / lastRunError は将来サーバー配信エンジンが書き込むフィールドで、
+   *    現状クライアント側で更新する経路はない（読み取りは本 API で返ってくる）
+   */
+  getReportSchedule(clientId: string): ReportScheduleSetting | undefined;
+  /**
+   * レポート定期配信設定を**全置換**で保存（N-5 で追加）。
+   *  - `data.reportSchedule` を渡された setting オブジェクトで丸ごと差し替える
+   *  - partial update は受け付けない（呼出側で setting を組み立てる前提。既存 updateClientData 互換）
+   *  - 他フィールド (lastRunAt / lastRunStatus / lastRunError 等) を含む setting が想定。
+   *    画面側の useEffect で clientData.reportSchedule を state に読み込む経路により、
+   *    save 時にもこれらを保持したまま全置換するのが既存挙動
+   *  - no-op 短絡なし（既存 updateClientData も毎回 saveClientData を呼んでいた）
+   *  - saveClientData は 1 回のみ
+   *
+   * 将来 API 候補（N-5 では実装しない）:
+   *  - markRunSuccess(clientId, at: string)   // 配信エンジン成功時
+   *  - markRunFailure(clientId, at: string, error: string)  // 配信エンジン失敗時
+   *  → Firestore 化（Phase J）で Cloud Functions 経由の書込権限分離と合わせて検討
+   */
+  saveReportSchedule(clientId: string, setting: ReportScheduleSetting): void;
 }
 
 /**

@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Mail, Clock, Plus, Trash2, Save, AlertCircle } from 'lucide-react';
 import type { ReportScheduleSetting } from '@/types';
 import { nextScheduledRun, frequencyLabel, rangePresetLabel } from '@/utils/reports/schedule';
+import { reportRepository, resolveDataOwnerId } from '@/repositories';
 
 const DEFAULT_SETTING: ReportScheduleSetting = {
   enabled: false,
@@ -18,10 +19,14 @@ const labelStyle: React.CSSProperties = { fontSize: '0.8125rem', fontWeight: 600
 const inputStyle: React.CSSProperties = { padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.875rem', width: '100%', boxSizing: 'border-box' };
 
 const ReportScheduleSettings: React.FC = () => {
-  const { clientData, updateClientData } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [setting, setSetting] = useState<ReportScheduleSetting>(DEFAULT_SETTING);
   const [newEmail, setNewEmail] = useState('');
   const [saved, setSaved] = useState(false);
+
+  // N-5: reportRepository への書き込みは parent の clientId で行う（updateClientData と同じ責務境界）。
+  // reportSchedule は singleton 設定で base-override を持たないため、追加 opts は不要。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
 
   useEffect(() => {
     if (clientData?.reportSchedule) setSetting(clientData.reportSchedule);
@@ -49,7 +54,9 @@ const ReportScheduleSettings: React.FC = () => {
   };
 
   const save = () => {
-    updateClientData((data) => ({ ...data, reportSchedule: setting }));
+    if (!ownerId) return;
+    reportRepository.saveReportSchedule(ownerId, setting);
+    reloadClientData();
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
