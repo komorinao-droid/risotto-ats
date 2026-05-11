@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Wallet, Plus, Trash2, Save, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { mediaCostRepository, resolveDataOwnerId } from '@/repositories';
 
 /**
  * 媒体費用管理: 月 × 媒体 のマトリクスで費用を入力
@@ -23,7 +24,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const MediaCostManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, client, reloadClientData } = useAuth();
 
   // 表示する月リスト（センター月から前後にスクロール可能）
   const [centerMonth, setCenterMonth] = useState<string>(() => {
@@ -63,48 +64,18 @@ const MediaCostManagement: React.FC = () => {
 
   const hasUnsaved = Object.keys(draft).length > 0;
 
-  /** 全角数字→半角、カンマ/空白除去、上限値で正規化 */
-  const parseAmount = (raw: string): number | null => {
-    if (!raw) return null;
-    // 全角数字を半角に変換
-    const halfWidth = raw.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
-    const cleaned = halfWidth.replace(/[,\s]/g, '');
-    const num = parseInt(cleaned, 10);
-    if (!Number.isFinite(num)) return null;
-    if (num <= 0) return null;
-    // 1億円以上は誤入力扱い（現実的にあり得ない月次媒体費）
-    if (num > 100_000_000) return null;
-    return num;
-  };
-
+  // N-7: 媒体費用 draft 反映 / removeSource を mediaCostRepository 経由に集約。
+  //  - parseAmount のルール / 月キー pruning / invalidCount 集計は Repository 内に閉じ込め
+  //  - UI は raw 文字列 draft を渡し、{invalidCount} を受け取って alert を判定するのみ
+  //  - 書込は parent の clientId（resolveDataOwnerId）。base-override なし
   const save = () => {
-    let invalidCount = 0;
-    updateClientData((data) => {
-      const newCosts = { ...(data.mediaCosts || {}) };
-      Object.entries(draft).forEach(([ym, monthly]) => {
-        const target = { ...(newCosts[ym] || {}) };
-        Object.entries(monthly).forEach(([src, raw]) => {
-          const trimmed = raw.trim();
-          if (trimmed === '') {
-            delete target[src];
-            return;
-          }
-          const num = parseAmount(trimmed);
-          if (num !== null) {
-            target[src] = num;
-          } else {
-            invalidCount += 1;
-            delete target[src];
-          }
-        });
-        if (Object.keys(target).length > 0) newCosts[ym] = target;
-        else delete newCosts[ym];
-      });
-      return { ...data, mediaCosts: newCosts };
-    });
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    const result = mediaCostRepository.saveDraft(ownerId, draft);
     setDraft({});
-    if (invalidCount > 0) {
-      alert(`${invalidCount} 件の不正値（負数 / 0 / 1億円超 / 数字以外）はスキップして保存しました。`);
+    reloadClientData();
+    if (result.invalidCount > 0) {
+      alert(`${result.invalidCount} 件の不正値（負数 / 0 / 1億円超 / 数字以外）はスキップして保存しました。`);
     }
   };
 
@@ -117,16 +88,10 @@ const MediaCostManagement: React.FC = () => {
 
   const removeSource = (src: string) => {
     if (!window.confirm(`媒体「${src}」の全期間の費用データを削除しますか？`)) return;
-    updateClientData((data) => {
-      const newCosts = { ...(data.mediaCosts || {}) };
-      Object.keys(newCosts).forEach((ym) => {
-        const target = { ...newCosts[ym] };
-        delete target[src];
-        if (Object.keys(target).length > 0) newCosts[ym] = target;
-        else delete newCosts[ym];
-      });
-      return { ...data, mediaCosts: newCosts };
-    });
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    mediaCostRepository.removeSource(ownerId, src);
+    reloadClientData();
     setExtraSources((prev) => prev.filter((s) => s !== src));
   };
 

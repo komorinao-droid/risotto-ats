@@ -1376,3 +1376,100 @@ export interface ExclusionRepository {
    */
   remove(clientId: string, id: number): void;
 }
+
+/**
+ * 媒体費用 draft 反映 (`MediaCostRepository.saveDraft`) の結果。
+ *  - invalidCount: parseAmount が null を返した cell 数（負数 / 0 / 1 億円超 / 数字以外）。
+ *      呼出側 UI は `> 0` の場合に既存 alert 文言（「N 件の不正値（負数 / 0 / 1億円超 / 数字以外）はスキップして保存しました。」）を表示する責務
+ *  - appliedCells: set または delete が実際に行われた cell 数（既存値 == 新値の no-op cell は含めない）
+ *  - changed: 実際に saveClientData が呼ばれたか（draft 全 cell が現状と一致した場合は false で localStorage 書込ゼロ）
+ */
+export interface SaveMediaCostDraftResult {
+  invalidCount: number;
+  appliedCells: number;
+  changed: boolean;
+}
+
+/**
+ * 媒体名による cascade 削除 (`MediaCostRepository.removeSource`) の結果。
+ *  - affectedMonths: 削除対象 entry が存在した月数（pruning で月キーごと delete された数も含む）
+ *      `0` の場合は saveClientData が呼ばれていない（no-op）
+ */
+export interface RemoveMediaCostSourceResult {
+  affectedMonths: number;
+}
+
+/**
+ * 媒体費用 (mediaCosts) の CRUD を扱う Repository（Phase N-7 で追加）。
+ *
+ * 想定する移行先:
+ *  - `MediaCostManagement.tsx` の `updateClientData` 2 箇所（save / removeSource）を本 API 経由に置換
+ *
+ * 方針:
+ *  - **base-override なし**（tenant 全体で 1 リスト共有。子アカも親と同じ mediaCosts を参照）
+ *      → `pickLayer`/`writeLayer`/`removeBaseOverride` を持たない / `applicantBaseFilter` opt も不要
+ *  - **parseAmount を Repository 内に集約**:
+ *      ルール（全角→半角 / カンマ・空白除去 / int / 1〜100,000,000 / それ以外 invalid）を画面側に再実装しない。
+ *      UI は raw 文字列を draft として渡し、`{invalidCount}` を受け取って alert を判定する
+ *  - **月キーの pruning**: 月内 entry が 0 件になった時にその月キーごと delete する既存挙動を Repository で厳密維持
+ *      （Firestore 化時に「空 doc が残る」「monthsWithCost のカウントが狂う（`clientStats.ts`）」リスクを防ぐ）
+ *  - **saveDraft は partial merge**: draft に含まれない月/cell は触らない（全置換ではない）
+ *  - **getAll は 2 階層 deep copy**: 呼出側 mutate が localStorage に直接漏れない（既存 `storage.getClientData` は shallow copy のみ）
+ *
+ * N-1〜N-6 との差分:
+ *  - **ネストマップ型** (yearMonth → sourceName → number): 初の N-7 ケース
+ *  - **draft 一括反映 API**: `setEntry` のような cell 単位 API ではなく、UI の draft state を 1 回で flush する
+ *      （Firestore 化時に WriteBatch を組み直さなくて済む / アトミック性が自然に確保される）
+ *  - **削除カスケード方向が逆**: sourceName による全月横断 cascade（媒体名で全期間削除）
+ *  - **invalidCount 返却**: parse 失敗 cell の存在を呼出側 UI に通知する初のケース
+ *
+ * スコープ外:
+ *  - Source rename / delete との連動（pre-existing orphan、SourceRepository.update / deleteWithCascade との連携は別フェーズ）
+ *  - extraSources の永続化（UI ローカル state のみ、媒体追加 UX 改善は別フェーズ）
+ *  - 1 億円上限のポリシー化（既存値ハードコード維持）
+ *  - cell 単位 setEntry API（draft 一括反映で十分）
+ *  - 集計 API（sumMediaCostsInRange / calcCostBreakdown は aggregate.ts の純粋関数で完結）
+ *
+ * Firestore マッピング（Phase J）:
+ *  - 案 A: `/tenants/{tid}/settings/global` doc の `mediaCosts` map field（recruitmentGoals / reportSchedule と同居、firestore-design §6.2）
+ *  - 案 B: `/tenants/{tid}/mediaCosts/{ym}` 月別 doc（24 ヶ月 × 多媒体で 1 MB に近づく場合）
+ *  - `saveDraft` は WriteBatch で 1 transaction 化、`removeSource` は影響月の doc 更新を WriteBatch で 1 atomic 化
+ *  - 部分更新は `merge: true` で各月 doc を更新（lastRunAt の race 問題と類似）
+ */
+export interface MediaCostRepository {
+  /**
+   * 全期間の media costs を返す（base-override なし / 並び順は保存時のまま）。
+   *  - `data.mediaCosts` を 2 階層 deep copy で返す（第 1 階層 `{...obj}` + 第 2 階層 `{...inner}`）
+   *  - undefined の場合は `{}` を返す
+   */
+  getAll(clientId: string): { [yearMonth: string]: { [sourceName: string]: number } };
+  /**
+   * draft を partial merge で反映する。
+   *  - 各 cell について:
+   *      - 値が空文字（`trim()` 後）: 該当 entry を delete
+   *      - `parseAmount` が number を返す: set
+   *      - `parseAmount` が null を返す: delete + invalidCount++
+   *  - 月内 entry が 0 件になったらその月キーごと delete（pruning）
+   *  - draft に含まれない月/cell は触らない（全置換ではない）
+   *  - 全 cell が no-op の場合は saveClientData を呼ばない（`changed: false`）
+   *
+   * parseAmount のルール:
+   *  - 全角数字 `０-９` を半角に変換
+   *  - カンマ・空白を除去 (`/[,\s]/g`)
+   *  - `parseInt(..., 10)`
+   *  - `Number.isFinite(n) && n >= 1 && n <= 100_000_000` のみ valid
+   *  - それ以外（0 / 負数 / 1 億円超 / 数字以外）は null = invalid
+   */
+  saveDraft(
+    clientId: string,
+    draft: { [yearMonth: string]: { [sourceName: string]: string } }
+  ): SaveMediaCostDraftResult;
+  /**
+   * 指定 sourceName のエントリを全月から削除する。
+   *  - 月内 entry が 0 件になったらその月キーごと delete（pruning）
+   *  - 該当エントリが 1 件もない場合は saveClientData を呼ばない（`affectedMonths: 0`）
+   *  - UI 側の `window.confirm` ダイアログは呼出責務（Repository には持たせない）
+   *  - sources 配列（`data.sources`）や `extraSources` ローカル state には触らない
+   */
+  removeSource(clientId: string, sourceName: string): RemoveMediaCostSourceResult;
+}
