@@ -25,6 +25,7 @@ import { LocalStorageJobRepository } from './localStorage/jobRepository';
 import { LocalStorageSourceRepository } from './localStorage/sourceRepository';
 import { LocalStorageEmailTemplateRepository } from './localStorage/emailTemplateRepository';
 import { LocalStorageHearingRepository } from './localStorage/hearingRepository';
+import { LocalStorageExclusionRepository } from './localStorage/exclusionRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -40,6 +41,7 @@ export const jobRepository = new LocalStorageJobRepository();
 export const sourceRepository = new LocalStorageSourceRepository();
 export const emailTemplateRepository = new LocalStorageEmailTemplateRepository();
 export const hearingRepository = new LocalStorageHearingRepository();
+export const exclusionRepository = new LocalStorageExclusionRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -69,6 +71,8 @@ export type {
   DeleteEmailTemplateResult,
   RemoveEmailTemplateBaseOverrideResult,
   HearingRepository,
+  ExclusionRepository,
+  ExclusionAddResult,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,

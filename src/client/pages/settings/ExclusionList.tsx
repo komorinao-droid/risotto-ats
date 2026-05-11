@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { ExclusionEntry } from '@/types';
 import Modal from '@/components/Modal';
-import { applicantRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
+import { applicantRepository, exclusionRepository, resolveDataOwnerId, type BulkStageChangePatch } from '@/repositories';
 import { getClientOperatorLabel } from '@/utils/clientOperator';
 
 const PAGE_SIZE = 30;
@@ -34,7 +34,7 @@ const typeLabels: Record<ExclusionEntry['type'], string> = {
 };
 
 const ExclusionList: React.FC = () => {
-  const { clientData, updateClientData, client, reloadClientData } = useAuth();
+  const { clientData, client, reloadClientData } = useAuth();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<{ email: boolean; phone: boolean; name_birth: boolean }>({
     email: true,
@@ -86,6 +86,8 @@ const ExclusionList: React.FC = () => {
   };
 
   const addEntry = () => {
+    if (!client) return;
+
     let entry: Omit<ExclusionEntry, 'id'>;
     if (formType === 'email') {
       if (!formEmail.trim()) return;
@@ -98,56 +100,42 @@ const ExclusionList: React.FC = () => {
       entry = { type: 'name_birth', name: formName.trim(), birthDate: formBirthDate };
     }
 
-    // 重複チェック（同じ条件のエントリが既にあれば登録しない）
-    const existingList = clientData?.exclusionList || [];
-    const duplicate = existingList.find((e) => {
-      if (e.type !== entry.type) return false;
-      if (entry.type === 'email') return e.email?.toLowerCase() === entry.email?.toLowerCase();
-      if (entry.type === 'phone') return (e.phone || '').replace(/[-\s]/g, '') === (entry.phone || '').replace(/[-\s]/g, '');
-      if (entry.type === 'name_birth') return e.name === entry.name && e.birthDate === entry.birthDate;
-      return false;
-    });
-    if (duplicate) {
+    // N-6: exclusionList へのエントリ追加は exclusionRepository.add 経由に集約。
+    //  - dedup 判定 / id 採番 / saveClientData の制御は Repository 内に閉じ込め
+    //  - changeStageBulk による該当 applicant の一括除外は画面側 orchestrator の責務として維持
+    //  - Firestore 化時に add + changeStageBulk を 1 transaction 化する余地は別フェーズ
+    const ownerId = resolveDataOwnerId(client);
+    const result = exclusionRepository.add(ownerId, entry);
+    if (!result.ok) {
+      // duplicate: saveClientData は呼ばれていない。既存と同じメッセージを表示して return
       setAddResult('既に同じ条件が登録されています。');
       return;
     }
 
-    // Step 1: exclusionList へのエントリ追加のみ（applicants には触らない）
-    updateClientData((data) => {
-      const maxId = data.exclusionList.reduce((m, e) => Math.max(m, e.id), 0);
-      const newEntry: ExclusionEntry = { id: maxId + 1, ...entry };
-      return {
-        ...data,
-        exclusionList: [...data.exclusionList, newEntry],
-      };
-    });
-
-    // Step 2: 該当 applicants は changeStageBulk 経由で履歴を残しつつ一括除外
+    // Step 2: 該当 applicants は changeStageBulk 経由で履歴を残しつつ一括除外（既存挙動維持）
     let matchCount = 0;
-    if (client) {
-      const matched = (clientData?.applicants || []).filter((a) => {
-        if (!a.active) return false;
-        if (formType === 'email' && a.email === entry.email) return true;
-        if (formType === 'phone' && a.phone === entry.phone) return true;
-        if (formType === 'name_birth' && a.name === entry.name && a.birthDate === entry.birthDate) return true;
-        return false;
+    const matched = (clientData?.applicants || []).filter((a) => {
+      if (!a.active) return false;
+      if (formType === 'email' && a.email === entry.email) return true;
+      if (formType === 'phone' && a.phone === entry.phone) return true;
+      if (formType === 'name_birth' && a.name === entry.name && a.birthDate === entry.birthDate) return true;
+      return false;
+    });
+    if (matched.length > 0) {
+      const toStageName = excludeStatus?.name || '対象外';
+      const patches: BulkStageChangePatch[] = matched.map((a) => ({
+        applicantId: a.id,
+        toStage: toStageName,
+        patch: { active: false },
+      }));
+      const bulkResult = applicantRepository.changeStageBulk(ownerId, patches, {
+        operator: getClientOperatorLabel(client),
+        reason: 'exclusion_list_applied',
       });
-      if (matched.length > 0) {
-        const ownerId = resolveDataOwnerId(client);
-        const toStageName = excludeStatus?.name || '対象外';
-        const patches: BulkStageChangePatch[] = matched.map((a) => ({
-          applicantId: a.id,
-          toStage: toStageName,
-          patch: { active: false },
-        }));
-        const result = applicantRepository.changeStageBulk(ownerId, patches, {
-          operator: getClientOperatorLabel(client),
-          reason: 'exclusion_list_applied',
-        });
-        matchCount = result.updatedCount;
-        reloadClientData();
-      }
+      matchCount = bulkResult.updatedCount;
     }
+
+    reloadClientData();
 
     setAddResult(
       matchCount > 0
@@ -158,10 +146,12 @@ const ExclusionList: React.FC = () => {
 
   const deleteEntry = (id: number) => {
     if (!window.confirm('この除外ルールを削除しますか？')) return;
-    updateClientData((data) => ({
-      ...data,
-      exclusionList: data.exclusionList.filter((e) => e.id !== id),
-    }));
+    if (!client) return;
+    // N-6: 削除も exclusionRepository.remove 経由（該当なしなら Repository 内で no-op）。
+    //  - applicants の stage / active は触らない既存仕様を Repository 側で保証
+    const ownerId = resolveDataOwnerId(client);
+    exclusionRepository.remove(ownerId, id);
+    reloadClientData();
   };
 
   const displayValue = (e: ExclusionEntry): string => {

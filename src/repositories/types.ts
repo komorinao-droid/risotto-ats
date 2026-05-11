@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1292,4 +1292,87 @@ export interface HearingRepository {
    * Phase N-4 では未実装 / 未呼出。
    */
   // removeByJob?(clientId: string, jobName: string): { removed: boolean };
+}
+
+/**
+ * 除外リスト追加 (`ExclusionRepository.add`) の結果。
+ *  - `ok: true` の場合は採番済の entry（id を含む）を返す
+ *  - `ok: false` の場合は理由を返す（現状 'duplicate' のみ）
+ *
+ * dedup 判定ルール（Repository 内部に集約 / UI 側で二重に書かない）:
+ *  - type === 'email': 既存 entry の `email?.toLowerCase()` と新 entry の `email?.toLowerCase()` が一致
+ *  - type === 'phone': 既存 entry / 新 entry の `phone` をそれぞれ `/[-\s]/g` で除去後、文字列一致
+ *  - type === 'name_birth': 既存 entry の `name` と `birthDate` が新 entry と完全一致
+ *  - type が異なるエントリ同士は別物として扱う（同じメール文字列が email と name_birth に重複登録される事は無いが、
+ *    仮にあっても duplicate にしない）
+ */
+export type ExclusionAddResult =
+  | { ok: true; entry: ExclusionEntry }
+  | { ok: false; reason: 'duplicate' };
+
+/**
+ * 除外リスト (ExclusionEntry) の CRUD を扱う Repository（Phase N-6 で追加）。
+ *
+ * 想定する移行先:
+ *  - `ExclusionList.tsx` の `updateClientData` 直更新を本 API 経由に置換
+ *
+ * 方針:
+ *  - **base-override なし**（tenant 全体で 1 リストを共有。子アカウントも親と同じ exclusionList を参照）
+ *      → `data.exclusionListByBase` のような拠点別レイヤは存在しない / 追加もしない
+ *  - **dedup 判定を Repository 内部に集約**:
+ *      画面側 (ExclusionList.tsx) は `{ok:false, reason:'duplicate'}` を受け取った時のメッセージ表示のみを担当。
+ *      正規化ルール (email lowercase / phone strip `-\s` / name_birth exact) を画面側に再実装しない
+ *  - **changeStageBulk は本 Repository に含めない**:
+ *      add 成功後に「該当 applicant の一括除外」を行うのは `applicantRepository.changeStageBulk(..., { reason: 'exclusion_list_applied' })` の責務。
+ *      呼出側 (ExclusionList.tsx) で 2 段呼びを維持する（LocalStorage では事実上 synchronous で整合性問題なし、
+ *      Firestore 化時に 1 transaction 化を別 API として検討予定 / `firestore-design §4.1`）
+ *  - **applicantRepository.delete 側の cleanup は据え置き**:
+ *      `applicantRepository.delete` 内で `(ex as { applicantId?: number }).applicantId === applicantId` 一致のエントリを除去する
+ *      cascade は既存通り同 Repository に閉じ込める（cleanupByApplicantId のような API は ExclusionRepository に作らない）
+ *  - **ExclusionEntry 型は無変更**: `applicantId?: number` は型未宣言の旧データ互換隠しフィールド
+ *      （`applicantRepository.delete` のみが読む）。Phase N-6 では型追加しない
+ *
+ * id 採番:
+ *  - `max(existing.id) + 1`。空配列時は reduce 初期値 0 → 新規 id=1（既存 ExclusionList.addEntry と完全一致）
+ *
+ * N-1〜N-5 との差分:
+ *  - **削除カスケードなし** / **base-override なし** / **add は dedup 判定で失敗し得る**（result 型を返す初の N-6 ケース）
+ *  - **API は最小 3 メソッド**: `list` / `add` / `remove`。bulk register UI が存在しないため `addMany` 等は作らない
+ *  - **add は dryRun を持たない**: 重複時に保存しないのは内部仕様であり、UI からは「保存試行 → duplicate or 成功」の 2 値で十分
+ *
+ * スコープ外:
+ *  - ExclusionEntry 型への `applicantId?` 追加（旧データ互換隠しフィールドのまま維持）
+ *  - changeStageBulk の Repository 内取り込み（呼出側 orchestrator のまま維持）
+ *  - applicantRepository.delete の exclusionList cleanup 移動（既存 Repository に閉じ込め継続）
+ *  - AddApplicantModal の dedup 警告ロジック（read 専用 / 本フェーズ対象外）
+ *  - bulk register / CSV import UI（存在しない）
+ *  - 除外解除時の applicant 復活（仕様として行わない）
+ *
+ * Firestore マッピング（Phase J）:
+ *  - `/tenants/{tid}/exclusionList/{eid}` 1 entry = 1 doc 展開
+ *  - Security Rules: parent のみ write（`firestore-design §8.2`）
+ *  - add 成功 + changeStageBulk を `runTransaction` で 1 atomic 化（`firestore-design §4.1` で既知の検討事項）
+ *  - id は autoId (string) 化、`applicantId?` は string FK に変換
+ */
+export interface ExclusionRepository {
+  /**
+   * 除外リスト一覧を返す（base-override なし / 並び順は保存時のまま）。
+   *  - `data.exclusionList` を `?? []` でフォールバック後、新規配列で返す（防御的コピー）
+   */
+  list(clientId: string): ExclusionEntry[];
+  /**
+   * 1 件追加。
+   *  - dedup ルール（上記 ExclusionAddResult JSDoc 参照）に該当する既存 entry があれば `{ok:false, reason:'duplicate'}` を返し、
+   *    saveClientData を呼ばない
+   *  - 重複なしの場合は id = max(existing.id) + 1 で採番（空配列時は 1）、末尾に push して saveClientData を 1 回呼ぶ
+   *  - applicants は触らない（add 成功後の一括除外は呼出側で `applicantRepository.changeStageBulk` を呼ぶ責務）
+   */
+  add(clientId: string, entry: Omit<ExclusionEntry, 'id'>): ExclusionAddResult;
+  /**
+   * id 一致で 1 件削除。
+   *  - 該当なしなら no-op（saveClientData を呼ばない）
+   *  - applicants の stage / active は触らない（除外解除で過去 applicant を active に戻したりはしない仕様）
+   *  - applicantRepository.delete 側の `applicantId?` 一致 cleanup とは別経路（こちらは id 一致のみ）
+   */
+  remove(clientId: string, id: number): void;
 }

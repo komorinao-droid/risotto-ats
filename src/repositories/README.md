@@ -201,6 +201,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-3** | **EmailTemplateRepository 型 + LocalStorage 実装 + EmailTemplateManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1/N-2 と同じ base-override 型だが cascade なし（applicants 触らない）。1000ms debounce auto-save は呼出側責務として既存挙動維持。EmailTemplate 型・データ形状・UI・文言・auto-save タイミングは無変更** | **✅ 完了** |
 | **N-4** | **HearingRepository 型 + LocalStorage 実装（list / upsert のみ）+ HearingManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / jobName キー型 / cascade なし / 削除 API なし。800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持。HearingTemplate 型・データ形状・UI・文言・debounce タイミングは無変更** | **✅ 完了** |
 | **N-5** | **既存 reportRepository を拡張（getReportSchedule / saveReportSchedule を追加）。ReportScheduleSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。singleton 設定型 / 保存ボタン式 / debounce なし。新規 ReportScheduleRepository は作らず recruitmentGoals と同居（Firestore `/tenants/{tid}/settings/global` doc 設計と整合）。ReportScheduleSetting 型・データ形状・UI・文言・DEFAULT_SETTING・email validation は無変更。lastRunAt / lastRunStatus / lastRunError は将来サーバー配信エンジン用で N-5 では専用 API を作らない（読取り経路のみ提供）** | **✅ 完了** |
+| **N-6** | **ExclusionRepository 型 + LocalStorage 実装（list / add / remove）+ ExclusionList.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / tenant 全体共有 / dedup 判定（email lowercase / phone strip / name_birth exact）を Repository 内に集約。add 成功後の `applicantRepository.changeStageBulk` 連携は画面側 orchestrator として維持。applicantRepository.delete 内の `applicantId?` 一致 cleanup は据え置き（cleanupByApplicantId 等は ExclusionRepository に作らない）。ExclusionEntry 型は無変更（`applicantId?` は旧データ互換隠しフィールドのまま）** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -210,7 +211,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張）完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -806,7 +807,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-3**: `EmailTemplateRepository` 型 + LocalStorage 実装 + EmailTemplateManagement.tsx 移行（cascade なし、1000ms debounce auto-save は呼出側責務として既存挙動維持）
 - [x] **N-4**: `HearingRepository` 型 + LocalStorage 実装 + HearingManagement.tsx 移行（base-override なし / jobName キー / cascade なし / 削除 API なし、800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持）
 - [x] **N-5**: 既存 `reportRepository` 拡張（getReportSchedule / saveReportSchedule 追加） + ReportScheduleSettings.tsx 移行（singleton 設定型 / 保存ボタン式 / debounce なし、新規 Repository は作らず採用目標と同居）
-- [ ] **N-6**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
+- [x] **N-6**: `ExclusionRepository` 型 + LocalStorage 実装 + ExclusionList.tsx 移行（base-override なし / tenant 全体共有 / dedup 判定 Repository 内集約 / `applicantRepository.changeStageBulk` は画面側 orchestrator として維持）
 - [ ] **N-7**: `MediaCostRepository`（ネスト map `[ym][src]`）
 - [ ] **N-8**: `FilterConditionRepository`（base 別 + legacy `filterCondition` フォールバック）
 - [ ] **N-9**: `ScreeningRepository`（byJob override + axes migration）
@@ -972,12 +973,62 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - `saveReportSchedule` は `Promise<void>` 化、画面側は async/await。`merge: true` で部分更新化し lastRun* の race を回避
 - 配信エンジン用 API（markRunSuccess / markRunFailure）は Cloud Functions 専用書込権限 + Security Rules で `recipients` / `enabled` 等の編集権限と分離する設計余地あり
 
-### 14.8 残タスク
+### 14.8 N-6: ExclusionRepository（base-override なし / dedup Repository 集約 / changeStageBulk は画面側）
 
-- **N-6 以降**: §14.2 の通り、設定系 5 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-6 候補は Exclusion（global 単一配列、シンプル）/ MediaCost / FilterCondition / Screening / Chatbot
+#### 責務
+
+- `data.exclusionList` の list / add / remove
+- API: `list(clientId)` / `add(clientId, entry)` / `remove(clientId, id)` の **3 個のみ**
+- dedup 判定（email lowercase / phone strip `-\s` / name_birth exact）を Repository 内に集約
+
+#### N-1〜N-5 との差分
+
+- **add が dedup 失敗で `{ok:false, reason:'duplicate'}` を返す result 型 API**: 初の N-6 ケース。create / upsert 系と異なり、保存試行が成功 / duplicate の 2 値で分岐し、duplicate 時は saveClientData を呼ばない
+- **base-override なし**: tenant 全体で 1 リスト共有（子アカも親と同じ exclusionList を参照）→ `pickLayer`/`writeLayer`/`removeBaseOverride` を持たない / `applicantBaseFilter` opt も不要
+- **削除カスケードなし**: 除外解除で過去 applicant を active に戻したりしない既存仕様。`remove` は exclusionList から id 一致を除去するのみで applicants 側を触らない
+- **changeStageBulk は本 Repository に取り込まない**: add 成功後の「該当 applicant の一括除外」は画面側 orchestrator で `applicantRepository.changeStageBulk(..., { reason: 'exclusion_list_applied' })` を続けて呼ぶ責務。Firestore 化時に 1 transaction 化を別 API として検討予定（firestore-design §4.1）
+- **applicantRepository.delete の cleanup は据え置き**: applicantRepository.delete 内の `(ex as { applicantId?: number }).applicantId === applicantId` 一致 cascade は既存 Repository に閉じ込め継続。本 Repository には `cleanupByApplicantId` 等を作らない（依存方向逆流を避ける）
+
+#### ExclusionEntry 型の `applicantId?` について
+
+- 型未宣言の旧データ互換隠しフィールド。`applicantRepository.delete` のみが `(ex as { applicantId?: number }).applicantId` で参照する
+- 現在 UI 経路でこれを生成するパスはない（`ExclusionList.addEntry` は `{type, email/phone/name+birth}` のみを Repository に渡す）
+- firestore-design.md §8.1 / §10.6.3 に `applicantId?` がドキュメント化済（FK として string 化する移行方針）
+- **Phase N-6 では ExclusionEntry 型に追加しない**: 「特定 applicant を直接 exclusion 登録する UI」が前提となる API 変更で、本フェーズの責務を越える。旧データ互換のまま維持
+
+#### 既知の挙動メモ（既存仕様、本フェーズで触らない）
+
+- **権限ゲート**: `client.permissions.exclusion` または parent のみ canEdit。Repository 化後も UI 側で維持
+- **dedup の正規化ルール**: Phase N-6 で Repository 内に集約。将来ルール変更時は `exclusionRepository.ts` の `isDuplicate` 1 箇所だけ更新すれば足りる（以前は UI 側にも同ロジックがあった）
+- **id 採番**: `max(...exclusionList.map(e => e.id)) + 1`。空配列時は reduce 初期値 0 → 新規 id=1（既存 ExclusionList.addEntry と完全一致）
+- **入力 trim / 必須項目チェック**: 呼出側責務（既存 UI が trim 済の値を Repository に渡す前提）。Repository 側で再 trim / 必須チェックは行わない
+- **AddApplicantModal の dedup 警告**: 応募者追加時に `data.exclusionList` を読んで alert を出す経路（read 専用）。N-6 では触らない
+- **AddApplicantModal の duplicate back-prop**: 既存仕様。N-6 範囲外
+
+#### 移行先
+
+- `src/client/pages/settings/ExclusionList.tsx` の `addEntry` / `deleteEntry` を Repository 経由に置換
+- `useAuth` 分割代入から `updateClientData` を削除（`reloadClientData` / `client` / `clientData` のみ利用）
+- `addEntry` の dedup 判定ロジックは削除（Repository に集約）。UI は `{ok:false, reason:'duplicate'}` を受け取った時に既存と同じメッセージを表示するのみ
+- add 成功後の `applicantRepository.changeStageBulk` 呼出は既存通り画面側で維持
+- UI / 文言 / バリデーション / 権限ガード / pagination / search / typeFilter / Modal は変更しない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- `/tenants/{tid}/exclusionList/{eid}` 1 entry = 1 doc 展開（firestore-design §8.1）
+- Security Rules: parent のみ write（firestore-design §8.2）
+- `add` + `changeStageBulk` を `runTransaction` で 1 atomic 化する API を別途検討（`addAndExclude` のような composite API。LocalStorage 実装では各 Repository を逐次呼ぶ thin wrapper、Firestore 実装では transaction を張る）
+- id は autoId (string) 化、`applicantId?` は string FK に変換
+- `applicantRepository.delete` の exclusionList cleanup は Firestore でも transaction 内で 3 collection 削除に置換（firestore-design §4）
+
+### 14.9 残タスク
+
+- **N-7 以降**: §14.2 の通り、設定系 4 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-7 候補は MediaCost（ネスト map）/ FilterCondition / Screening / Chatbot
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing / N-5 ReportSchedule は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing / N-5 ReportSchedule / N-6 Exclusion は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **ExclusionRepository の `addAndExclude` composite API**: 現状 ExclusionList.tsx で `exclusionRepository.add` → `applicantRepository.changeStageBulk` の 2 段呼びを維持。Firestore 化（Phase J）時に 1 transaction 化が必要なら composite API を新設（firestore-design §4.1 既知の検討事項）
+- **ExclusionEntry 型への `applicantId?` 追加**: 「特定 applicant を直接 exclusion 登録する UI」を実装する時に併せて型追加。現状は旧データ互換隠しフィールドのまま維持
 - **`Source.password` の暗号化 / 秘匿化**: 既存仕様維持で本フェーズ対象外。Firestore 化（Phase J）と合わせて検討（client-side encryption / Cloud KMS / 別 collection 分離など）
 - **EmailTemplateManagement の closure off-by-one / アンマウント時 flush**: 既存挙動。改善する場合は別フェーズ（useRef で最新値を参照する pattern / useEffect cleanup で flush 等）
 - **HearingManagement の Job 切替時 flush / Job rename・delete カスケード**: 既存挙動。改善する場合は別フェーズ（切替 useEffect で `clearTimeout` + 即時 doSave / jobRepository.deleteWithCascade 連携）
