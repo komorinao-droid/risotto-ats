@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1203,4 +1203,62 @@ export interface EmailTemplateRepository {
    *  - applicants は触らない
    */
   removeBaseOverride(clientId: string, baseName: string): RemoveEmailTemplateBaseOverrideResult;
+}
+
+/**
+ * ヒアリングテンプレ (HearingTemplate) の最小 CRUD を扱う Repository（Phase N-4 で追加）。
+ *
+ * 想定する移行先:
+ *  - `HearingManagement.tsx` の updateClientData 直更新を本 API 経由に置換
+ *
+ * 方針:
+ *  - HearingTemplate は **id を持たず jobName 文字列がキー**（Job/Source/EmailTemplate の numeric id 型と異なる）
+ *  - **base-override なし**（`AuthContext.filterDataByBase` は hearingTemplates を触らず、子アカも全社共通を参照）
+ *      → `data.hearingTemplatesByBase` のような拠点別レイヤは存在しない / 追加もしない
+ *  - 既存データ形状を維持する（HearingTemplate 型への id / baseName 追加は本フェーズで行わない）
+ *  - 呼出側 (HearingManagement.tsx) は **800ms debounce auto-save + 手動保存ボタン** を持つが、
+ *    debounce / Manual 保存ボタンは呼出側の責務で、Repository は同期 API のまま（既存挙動を維持）
+ *
+ * N-1/N-2/N-3 との差分:
+ *  - **削除カスケードなし**（applicants にヒアリング参照フィールドが存在しない）
+ *  - **削除 API なし**（HearingManagement に削除 UI がない / Job 削除カスケード連携は別フェーズ）
+ *      → API は `list` + `upsert` のみ。`removeByJob` は将来用にコメント化
+ *  - **base-override なし**（`pickLayer`/`writeLayer`/`removeBaseOverride` 不要 / `applicantBaseFilter` opt も不要）
+ *  - キーが numeric id ではなく jobName 文字列のため `upsert` API（create/update を統合）が自然
+ *
+ * スコープ外:
+ *  - HearingTemplate 型への id / baseName 追加（Firestore 化時に再設計）
+ *  - 削除 API (`removeByJob`) 実装（UI が来た時に追加）
+ *  - Job rename/delete カスケード連携（JobRepository.deleteWithCascade との連動は別フェーズ）
+ *  - Job 切替時の未 flush 改善（既存挙動として維持）
+ *  - debounce / アンマウント時 flush の改善（既存挙動維持）
+ *  - ScreeningRepository / ChatRepository / MediaCostRepository / ExclusionRepository /
+ *    ReportScheduleRepository / FilterConditionRepository 等（Phase N-5 以降）
+ *
+ * Firestore マッピング:
+ *  - `/tenants/{tid}/hearingTemplates/{docId}` doc（docId = sanitized jobName or random id + jobName field、設計判断は Phase J 時に確定）
+ *  - 全社共通のみ（base-override コレクションなし）
+ *  - upsert は Phase J で `Promise<HearingTemplate>` に変更、画面側は async/await + saveState を Promise 完了まで延長
+ */
+export interface HearingRepository {
+  /**
+   * ヒアリングテンプレ一覧を返す（base-override なし）。
+   *  - `data.hearingTemplates` をそのまま返す（未定義時は `[]`）
+   *  - 並び順は保存時のまま
+   */
+  list(clientId: string): HearingTemplate[];
+  /**
+   * jobName をキーに upsert する。
+   *  - jobName 一致あり + template が完全一致: no-op で current を返す（saveClientData を呼ばない）
+   *  - jobName 一致あり + template 差分あり: 該当 entry の template を差替えて save
+   *  - jobName 一致なし: 末尾に `{ jobName, template }` を push して save
+   *  - 戻り値は upsert 後の HearingTemplate（または no-op 時の current）
+   *  - applicants は触らない（参照フィールドが存在しないため）
+   */
+  upsert(clientId: string, jobName: string, templateBody: string): HearingTemplate;
+  /**
+   * 将来予約: jobName 単位の削除（HearingManagement に削除 UI が来た時 / jobRepository.deleteWithCascade との連携時）。
+   * Phase N-4 では未実装 / 未呼出。
+   */
+  // removeByJob?(clientId: string, jobName: string): { removed: boolean };
 }

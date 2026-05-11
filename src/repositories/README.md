@@ -199,6 +199,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-1** | **JobRepository 型 + LocalStorage 実装（list / create / update / deleteWithCascade / removeBaseOverride）+ JobManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。jobs / jobsByBase の形状を維持。設定系 Repository 化（Phase N）の参照実装（base-override 型）** | **✅ 完了** |
 | **N-2** | **SourceRepository 型 + LocalStorage 実装 + SourceManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1 JobRepository の base-override 型を機械的に横展開（`sources` / `sourcesByBase` + `applicants[].src` カスケード）。Source 型・データ形状・UI・文言は無変更** | **✅ 完了** |
 | **N-3** | **EmailTemplateRepository 型 + LocalStorage 実装 + EmailTemplateManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。N-1/N-2 と同じ base-override 型だが cascade なし（applicants 触らない）。1000ms debounce auto-save は呼出側責務として既存挙動維持。EmailTemplate 型・データ形状・UI・文言・auto-save タイミングは無変更** | **✅ 完了** |
+| **N-4** | **HearingRepository 型 + LocalStorage 実装（list / upsert のみ）+ HearingManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / jobName キー型 / cascade なし / 削除 API なし。800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持。HearingTemplate 型・データ形状・UI・文言・debounce タイミングは無変更** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -208,7 +209,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -802,7 +803,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-1**: `JobRepository` 型 + LocalStorage 実装 + JobManagement.tsx 移行
 - [x] **N-2**: `SourceRepository` 型 + LocalStorage 実装 + SourceManagement.tsx 移行
 - [x] **N-3**: `EmailTemplateRepository` 型 + LocalStorage 実装 + EmailTemplateManagement.tsx 移行（cascade なし、1000ms debounce auto-save は呼出側責務として既存挙動維持）
-- [ ] **N-4**: `HearingRepository`（HearingManagement.tsx、job-keyed singleton 型）
+- [x] **N-4**: `HearingRepository` 型 + LocalStorage 実装 + HearingManagement.tsx 移行（base-override なし / jobName キー / cascade なし / 削除 API なし、800ms debounce auto-save + 手動保存ボタンは呼出側責務として既存挙動維持）
 - [ ] **N-5**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
 - [ ] **N-6**: `ReportScheduleRepository` または reportRepository 拡張
 - [ ] **N-7**: `MediaCostRepository`（ネスト map `[ym][src]`）
@@ -890,11 +891,49 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - `body` が長文化しやすいため、quota / 転送量観点で案 A 寄り（必要なテンプレートだけ取得できる）
 - `update` は `Promise<EmailTemplate>` 化し、画面側は async/await + saveState を Promise 完了まで延長。アンマウント時 flush の改善とセットで検討
 
-### 14.6 残タスク
+### 14.6 N-4: HearingRepository（base-override なし / jobName キー / 最小 CRUD）
 
-- **N-4 以降**: §14.2 の通り、設定系 7 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-4 候補は Hearing（job-keyed 型 = base-override とは異なる構造）
+#### 責務
+
+- `data.hearingTemplates` の list と jobName キー upsert
+- API: `list(clientId)` / `upsert(clientId, jobName, templateBody)` の **2 個のみ**
+- 完全一致時は no-op で current を返す（saveClientData を呼ばない）
+
+#### N-1/N-2/N-3 との差分
+
+- **base-override なし**: `AuthContext.filterDataByBase` は hearingTemplates を触らず、子アカも全社共通を参照する。`data.hearingTemplatesByBase` は存在しない / 追加もしない → `pickLayer`/`writeLayer`/`removeBaseOverride` を持たない
+- **削除 API なし**: HearingManagement に削除 UI がない / Job 削除カスケード連携も別フェーズ → `delete` / `removeByJob` を提供しない（interface にはコメントで将来予約のみ記載）
+- **削除カスケードなし**: applicants にヒアリング参照フィールドが存在しない → `applicantBaseFilter` opt も不要
+- **キーが numeric id ではなく jobName 文字列**: 単一エントリポイント `upsert` で create/update を統合（add UI が存在せず、初回保存 = 暗黙 add であるため自然）
+- **呼出側に 800ms debounce auto-save + 手動保存ボタンあり**: `HearingManagement.tsx` の `handleChange` は `setTimeout(..., 800)` 経由で `doSave(value)` を呼び、`handleManualSave` は `clearTimeout` + 即時 `doSave(template)`。`doSave` は `hearingRepository.upsert(...)` + `reloadClientData()` を実行。Repository は同期 API のまま（既存挙動維持）
+- **`doSave` の closure off-by-one なし**: 引数 `value` で受け取る設計のため EmailTemplate のような off-by-one は存在しない（健全）
+
+#### 既知の挙動メモ（既存仕様、本フェーズで触らない）
+
+- **Job 切替時の未 flush**: 切替 useEffect は `clearTimeout` を呼ばずに `setTemplate(found?.template)` で上書きする。800ms 内編集が切替で失われる可能性（pre-existing）。N-4 では維持。改善する場合は別フェーズで EmailTemplate と同じ「切替時 flush」を導入
+- **Job rename / delete の orphan**: `jobRepository.deleteWithCascade` は hearingTemplates をクリアしない → 削除済 Job 名で hearingTemplates が残る可能性（pre-existing）。N-4 では維持。連携カスケードは別フェーズ
+- **AdminApp bulk-copy の localStorage 直書き共存**: `AdminApp.tsx:4196` は `localStorage.setItem(...)` で hearingTemplates をコピーしており、Repository 経由ではない。N-4 では触らない（Job/Source/EmailTemplate も同じ共存状態）
+- **アンマウント時 flush 未実装**: 800ms 以内に他画面遷移すると未保存。既存挙動維持
+
+#### 移行先
+
+- `src/client/pages/settings/HearingManagement.tsx` の `updateClientData` 呼出を `hearingRepository.upsert(...)` + `reloadClientData()` に置換
+- `useAuth` 分割代入は `updateClientData` → `reloadClientData` に差し替え
+- `ownerId = resolveDataOwnerId(client)` を doSave 内で参照（書込は parent clientId に統一、既存責務境界と同じ）
+- UI / 文言 / 800ms debounce / 手動保存ボタン / saveState 表示 / Job 切替 useEffect は変更しない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- `/tenants/{tid}/hearingTemplates/{docId}` 単一 collection（base-override なし）
+- docId 候補: sanitized jobName（衝突リスクあり）/ random id + jobName field（Job rename 時に jobName field 更新が必要、または jobId 外部キー化）→ 設計判断は Phase J 時
+- `upsert` は `Promise<HearingTemplate>` 化し、画面側は async/await + saveState を Promise 完了まで延長。Job rename / delete カスケード連携もこのタイミングで検討（jobs collection の rename listener / cloud function での bulk update）
+
+### 14.7 残タスク
+
+- **N-5 以降**: §14.2 の通り、設定系 6 種が順次着手対象。優先順位の根拠は「base-override 型 → job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」。N-5 候補は Exclusion（global 単一配列、シンプル）/ MediaCost / ReportSchedule / FilterCondition / Screening / Chatbot
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
-- **正規化（Job / Source / EmailTemplate 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個（N-4 Hearing は base-override なしのため非対象）。N-8 (FilterCondition) を待って 4 個揃った段階で共通化検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
 - **`Source.password` の暗号化 / 秘匿化**: 既存仕様維持で本フェーズ対象外。Firestore 化（Phase J）と合わせて検討（client-side encryption / Cloud KMS / 別 collection 分離など）
 - **EmailTemplateManagement の closure off-by-one / アンマウント時 flush**: 既存挙動。改善する場合は別フェーズ（useRef で最新値を参照する pattern / useEffect cleanup で flush 等）
+- **HearingManagement の Job 切替時 flush / Job rename・delete カスケード**: 既存挙動。改善する場合は別フェーズ（切替 useEffect で `clearTimeout` + 即時 doSave / jobRepository.deleteWithCascade 連携）

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { hearingRepository, resolveDataOwnerId } from '@/repositories';
 
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   padding: '0.375rem 0.75rem',
@@ -13,7 +14,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 });
 
 const HearingManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [activeJob, setActiveJob] = useState('');
   const [template, setTemplate] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -22,6 +23,10 @@ const HearingManagement: React.FC = () => {
   const jobs = clientData?.jobs || [];
   const hearingTemplates = clientData?.hearingTemplates || [];
   const canEdit = !client || client.accountType === 'parent' || client.permissions.hearing;
+
+  // N-4: hearingRepository への書き込みは parent の clientId で行う（updateClientData と同じ責務境界）。
+  // hearingTemplates は base-override を持たないため、applicantBaseFilter / targetBaseName は不要。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
 
   // Set first job as active when jobs change
   useEffect(() => {
@@ -39,20 +44,13 @@ const HearingManagement: React.FC = () => {
 
   const doSave = useCallback(
     (value: string) => {
+      if (!ownerId || !activeJob) return;
       setSaveState('saving');
-      updateClientData((data) => {
-        const list = [...data.hearingTemplates];
-        const idx = list.findIndex((h) => h.jobName === activeJob);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], template: value };
-        } else {
-          list.push({ jobName: activeJob, template: value });
-        }
-        return { ...data, hearingTemplates: list };
-      });
+      hearingRepository.upsert(ownerId, activeJob, value);
+      reloadClientData();
       setTimeout(() => setSaveState('saved'), 300);
     },
-    [activeJob, updateClientData]
+    [activeJob, ownerId, reloadClientData]
   );
 
   const handleChange = (value: string) => {
