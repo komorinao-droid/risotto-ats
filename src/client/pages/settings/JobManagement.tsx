@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Job, ClientData } from '@/types';
+import type { Job } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
+import { jobRepository, resolveDataOwnerId } from '@/repositories';
 
 const PAGE_SIZE = 10;
 
@@ -31,7 +32,7 @@ const btnStyle = (color: string, bg: string): React.CSSProperties => ({
 const SHARED = '__shared__';
 
 const JobManagement: React.FC = () => {
-  const { clientData, updateClientData, client, logAction } = useAuth();
+  const { clientData, reloadClientData, client, logAction } = useAuth();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
@@ -82,36 +83,33 @@ const JobManagement: React.FC = () => {
     setModalOpen(true);
   };
 
-  // 拠点別レイヤへの書き込みヘルパー
-  const writeJobs = (mutator: (list: Job[]) => Job[]) => {
-    updateClientData((data) => {
-      if (editingScope === SHARED) {
-        return { ...data, jobs: mutator(data.jobs) };
-      }
-      // 拠点別レイヤ：未設定なら親共通からコピーして開始
-      const current = data.jobsByBase?.[editingScope] ?? data.jobs;
-      const next = mutator(current);
-      return {
-        ...data,
-        jobsByBase: { ...(data.jobsByBase || {}), [editingScope]: next },
-      };
-    });
-  };
+  // jobRepository への書き込みは parent の clientId で行う（updateClientData と同じ責務境界）。
+  // applicantBaseFilter は子アカウント呼出時の applicants[].job クリア対象絞り込み用
+  //   （AuthContext.filterDataByBase の挙動を Repository 経由でも維持するため）。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
+  const applicantBaseFilter =
+    client?.accountType === 'child' && client.baseName ? client.baseName : undefined;
+  const targetBaseName = editingScope === SHARED ? undefined : editingScope;
 
   const save = () => {
     if (!form.name.trim()) return;
+    if (!ownerId) return;
     const isNew = editId === null;
-    writeJobs((list) => {
-      const updated = [...list];
-      if (editId !== null) {
-        const idx = updated.findIndex((j) => j.id === editId);
-        if (idx >= 0) updated[idx] = { ...updated[idx], name: form.name.trim(), color: form.color };
-      } else {
-        const maxId = updated.reduce((m, j) => Math.max(m, j.id), 0);
-        updated.push({ id: maxId + 1, name: form.name.trim(), color: form.color });
-      }
-      return updated;
-    });
+    if (isNew) {
+      jobRepository.create(
+        ownerId,
+        { name: form.name.trim(), color: form.color },
+        targetBaseName,
+      );
+    } else if (editId !== null) {
+      jobRepository.update(
+        ownerId,
+        editId,
+        { name: form.name.trim(), color: form.color },
+        targetBaseName,
+      );
+    }
+    reloadClientData();
     const scopeLabel = editingScope === SHARED ? '全社共通' : `職種別: ${editingScope}`;
     logAction('setting', isNew ? '職種追加' : '職種編集', form.name.trim(), scopeLabel);
     setModalOpen(false);
@@ -121,17 +119,12 @@ const JobManagement: React.FC = () => {
     const job = jobs.find((j) => j.id === id);
     if (!job) return;
     if (!window.confirm(`"${job.name}" を削除しますか？該当職種の応募者からも参照がクリアされます。`)) return;
-    updateClientData((data) => {
-      const next: ClientData = { ...data };
-      if (editingScope === SHARED) {
-        next.jobs = data.jobs.filter((j) => j.id !== id);
-      } else {
-        const current = data.jobsByBase?.[editingScope] ?? data.jobs;
-        next.jobsByBase = { ...(data.jobsByBase || {}), [editingScope]: current.filter((j) => j.id !== id) };
-      }
-      next.applicants = data.applicants.map((a) => (a.job === job.name ? { ...a, job: '' } : a));
-      return next;
+    if (!ownerId) return;
+    jobRepository.deleteWithCascade(ownerId, id, {
+      baseName: targetBaseName,
+      applicantBaseFilter,
     });
+    reloadClientData();
     const scopeLabel = editingScope === SHARED ? '全社共通' : `職種別: ${editingScope}`;
     logAction('setting', '職種削除', job.name, scopeLabel);
   };
@@ -139,11 +132,9 @@ const JobManagement: React.FC = () => {
   const removeOverride = () => {
     if (!isBaseScope) return;
     if (!window.confirm(`「${scope}」の拠点別職種設定を削除し、全社共通に戻しますか？`)) return;
-    updateClientData((data) => {
-      const next = { ...(data.jobsByBase || {}) };
-      delete next[scope];
-      return { ...data, jobsByBase: next };
-    });
+    if (!ownerId) return;
+    jobRepository.removeBaseOverride(ownerId, scope);
+    reloadClientData();
   };
 
   if (!canEdit) {

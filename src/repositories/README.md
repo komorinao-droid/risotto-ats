@@ -196,6 +196,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **M-7a** | **AuthService に `adminResetPassword(clientId, newPassword)` を追加 + LocalStorageAuthService に実装。AdminApp.handleUpdatePassword を `authService.adminResetPassword` 経由に置換。ClientRepository は password を扱わない方針を維持。SafeClient / sessionStorage に password を出さない経路を再確認** | **✅ 完了** |
 | **M-7b** | **`src/utils/clientOptions.ts` の `incrementOptionUsage` を `clientRepository.findById / update` 経由に置換。`storage.getClients/saveClients` 直叩きを除去（dynamic import は AuthContext → clientOptions → repositories の起動順循環回避のため維持）** | **✅ 完了** |
 | **M-8** | **BaseManagement の削除確認ダイアログ用 child 件数取得を `clientRepository.listChildren` 経由に置換。BaseManagement.tsx 内の `storage` 直叩き消滅** | **✅ 完了** |
+| **N-1** | **JobRepository 型 + LocalStorage 実装（list / create / update / deleteWithCascade / removeBaseOverride）+ JobManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。jobs / jobsByBase の形状を維持。設定系 Repository 化（Phase N）の参照実装（base-override 型）** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -203,7 +204,9 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | — | Firestore 実装本体 | 未着手（別タスク） |
 | — | UI 上の予約 / キャンセル / 再調整モーダルの完全な手動確認（H-2〜H-5 は Repository 直接呼出で等価カバレッジを取得済） | 推奨（リリース前回帰テストで実施） |
 
-> **次フェーズ (Phase J 系: Firestore / Firebase Auth / Cloud Storage 移行) の詳細は `docs/production-handoff-checklist.md` を参照**。Phase J-1〜J-9 の推奨 PR 順、設定系 Repository 10 種 (Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion) や AdminApp 系の網羅リスト、本番リリース前チェックリストは本書ではなく handoff に集約してある。
+> **Phase の分け方**:
+> - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -777,3 +780,64 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - **Firestore 実装本体**: §13.4 の表どおりの Firestore 版実装。Firebase Auth 連携 + Cloud Functions（parent delete cascade）が前提
 - **`Client.findForLogin` 撤去**: Firebase Auth 移行と同時に削除候補（authService 内部のみが呼ぶ歴史的 API）
 - **delete cascade の orchestrator 側（clientData / operationLogs キー削除）**: Firestore 化時は Cloud Functions の subcollection 再帰削除 or `tenants/{tid}` doc 削除トリガに移管。LocalStorage 期は AdminApp 内に残置（責務分離が明確なため Repository に巻き取らない）
+
+---
+
+## 14. 設定系 Repository 化（Phase N）
+
+`AuthContext.updateClientData(updater)` を経由した「ClientData blob 一括 read / write」から、各設定ドメイン（Job / Source / EmailTemplate / 等）の Repository API へ責務境界を引き直すフェーズ。Phase J（Firestore 実装本体）の前段に位置付けられ、設定系 10 画面分の境界を確定させておく。
+
+### 14.1 責務範囲
+
+- 対象は `src/client/pages/settings/` 配下の 10 画面。`updateClientData(updater)` 経由の ClientData blob 更新を、ドメイン Repository API（create / update / delete / etc.）に置換する
+- LocalStorage キーは変更しない（`hireflow:client:${id}:data`）
+- ClientData の既存データ形状は維持する（型の正規化＝Job への baseName 追加 等は Firestore 化（Phase J）時に再設計）
+- 子アカウント呼出時の applicants 絞り込み挙動（AuthContext.filterDataByBase 由来）は Repository 側の opt（例: `applicantBaseFilter`）で再現する
+- 書込後の state 同期は `reloadClientData()` 経由に統一する（`updateClientData` の即時 setClientData 経路は撤去候補だが、Phase N の各画面が完了するまでは shim として残置）
+
+### 14.2 進捗
+
+- [x] **N-1**: `JobRepository` 型 + LocalStorage 実装 + JobManagement.tsx 移行
+- [ ] **N-2**: `SourceRepository`（SourceManagement.tsx）
+- [ ] **N-3**: `EmailTemplateRepository`（EmailTemplateManagement.tsx、auto-save 800-1000ms 維持）
+- [ ] **N-4**: `HearingRepository`（HearingManagement.tsx、job-keyed singleton 型）
+- [ ] **N-5**: `ExclusionRepository`（ExclusionList.tsx、applicantRepository.changeStageBulk は既存）
+- [ ] **N-6**: `ReportScheduleRepository` または reportRepository 拡張
+- [ ] **N-7**: `MediaCostRepository`（ネスト map `[ym][src]`）
+- [ ] **N-8**: `FilterConditionRepository`（base 別 + legacy `filterCondition` フォールバック）
+- [ ] **N-9**: `ScreeningRepository`（byJob override + axes migration）
+- [ ] **N-10**: `ChatbotRepository`（scenarios / questionGroups / leadSettings の 3 配列原子性）
+
+### 14.3 N-1: JobRepository（base-override パターンの参照実装）
+
+#### 責務
+
+- `data.jobs` / `data.jobsByBase[baseName]` の CRUD と削除カスケード
+- API: `list(clientId, baseName?)` / `create(clientId, job, baseName?)` / `update(clientId, jobId, patch, baseName?)` / `deleteWithCascade(clientId, jobId, opts?)` / `removeBaseOverride(clientId, baseName)`
+- baseName 未指定: 全社共通レイヤ。指定: 拠点別レイヤ
+- 拠点別レイヤ未作成での書込時は `data.jobs` をコピーして開始 → 拠点別レイヤを新規作成（既存 writeJobs と互換）
+
+#### deleteWithCascade
+
+- 対象レイヤから jobId 一致を除去 + `applicants[].job === removedJobName` を `''` にクリア + 1 saveClientData にまとめる
+- `opts.applicantBaseFilter` で applicants クリア対象の base 絞り込み（子アカウント呼出時の自拠点 applicants 限定挙動を再現）
+- `applicants[].updatedAt` は touch しない（既存 deleteJob 互換）
+
+#### 移行先
+
+- `src/client/pages/settings/JobManagement.tsx` の `writeJobs` / `deleteJob` / `removeOverride` を Repository 経由に置換
+- 画面側は `updateClientData` を撤去し、`reloadClientData()` で state 同期する
+- UI / 文言 / バリデーション / logAction は変更しない
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- `/tenants/{tid}/jobs/{jobId}` を 1 doc 単位とする collection 構造に分離
+- 拠点別オーバーライドは案 A（doc に `baseName?: string | null` フィールド + 単一 collection）/ 案 B（`/tenants/{tid}/baseOverrides/{baseName}/jobs/{jobId}` 別 subcollection）から選択。クエリ性と Firestore Rules の書きやすさから案 A 寄り（決定は Phase J 時）
+- `deleteWithCascade` は jobs collection の doc 削除 + applicants collection の対象 doc 更新を `runTransaction` / `WriteBatch` で 1 atomic 化
+
+### 14.4 残タスク
+
+- **N-2 以降**: §14.2 の通り、設定系 9 種が順次着手対象。優先順位の根拠は「base-override 型→ job-keyed 型 → global 単一型 → 複雑型（screening / chatbot）」
+- **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
+- **正規化（Job 等への baseName フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
+- **共通 base-override ヘルパ**: N-2 (Source) / N-3 (EmailTemplate) / N-8 (FilterCondition) で同じ pickLayer / writeLayer パターンが繰り返される。3 個出揃った段階で共通化を検討（早すぎる抽象化を避ける）

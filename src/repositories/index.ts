@@ -21,6 +21,7 @@ import { LocalStorageStatusRepository } from './localStorage/statusRepository';
 import { LocalStorageEventRepository } from './localStorage/eventRepository';
 import { LocalStorageSlotRepository } from './localStorage/slotRepository';
 import { LocalStorageBaseRepository } from './localStorage/baseRepository';
+import { LocalStorageJobRepository } from './localStorage/jobRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -32,6 +33,7 @@ export const statusRepository = new LocalStorageStatusRepository();
 export const eventRepository = new LocalStorageEventRepository();
 export const slotRepository = new LocalStorageSlotRepository();
 export const baseRepository = new LocalStorageBaseRepository();
+export const jobRepository = new LocalStorageJobRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -51,6 +53,9 @@ export type {
   EventRepository,
   SlotRepository,
   BaseRepository,
+  JobRepository,
+  DeleteJobCascadeResult,
+  RemoveJobBaseOverrideResult,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,

@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, InterviewEvent, MessageLog, MessageStatus, SlotSetting, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, InterviewEvent, Job, MessageLog, MessageStatus, SlotSetting, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -816,4 +816,136 @@ export interface ReportRepository {
    * 既存の他フィールドは破壊しない。
    */
   updateRecruitmentGoal(clientId: string, yearMonth: string, value: number): void;
+}
+
+/**
+ * `JobRepository.deleteWithCascade` の戻り値（Phase N-1 で追加）。
+ *
+ * カスケード方針:
+ *  - 対象レイヤ (jobs または jobsByBase[baseName]) から jobId 一致を除去
+ *  - applicants[].job === removedJobName を '' にクリア
+ *      - opts.applicantBaseFilter 指定時はその base 一致 applicants のみ対象
+ *      - 未指定時は全 applicants 横断（既存 JobManagement.deleteJob の挙動を維持）
+ *  - applicants[].updatedAt は touch しない（既存 deleteJob 互換）
+ *  - 上記 2 配列の更新を 1 saveClientData にまとめる
+ *  - jobId 不一致なら no-op で removed: false を返す（saveClientData も呼ばない）
+ */
+export interface DeleteJobCascadeResult {
+  /** 対象レイヤから jobId が実際に除去されたか */
+  removed: boolean;
+  /** 除去した job の name（applicants クリア判定に使用した値）。removed=false なら undefined */
+  removedJobName?: string;
+  /** applicants[].job === removedJobName を '' にクリアした件数 */
+  clearedApplicantJobCount: number;
+}
+
+/** `JobRepository.removeBaseOverride` の戻り値（Phase N-1 で追加）。 */
+export interface RemoveJobBaseOverrideResult {
+  /** jobsByBase[baseName] キーが存在して削除されたか（不在なら false / save も呼ばない） */
+  removed: boolean;
+}
+
+/**
+ * 求人 (Job) 設定の CRUD ＋ 拠点別オーバーライド ＋ 削除カスケードを扱う Repository（Phase N-1 で追加）。
+ *
+ * 想定する移行先:
+ *  - `JobManagement.tsx` の updateClientData 直更新を本 API 経由に置換
+ *
+ * 方針:
+ *  - 既存データ形状を維持する（Job 型に baseName を追加する正規化は本フェーズで行わない）
+ *      - `data.jobs`               : 全社共通レイヤ
+ *      - `data.jobsByBase[baseName]` : 拠点別オーバーライドレイヤ
+ *  - baseName 未指定 = 全社共通レイヤを対象
+ *  - baseName 指定 = 拠点別レイヤを対象
+ *      - 対象レイヤ未作成時は `data.jobs` をコピーして開始（既存 writeJobs と互換、編集すると override が新規作成される）
+ *  - deleteWithCascade は対象レイヤの更新と applicants[].job クリアを 1 saveClientData にまとめる
+ *  - 子アカウント呼出時は opts.applicantBaseFilter で「自拠点 applicants のみ」絞り込みを可能にする
+ *    （AuthContext.filterDataByBase が applicants を base 絞り込みしていた挙動の再現）
+ *
+ * スコープ外:
+ *  - Job 型への baseName 追加（Firestore 化時に再設計）
+ *  - rename / 並び替え / 並列重複名チェック（必要になったら別フェーズで検討）
+ *  - SourceRepository / EmailTemplateRepository / FilterConditionRepository（Phase N-2 以降）
+ *
+ * Firestore マッピング:
+ *  - 全社共通レイヤ: `/tenants/{tid}/jobs/{jobId}` doc（baseName フィールドなし or null）
+ *  - 拠点別レイヤ: `/tenants/{tid}/jobs/{jobId}` doc（baseName フィールド指定）or
+ *    `/tenants/{tid}/baseOverrides/{baseName}/jobs/{jobId}`（設計判断は Phase J 時に確定）
+ *  - deleteWithCascade は jobs collection の doc 削除 + applicants collection の対象 doc 更新を
+ *    runTransaction / WriteBatch で 1 atomic 化
+ */
+export interface JobRepository {
+  /**
+   * 求人一覧を返す。
+   *  - baseName 未指定: `data.jobs`（全社共通）
+   *  - baseName 指定 + `data.jobsByBase[baseName]` あり: `data.jobsByBase[baseName]`
+   *  - baseName 指定 + `data.jobsByBase[baseName]` 未作成: `data.jobs`（フォールバック、既存 UI 表示互換）
+   *  - 並び順は保存時のまま
+   */
+  list(clientId: string, baseName?: string): Job[];
+  /**
+   * 求人を 1 件追加する。
+   *  - id は対象レイヤの `max(j.id) + 1` で採番（既存 JobManagement.save と互換。
+   *    既存挙動: 0 件レイヤなら id=1 から開始）
+   *  - baseName 指定 + 対象レイヤ未作成: `data.jobs` をコピーして開始 → 末尾に追加し
+   *    `data.jobsByBase[baseName]` として保存（既存 writeJobs 互換、override 新規作成）
+   *  - 重複名チェックは行わない（呼出側責務）
+   *  - 戻り値は採番後の Job
+   */
+  create(
+    clientId: string,
+    job: Omit<Job, 'id'>,
+    baseName?: string,
+  ): Job;
+  /**
+   * 求人を部分更新する。
+   *  - 対象 jobId が見つからなければ undefined を返す（saveClientData を呼ばない）
+   *  - patch に id が混入しても無視（id は不変）
+   *  - 対象レイヤが既存 + 全フィールドが現状と一致なら saveClientData を呼ばない（無駄な書込防止）
+   *  - 対象レイヤが未作成 (= baseName 指定で `data.jobsByBase[baseName]` が無い) の場合:
+   *      patch 内容が現状と一致しても saveClientData を呼んで override を新規作成する
+   *      （既存 writeJobs 挙動互換: 「base 未設定で編集 = override 作成」）
+   *  - 戻り値は更新後 Job（または既存値一致時の current）
+   */
+  update(
+    clientId: string,
+    jobId: number,
+    patch: Partial<Omit<Job, 'id'>>,
+    baseName?: string,
+  ): Job | undefined;
+  /**
+   * 求人削除と applicants[].job クリアを 1 saveClientData に集約する。
+   *
+   * 動作:
+   *  - 対象レイヤ (`data.jobs` または `data.jobsByBase[baseName]`) から jobId 一致を除去
+   *      - baseName 指定 + 対象レイヤ未作成: `data.jobs` をコピーして開始 → 削除（既存 writeJobs/deleteJob 互換）
+   *  - 対象 jobId が見つからなければ no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - applicants[].job === removedJobName を '' にクリア
+   *      - `opts.applicantBaseFilter` 指定時: `a.base === applicantBaseFilter` のみ対象
+   *      - 未指定時: 全 applicants 横断（既存 JobManagement.deleteJob の挙動を維持）
+   *  - applicants[].updatedAt は touch しない（既存 deleteJob 互換）
+   *  - 上記 2 配列の更新を 1 saveClientData にまとめる
+   *
+   * 既知の挙動メモ:
+   *  - 親アカウント + base scope での削除も `applicantBaseFilter` 未指定で呼ぶことで「全 applicants 横断クリア」
+   *    という現行挙動を維持する（base override のみ削除しても applicants の job 参照は全社で消える）。
+   *    意味論的なリファクタは Phase J 以降で再検討。
+   */
+  deleteWithCascade(
+    clientId: string,
+    jobId: number,
+    opts?: {
+      /** 対象レイヤ。undefined = 全社共通 / 指定 = 拠点別 */
+      baseName?: string;
+      /** applicants[].job クリア対象の base 絞り込み。undefined = 全 applicants 横断 */
+      applicantBaseFilter?: string;
+    },
+  ): DeleteJobCascadeResult;
+  /**
+   * 拠点別求人オーバーライドレイヤをまるごと削除する（既存 JobManagement.removeOverride 互換）。
+   *  - `data.jobsByBase[baseName]` キーを delete
+   *  - キー不在なら no-op で `removed: false` を返す（saveClientData も呼ばない）
+   *  - applicants は触らない（override を消すと全社共通レイヤにフォールバックする = 名前一致は維持される）
+   */
+  removeBaseOverride(clientId: string, baseName: string): RemoveJobBaseOverrideResult;
 }
