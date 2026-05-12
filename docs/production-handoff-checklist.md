@@ -12,8 +12,9 @@
 
 - 画面コードは **Repository 層** (`src/repositories/`) と **AuthService 層** (`src/services/auth/`) を介してデータを読み書きする境界が確定済。
 - Firestore / Firebase Auth / Cloud Storage への切替は、原則として **`src/repositories/index.ts` と `src/services/auth/index.ts` の各 1 行差し替え** + 新実装ディレクトリの追加でできる構成にしてある。
-- Slot (Phase K) / Base (Phase L) / Client (Phase M) は完了済。**残る直書き経路**は **設定系 Repository / AdminApp の Client 以外 (AdminAccount / AdminLog / MediaIntegration、媒体連携、契約・請求等)**。Firestore 化と同時に立ち上げると PR が肥大化するので、**段階順序を守ること**。
+- Slot (Phase K) / Base (Phase L) / Client (Phase M) / 設定系 10 画面 (Phase N) は完了済。**残る直書き経路**は **AdminApp の Client 以外 (AdminAccount / AdminLog / MediaIntegration、媒体連携、契約・請求等)** + `AddApplicantModal.tsx` の duplicate flag 一括更新 1 callsite のみ。Firestore 化と同時に立ち上げると PR が肥大化するので、**段階順序を守ること**。
 - ClientRepository は Phase M-1〜M-8 完了（型 + LocalStorage CRUD 5 API + AccountSettings + BaseRepository + AdminApp 全 callsite + `clientOptions.incrementOptionUsage` + BaseManagement read-only 経路）。**クライアント系 `storage.getClients/saveClients` 直叩きはコードベースから完全消滅**。
+- Phase N-1〜N-10 で設定系 10 画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済。**設定画面側の `updateClientData` 実コールは 0 件**。残るは `AddApplicantModal.tsx` の 1 callsite と `AuthContext.updateClientData` shim 本体のみ（撤去候補）。
 - `src/repositories/firestore-design.md` (v1.6) が本番 DB 設計の唯一のソース。本書はその「実装着手側から見た作業順序」だけを抽出する。
 
 ---
@@ -100,6 +101,7 @@
 | K | SlotRepository 立ち上げ + Calendar.tsx の slotSettings 直書き経路を全 Repository 化 (K-1〜K-4)。K-5 = BaseManagement.deleteBase 連携は Phase L-3 で集約 |
 | L | BaseRepository 立ち上げ (L-1) + BaseManagement / Calendar の bases 直書き経路を全 Repository 化 (L-2)。L-3 で `deleteWithCascade` に 8 配列カスケード + child アカウント baseName クリアを集約 (K-5 を同時消化) |
 | M | ClientRepository CRUD 補完: 5 API 追加 (M-1) / AccountSettings (M-2) / BaseRepository 経由置換 (M-3) / AdminApp.loadClients (M-4) / AdminApp.handleToggleStatus + onUpdateClient prop (M-5a) / AdminApp.handleSave (M-5b、child companyName 追従を listChildren + update で維持) / AdminApp.handleDelete (M-6、clientData/operationLogs は orchestrator 残置) / AuthService.adminResetPassword 追加 + AdminApp.handleUpdatePassword (M-7a) / clientOptions.incrementOptionUsage (M-7b) / BaseManagement read-only 経路 (M-8)。**クライアント系 `storage.getClients/saveClients` 直叩きはコードベースから完全消滅** |
+| N | 設定系 10 画面の Repository 化: JobManagement (N-1) / SourceManagement (N-2) / EmailTemplateManagement (N-3) / HearingManagement (N-4) / ReportScheduleSettings (N-5、reportRepository 拡張) / ExclusionList (N-6) / MediaCostManagement (N-7) / FilterConditionSettings (N-8) / ScreeningSettings (N-9) / ChatbotManagement (N-10)。`useAuth` 分割代入から `updateClientData` を除去 → `reloadClientData` に統一。base-override / cascade / deep copy 方針は `README.md §14` の各 N-x 節を参照。**設定画面側の `updateClientData` 直叩きはコードベースから完全消滅**。後続整理として O-1 で `baseScope.ts` の dead 6 helper を削除済 |
 
 ---
 
@@ -113,20 +115,24 @@
 | **Firebase Auth 実装** | `src/services/auth/firebase/` に `FirebaseAuthService` 新設。同期 shim は throw | ★★★ |
 | **Cloud Storage 添付ファイル実装** | `Applicant.files[]` の inline url を Cloud Storage path に置換。Storage Rules 整備 | ★★★ |
 
-### 2.2 未着手 Repository (Firestore 移行と同時にやる必要がある)
+### 2.2 設定系 Repository (✅ Phase N-1〜N-10 完了)
 
-| Repository | 担当範囲 | 優先度 | 備考 |
+設定系 10 画面の Repository 化は完了済。Firestore 移行時は LocalStorage 実装と同じインターフェース（`src/repositories/types.ts`）を満たす Firestore 版を `src/repositories/firestore/` に追加するだけで切替可能。
+
+| Repository | 画面 | LocalStorage 実装 | Phase |
 |---|---|---|---|
-| **JobRepository** | `JobManagement.tsx` の `jobs / jobsByBase` | ★★ | |
-| **SourceRepository** | `SourceManagement.tsx` の `sources / sourcesByBase` | ★★ | password 暗号化必須 |
-| **EmailTemplateRepository** | `EmailTemplateManagement.tsx` の `emailTemplates / emailTemplatesByBase` | ★★ | |
-| **HearingRepository** | `HearingManagement.tsx` の `hearingTemplates` | ★★ | |
-| **FilterConditionRepository** | `FilterConditionSettings.tsx` の `filterCondition / filterConditions[base]` | ★★ | 一部 changeStageBulk 経由は完了済 |
-| **ScreeningRepository** | `ScreeningSettings.tsx` の `screeningCriteria` (axes / byJob 含む) | ★★ | |
-| **ChatbotRepository** | `ChatbotManagement.tsx` の `chatScenarios / chatQuestionGroups / chatLeadSettings` | ★★ | 3 配列管理 |
-| **MediaCostRepository** | `MediaCostManagement.tsx` の `mediaCosts[ym][source]` | ★★ | |
-| **ReportScheduleRepository** | `ReportScheduleSettings.tsx` の `reportSchedule` | ★★ | reportRepository 拡張でも可 |
-| **ExclusionRepository** | `ExclusionList.tsx` の `exclusionList` | ★★ | 一部 changeStageBulk 経由完了済 |
+| `jobRepository` | `JobManagement.tsx` の `jobs / jobsByBase` | ✅ | N-1 |
+| `sourceRepository` | `SourceManagement.tsx` の `sources / sourcesByBase`（password 暗号化は Firestore 化時に検討）| ✅ | N-2 |
+| `emailTemplateRepository` | `EmailTemplateManagement.tsx` の `emailTemplates / emailTemplatesByBase` | ✅ | N-3 |
+| `hearingRepository` | `HearingManagement.tsx` の `hearingTemplates` | ✅ | N-4 |
+| `reportRepository` (拡張) | `ReportScheduleSettings.tsx` の `reportSchedule` | ✅ | N-5 |
+| `exclusionRepository` | `ExclusionList.tsx` の `exclusionList`（add + changeStageBulk の 2 段呼出は Firestore 化時に 1 transaction 化を検討）| ✅ | N-6 |
+| `mediaCostRepository` | `MediaCostManagement.tsx` の `mediaCosts[ym][source]` | ✅ | N-7 |
+| `filterConditionRepository` | `FilterConditionSettings.tsx` の `filterCondition / filterConditions[base]` | ✅ | N-8 |
+| `screeningRepository` | `ScreeningSettings.tsx` の `screeningCriteria` (axes / byJob 含む) | ✅ | N-9 |
+| `chatbotRepository` | `ChatbotManagement.tsx` の `chatScenarios / chatQuestionGroups / chatLeadSettings` (3 配列管理) | ✅ | N-10 |
+
+詳細設計（API 契約・base-override・cascade・deep copy 方針・Firestore マッピング案）は `src/repositories/README.md §14` の各 N-x 節と `src/repositories/firestore-design.md §5.3` を参照。
 
 ### 2.3 AdminApp 系 (運営画面、Client 以外)
 
@@ -140,7 +146,20 @@
 
 > **ClientRepository は Phase M-1〜M-8 で完了済**。AdminApp の loadClients / handleSave / handleDelete / handleToggleStatus / handleUpdatePassword / onUpdateClient prop + `clientOptions.incrementOptionUsage` + BaseManagement の child 件数取得はすべて Repository / authService 経由に置換済で、クライアント系 storage 直叩きは 0 件。
 
-### 2.4 E2E / Migration ツール
+### 2.4 Phase N 完了後の整理タスク
+
+Phase N 完了で設定 10 画面の Repository 化は揃ったが、`AuthContext.updateClientData` shim と `baseScope.ts` を完全撤去するには以下の整理が残る。Firestore 化（Phase J）と独立して進めて良い。
+
+| ID | 内容 | 概要 | 優先度 |
+|---|---|---|---|
+| **O-1** | `baseScope.ts` dead helper 削除 | ✅ 完了（`resolveScreeningCriteria` / `hasScreeningJobOverride` / `resolveEmailTemplates` / `hasJobsOverride` / `hasSourcesOverride` / `hasEmailTemplatesOverride` を削除）| — |
+| **O-2** | docs 更新 | ✅ 完了（本書 / `firestore-design.md` §5 / §5.3 を Phase N 完了状態に書き換え）| — |
+| **O-3** | `AddApplicantModal.tsx:284` の `updateClientData` 撤去 | duplicate flag 一括更新を applicantRepository の composite API（`markDuplicateByMatch` 等）経由に置換。子アカウント書込の権限境界（base 絞込 + 他拠点合算）を Repository 側で同等再現する必要あり | ★ |
+| **O-4** | `AuthContext.updateClientData` shim 削除 | O-3 完了後に interface / 実装 / export を削除。tsc / build で残利用箇所ゼロを確認 | ★ |
+| **O-5** | `baseScope.ts` 全体削除 | `resolveJobs` / `resolveSources` を JobRepository / SourceRepository の `listForBase(ownerId, baseName)` 等の新規 API に置換 → `baseScope.ts` ファイル自体を削除（AddApplicantModal / ApplicantDetail の 2 callsite を移行）| ★ |
+| **O-6** | AdminApp の `storage.getClientData / saveClientData` 直叩き整理 | 運営画面 invoice / clientData 直叩き（AdminApp.tsx で 10 callsite）を専用 Repository 経由に。Phase N スコープ外として残存 | ★ |
+
+### 2.5 E2E / Migration ツール
 
 | 項目 | 概要 | 優先度 |
 |---|---|---|

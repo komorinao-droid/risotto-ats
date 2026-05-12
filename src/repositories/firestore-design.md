@@ -299,7 +299,12 @@
 
 ## 5. Repository 化の残タスク (Firestore 移行前に注意)
 
-下記は **現状画面が `updateClientData` 直叩きで書いている** 経路で、Repository に寄せていない。Firestore 移行前にこれらを Repository 化しておくと、画面の変更を最小化できる。
+設定系画面の `updateClientData` 直叩きは **Phase N-1〜N-10 で全 10 画面の Repository 化が完了**。残るのは AdminApp 系（Client 以外）と、`AddApplicantModal.tsx` の duplicate flag 一括更新 1 callsite のみ。
+
+> **Phase N 完了状態（2026-05-12）**:
+> - 10 設定画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済
+> - 設定画面側の `updateClientData` 実コールは 0 件（コメント / JSDoc のみ残置）
+> - `AuthContext.updateClientData` shim は `AddApplicantModal.tsx:284` の 1 callsite を最後に残すのみ → 撤去候補
 
 ### 5.1 SlotRepository (✅ Phase K-1〜K-4 完了 — `README.md §11`)
 
@@ -362,22 +367,31 @@
 - Firestore マッピング: `tenants/{tid}/bases/{baseId}` doc + `tenants/{tid}/bases/{baseId}/slots/{date}` subcollection（§5.1 と整合）
 - rename カスケードは未実装（既存仕様維持）。仕様変更が必要なら `renameWithCascade` を別フェーズで新設する想定
 
-### 5.3 設定系 Repository (未着手)
+### 5.3 設定系 Repository (✅ Phase N-1〜N-10 完了 — `README.md §14`)
 
-下記は **現状全部 `updateClientData` 直叩き**。Firestore 化時にそのまま移すと、Repository 経由で書かない経路が大量発生する。
+設定系画面の 10 配列はすべて Repository 経由化済。`updateClientData` 直叩きはコードベースから消滅。詳細設計（API 契約・base-override・cascade・deep copy 方針）は `README.md §14` の各 N-x 節を参照。
 
-| 画面 | 直書きしている配列 | 必要 Repository |
-|---|---|---|
-| `JobManagement.tsx` | `jobs` / `jobsByBase[base]` | JobRepository (Job CRUD + base override) |
-| `SourceManagement.tsx` | `sources` / `sourcesByBase[base]` | SourceRepository |
-| `EmailTemplateManagement.tsx` | `emailTemplates` / `emailTemplatesByBase[base]` | EmailTemplateRepository |
-| `HearingManagement.tsx` | `hearingTemplates` | HearingRepository |
-| `FilterConditionSettings.tsx` | `filterCondition` / `filterConditions[base]` | FilterConditionRepository (一部 changeStageBulk 経由は完了済) |
-| `ScreeningSettings.tsx` | `screeningCriteria` (axes / byJob 含む) | ScreeningRepository |
-| `ChatbotManagement.tsx` | `chatScenarios` / `chatQuestionGroups` / `chatLeadSettings` | ChatbotRepository (3 配列管理) |
-| `MediaCostManagement.tsx` | `mediaCosts[ym][source]` | MediaCostRepository |
-| `ReportScheduleSettings.tsx` | `reportSchedule` | ReportScheduleRepository (or `reportRepository` 拡張) |
-| `ExclusionList.tsx` | `exclusionList` (一部 changeStageBulk 経由完了) | ExclusionRepository |
+| 画面 | 直書きしていた配列 | Repository | Phase |
+|---|---|---|---|
+| `JobManagement.tsx` | `jobs` / `jobsByBase[base]` | JobRepository (Job CRUD + base override + cascade) | ✅ N-1 |
+| `SourceManagement.tsx` | `sources` / `sourcesByBase[base]` | SourceRepository | ✅ N-2 |
+| `EmailTemplateManagement.tsx` | `emailTemplates` / `emailTemplatesByBase[base]` | EmailTemplateRepository | ✅ N-3 |
+| `HearingManagement.tsx` | `hearingTemplates` | HearingRepository | ✅ N-4 |
+| `ReportScheduleSettings.tsx` | `reportSchedule` | reportRepository 拡張（getSchedule / saveSchedule） | ✅ N-5 |
+| `ExclusionList.tsx` | `exclusionList` | ExclusionRepository (`add` + `applicantRepository.changeStageBulk` 2 段) | ✅ N-6 |
+| `MediaCostManagement.tsx` | `mediaCosts[ym][source]` | MediaCostRepository | ✅ N-7 |
+| `FilterConditionSettings.tsx` | `filterCondition` / `filterConditions[base]` | FilterConditionRepository | ✅ N-8 |
+| `ScreeningSettings.tsx` | `screeningCriteria` (axes / byJob 含む) | ScreeningRepository (`getGlobal / getForJob / saveAll`) | ✅ N-9 |
+| `ChatbotManagement.tsx` | `chatScenarios` / `chatQuestionGroups` / `chatLeadSettings` | ChatbotRepository (3 配列管理) | ✅ N-10 |
+
+**Phase N 完了による副次効果**:
+- `src/utils/baseScope.ts` の dead 6 helper（`resolveScreeningCriteria` / `hasScreeningJobOverride` / `resolveEmailTemplates` / `hasJobsOverride` / `hasSourcesOverride` / `hasEmailTemplatesOverride`）を O-1 で削除済。残るは `resolveJobs` / `resolveSources` の 2 関数（AddApplicantModal / ApplicantDetail で現役）
+- 設定画面側の `useAuth` 分割代入から `updateClientData` を除去、`reloadClientData` に統一済
+
+**残タスク（Phase N 後継）**:
+- `AddApplicantModal.tsx:284` の `updateClientData` 経由 duplicate flag 一括更新 → applicantRepository に composite API を追加する形で撤去予定（O-3 で着手）。子アカウント書込の権限境界（base 絞込 + 他拠点合算）を Repository 側で同等再現する必要あり
+- `AuthContext.updateClientData` shim の撤去 → O-3 完了後（O-4）。設定 10 画面 + AddApplicantModal で 0 callsite を確認したうえで interface / 実装 / export を削除
+- `baseScope.ts` 全体削除 → `resolveJobs / resolveSources` を JobRepository / SourceRepository の新規 API（`listForBase` 等）に置換した後（O-5）
 
 ### 5.4 AdminApp 系 (未着手)
 
