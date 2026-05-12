@@ -4064,10 +4064,7 @@ const InitDataPage: React.FC<{
 
   // コピー元データの読み込み（プレビュー件数算出用）
   const loadAppData = (id: string): ClientData | null => {
-    try {
-      const raw = localStorage.getItem(`hireflow:client:${id}:data`);
-      return raw ? (JSON.parse(raw) as ClientData) : null;
-    } catch { return null; }
+    try { return clientDataRepository.get(id); } catch { return null; }
   };
 
   const filteredApplicants = (data: ClientData | null) => {
@@ -4142,7 +4139,7 @@ const InitDataPage: React.FC<{
     };
 
     try {
-      localStorage.setItem(`hireflow:client:${appDstId}:data`, JSON.stringify(updated));
+      clientDataRepository.save(appDstId, updated);
     } catch (e) {
       setAppError('保存に失敗しました（容量上限の可能性）');
       return;
@@ -4166,20 +4163,14 @@ const InitDataPage: React.FC<{
     if (!Object.values(copyItems).some(Boolean)) { setError('コピーする項目を選択してください'); return; }
 
     let srcData: ClientData | null = null;
-    try {
-      const raw = localStorage.getItem(`hireflow:client:${srcId}:data`);
-      if (raw) srcData = JSON.parse(raw) as ClientData;
-    } catch { /* ignore */ }
+    try { srcData = clientDataRepository.get(srcId); } catch { /* ignore */ }
     if (!srcData) { setError('コピー元のデータが見つかりません'); return; }
 
     let successCount = 0;
     for (const dstId of dstIds) {
       try {
         let dstData: ClientData | null = null;
-        try {
-          const raw = localStorage.getItem(`hireflow:client:${dstId}:data`);
-          if (raw) dstData = JSON.parse(raw) as ClientData;
-        } catch { /* ignore */ }
+        try { dstData = clientDataRepository.get(dstId); } catch { /* ignore */ }
         if (!dstData) continue;
 
         if (copyItems.statuses) dstData.statuses = [...srcData.statuses];
@@ -4190,7 +4181,7 @@ const InitDataPage: React.FC<{
         if (copyItems.mailTemplates) dstData.emailTemplates = [...srcData.emailTemplates];
         if (copyItems.filterConditions) dstData.filterCondition = { ...srcData.filterCondition };
 
-        localStorage.setItem(`hireflow:client:${dstId}:data`, JSON.stringify(dstData));
+        clientDataRepository.save(dstId, dstData);
         successCount++;
       } catch { /* skip */ }
     }
