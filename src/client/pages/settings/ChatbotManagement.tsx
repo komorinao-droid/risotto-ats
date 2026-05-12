@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { chatbotRepository, resolveDataOwnerId } from '@/repositories';
 import type {
   ChatLeadSetting, ChatLeadQuestion, ChatLeadChoice,
   ChatInterviewCalendar,
@@ -540,10 +541,12 @@ const LeadEditor: React.FC<{
 // ── メインコンポーネント ──────────────────────────────────────────────────────
 
 const ChatbotManagement: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const canEdit = !client || client.accountType === 'parent' || client.permissions.chatbot;
+  // child アカウントは parent の clientData を共有するため、書込先 ownerId を解決する。
+  const ownerId = client ? resolveDataOwnerId(client) : null;
 
   const leads = clientData?.chatLeadSettings || [];
   const bases = (clientData?.bases || []).map(b => b.name);
@@ -561,29 +564,28 @@ const ChatbotManagement: React.FC = () => {
   }, [leads.length]);
 
   const onChange = (lead: ChatLeadSetting) => {
-    updateClientData(data => ({
-      ...data,
-      chatLeadSettings: (data.chatLeadSettings || []).map(l => l.id === lead.id ? lead : l),
-    }));
+    if (!ownerId) return;
+    chatbotRepository.updateLeadSetting(ownerId, lead);
+    reloadClientData();
   };
 
   const addLead = () => {
+    if (!ownerId) return;
     const id = newId(leads);
     const nl: ChatLeadSetting = {
       id, baseName: '', leadName: '新しいチャット設定', startMessage: '',
       questions: [], ngMessageImmediate: '', ngMessageAfterAll: '',
       interviewCalendars: [],
     };
-    updateClientData(data => ({ ...data, chatLeadSettings: [...(data.chatLeadSettings || []), nl] }));
+    chatbotRepository.createLeadSetting(ownerId, nl);
+    reloadClientData();
     setSelectedId(id);
   };
 
   const deleteLead = () => {
-    if (!selected || !window.confirm('このチャット設定を削除しますか？')) return;
-    updateClientData(data => ({
-      ...data,
-      chatLeadSettings: (data.chatLeadSettings || []).filter(l => l.id !== selected.id),
-    }));
+    if (!ownerId || !selected || !window.confirm('このチャット設定を削除しますか？')) return;
+    chatbotRepository.deleteLeadSetting(ownerId, selected.id);
+    reloadClientData();
     setSelectedId(null);
   };
 

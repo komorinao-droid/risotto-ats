@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, ChatLeadSetting, ChatQuestionGroup, ChatScenario, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1674,4 +1674,109 @@ export interface ScreeningRepository {
    *  - `saveClientData` は 1 回のみ呼ぶ
    */
   saveAll(clientId: string, criteria: ScreeningCriteria): ScreeningCriteria;
+}
+
+/**
+ * Chatbot 機能の永続化境界（Phase N-10 で追加）。
+ *
+ * 対象データ:
+ *  - `data.chatScenarios: ChatScenario[]`（必須、`[]` 初期化）
+ *  - `data.chatQuestionGroups: ChatQuestionGroup[]`（必須、`[]` 初期化）
+ *  - `data.chatLeadSettings?: ChatLeadSetting[]`（optional）
+ *
+ * 責務:
+ *  - 3 配列の read / write を 1 Repository に集約（firestore-design §377: "ChatbotRepository (3 配列管理)"）
+ *  - `ChatLeadSetting` は CRUD 粒度（既存 UI が単一リード単位で即時保存している挙動を踏襲）
+ *  - `ChatScenario` / `ChatQuestionGroup` は現状 UI 編集経路なし → save 全件型 API のみ用意
+ *  - 戻り値は全階層 deep copy（mutate が localStorage に漏れない）
+ *
+ * 設計判断:
+ *  - **3 配列を 1 Repository に括る**:
+ *      firestore-design §377 で「ChatbotRepository (3 配列管理)」と既定。
+ *      Firestore 移行時は WriteBatch で 3 collection を atomic 化する想定（transaction 不要）。
+ *  - **LeadSettings は CRUD 粒度**:
+ *      既存 UI が `onChange(lead)` / `addLead()` / `deleteLead()` の 3 操作で即時保存しているため、
+ *      saveAll にすると UI 側で「全配列を組み立てて渡す」リファクタが必要になる。CRUD で踏襲。
+ *  - **id 採番は呼出側責務**:
+ *      UI が `newId(leads)` で採番してから createLeadSetting に渡す既存挙動を維持。
+ *      Repository が採番すると「保存後に id を受け取って setState」往復が必要になり UX が変わる。
+ *  - **default 補完**:
+ *      未設定時は `[]` を返す（null は返さない）。`chatScenarios` / `chatQuestionGroups` は型上必須、
+ *      `chatLeadSettings` も UI は `|| []` で受けるため、Repository 側で `[]` 保証する。
+ *  - **deep copy**:
+ *      LeadSetting は questions / interviewCalendars を 2 階層ネストで持つ。
+ *      Scenario は messages.buttons を 2 階層ネストで持つ。すべて clone helper で deep copy。
+ *
+ * N-1〜N-9 との差分:
+ *  - **base-override / byJob なし**:
+ *      `chatLeadSettings[].baseName` で拠点を区別するが override collection ではなく単一配列
+ *      （複数拠点分を 1 配列に格納）。`getForX` 系 fallback API は不要。
+ *  - **migrate / normalize なし**:
+ *      v1↔v2 のような形式変遷を持たない。saveScenarios / saveQuestionGroups / saveAll の中で
+ *      正規化を走らせる必要なし。
+ *  - **id は number（既存仕様）**:
+ *      他の Repository は string id 主流だが、Chat 系は `newId` で `Math.max+1` の number 採番。
+ *      Repository 側で string 変換せず、UI 既存挙動をそのまま維持。
+ *
+ * スコープ外（N-10 では触らない）:
+ *  - `Base.deleteWithCascade` 時の `chatLeadSettings.baseName` / `chatInterviewCalendars.baseName`
+ *    orphan cleanup（pre-existing gap、後続フェーズで `baseRepository` 拡張検討）
+ *  - `AdminApp.tsx` の `copyItems` に chat 系を追加（既存仕様で未収録、後続フェーズで検討）
+ *  - `baseScope.ts` の N-9 残置関数（resolveScreeningCriteria 等）の削除（N-10 完了後の整理フェーズ）
+ *  - `applicant.chatAnswers`（applicantRepository 側で管理済み）
+ *
+ * Firestore マッピング（Phase J / firestore-design §2.2, §6.2）:
+ *  - 案 A: `/tenants/{tid}/settings/global` doc の 3 field に内包（低頻度設定として §78 で言及）
+ *  - 案 B: `/tenants/{tid}/chatScenarios/{id}` / `chatQuestionGroups/{id}` / `chatLeadSettings/{id}`
+ *    を独立 subcollection 化（§139-141）
+ *  - 実装時は WriteBatch で 3 collection の更新を atomic 化（transaction 上限 500 docs 不要）
+ */
+export interface ChatbotRepository {
+  /**
+   * 全 `ChatScenario` を返す（未設定なら `[]`、deep copy）。
+   *  - messages.buttons まで 2 階層 deep copy
+   */
+  getScenarios(clientId: string): ChatScenario[];
+  /**
+   * `ChatScenario[]` を全件上書き保存（戻り値は deep copy）。
+   *  - 現状 UI 編集経路なし。将来 UI が追加された場合に form 全件 flush 型で使う想定。
+   */
+  saveScenarios(clientId: string, scenarios: ChatScenario[]): ChatScenario[];
+
+  /**
+   * 全 `ChatQuestionGroup` を返す（未設定なら `[]`、deep copy）。
+   *  - questions まで 2 階層 deep copy
+   */
+  getQuestionGroups(clientId: string): ChatQuestionGroup[];
+  /**
+   * `ChatQuestionGroup[]` を全件上書き保存（戻り値は deep copy）。
+   */
+  saveQuestionGroups(clientId: string, groups: ChatQuestionGroup[]): ChatQuestionGroup[];
+
+  /**
+   * 全 `ChatLeadSetting` を返す（未設定なら `[]`、deep copy）。
+   *  - questions.choices / interviewCalendars.methods まで 2 階層 deep copy
+   */
+  listLeadSettings(clientId: string): ChatLeadSetting[];
+  /**
+   * 単一 `ChatLeadSetting` を新規追加。
+   *  - id は呼出側で `newId(existing)` 採番済みの前提（UI 既存挙動を踏襲）
+   *  - 既存配列 push のみ、id 重複チェックはしない
+   *  - 戻り値は追加された lead の deep copy
+   */
+  createLeadSetting(clientId: string, lead: ChatLeadSetting): ChatLeadSetting;
+  /**
+   * id 一致の `ChatLeadSetting` を単一置換。
+   *  - 一致なしの場合は `saveClientData` を呼ばず `null` を返す
+   *  - 戻り値は更新後の lead の deep copy
+   */
+  updateLeadSetting(clientId: string, lead: ChatLeadSetting): ChatLeadSetting | null;
+  /**
+   * id 一致の `ChatLeadSetting` を単一削除。
+   *  - 該当なしの場合は `saveClientData` を呼ばず `false` を返す
+   *  - 削除した場合は `true`
+   *  - questions / interviewCalendars はネスト構造で完結するため cascade なし
+   *  - `baseName` 参照の orphan cleanup は本 API ではしない（pre-existing、スコープ外）
+   */
+  deleteLeadSetting(clientId: string, leadId: number): boolean;
 }

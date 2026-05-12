@@ -205,6 +205,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-7** | **MediaCostRepository 型 + LocalStorage 実装（getAll / saveDraft / removeSource）+ MediaCostManagement.tsx の `updateClientData` 2 箇所を Repository 経由に置換。ネストマップ型 `[ym][src] -> number` を扱う初の N-7 ケース。parseAmount（全角→半角 / カンマ・空白除去 / 1〜1 億円範囲）/ 月キー pruning / invalidCount 集計を Repository 内に集約。saveDraft は partial merge（draft に含まれない月/cell は触らない）/ 全 cell no-op の場合は saveClientData を呼ばない。removeSource は媒体名で全月横断 cascade 削除。Source rename/delete と mediaCosts の連動は pre-existing orphan として据え置き（別フェーズ）** | **✅ 完了** |
 | **N-8** | **FilterConditionRepository 型 + LocalStorage 実装（getLegacy / getByBaseMap / getEffective / updateForBase）+ FilterConditionSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。base 別 `filterConditions[baseName]` のみを更新し、legacy `filterCondition` は読み取り fallback 専用（書換 API なし）。fallback 解決ロジック（base 別 → legacy → defaultFC）を Repository 内に集約。`applicantRepository.changeStageBulk(..., reason:'filter_condition_applied')` 連携は画面側 orchestrator として維持。AddApplicantModal / ApplicantList / AdminApp の legacy 直接参照はスコープ外として現状維持** | **✅ 完了** |
 | **N-9** | **ScreeningRepository 型 + LocalStorage 実装（getGlobal / getForJob / hasJobOverride / saveAll）+ ScreeningSettings.tsx の `updateClientData` 経由保存 + ApplicantDetail.tsx の AI 評価実行時 criteria 解決を Repository 経由に置換。`settings/global` 配下の単一オブジェクト + `byJob[jobName]` 職種別オーバーライド型。`migrateToAxes`（v1 テキスト→v2 axes）+ `ensureAxisImportance`（★3 補完）+ `normalizeWeights`（合計100% 化）を Repository 内に集約。`saveAll` は normalize のみ実行（migrate しない / UI 側 form state は v2 形式の前提）。未設定時は必ず `null` を返す（`defaultCriteria()` 相当の生成は UI 責務）。職種別 axes が空配列の場合は全社 axes を継承する `resolveScreeningCriteria` の挙動を 1:1 移植。`baseScope.ts` の `resolveScreeningCriteria` / `hasScreeningJobOverride` は他のヘルパと同居しているため残置（N-10 完了後に整理検討）。AdminApp stats / clientStats / AddApplicantModal の `clientData.screeningCriteria` 直参照はスコープ外として現状維持** | **✅ 完了** |
+| **N-10** | **ChatbotRepository 型 + LocalStorage 実装（getScenarios / saveScenarios / getQuestionGroups / saveQuestionGroups / listLeadSettings / createLeadSetting / updateLeadSetting / deleteLeadSetting）+ ChatbotManagement.tsx の `updateClientData` 直更新を Repository 経由に置換。3 配列（`chatScenarios` / `chatQuestionGroups` / `chatLeadSettings`）を 1 Repository に集約。LeadSettings は CRUD 粒度（UI 既存の即時保存挙動を踏襲、`newId` 採番は呼出側）/ Scenarios / QuestionGroups は現状 UI 編集経路なしで save 全件型のみ用意。未設定時は `[]` 返却（null なし）/ migrate / normalize / base-override / cascade なし（ネスト構造で完結）。child でも `permissions.chatbot=true` なら編集可能なため `resolveDataOwnerId` で親 ownerId 解決を必須化。`updateLeadSetting` は id 不在なら save せず null / `deleteLeadSetting` は該当なしなら save せず false。base 削除時の `baseName` orphan cleanup / AdminApp copyItems / baseScope.ts の N-9 残置関数整理はスコープ外（後続フェーズ）** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -214,7 +215,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository / N-8 = FilterConditionRepository / N-9 = ScreeningRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository / N-8 = FilterConditionRepository / N-9 = ScreeningRepository / N-10 = ChatbotRepository 完了（Phase N 全 10 種完了）。詳細は §14 を参照
 
 ---
 
@@ -814,7 +815,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-7**: `MediaCostRepository` 型 + LocalStorage 実装 + MediaCostManagement.tsx 移行（ネストマップ型 `[ym][src] -> number` / parseAmount + 月キー pruning + invalidCount 集計を Repository 内集約 / saveDraft は partial merge / removeSource は媒体名で全月横断 cascade）
 - [x] **N-8**: `FilterConditionRepository` 型 + LocalStorage 実装 + FilterConditionSettings.tsx 移行（base 別 + legacy fallback を Repository 内集約 / legacy `filterCondition` は読み取り専用 / `updateForBase` のみ提供 / `applicantRepository.changeStageBulk` は画面側 orchestrator 維持）
 - [x] **N-9**: `ScreeningRepository` 型 + LocalStorage 実装 + ScreeningSettings.tsx / ApplicantDetail.tsx 移行（settings/global 配下の単一オブジェクト + `byJob[jobName]` 職種別オーバーライド型 / migrate + normalize を Repository に集約 / 未設定時 null 返却 / `saveAll` 一括書込 / `baseScope.ts` の旧関数は残置）
-- [ ] **N-10**: `ChatbotRepository`（scenarios / questionGroups / leadSettings の 3 配列原子性）
+- [x] **N-10**: `ChatbotRepository` 型 + LocalStorage 実装 + ChatbotManagement.tsx 移行（3 配列を 1 Repository に集約 / LeadSettings は CRUD 粒度 / Scenarios・QuestionGroups は save 全件型 / `[]` 返却契約 / migrate・normalize・base-override・cascade なし / child 編集経路あり → `resolveDataOwnerId` 必須）
 
 ### 14.3 N-1: JobRepository（base-override パターンの参照実装）
 
@@ -1179,13 +1180,85 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - `saveAll` は `setDoc(..., {merge: true})` で `screeningCriteria` field を上書き
 - `getGlobal` / `getForJob` / `hasJobOverride` は 1 doc fetch（職種別 fallback も同 doc 内で完結）
 
-### 14.12 残タスク
+### 14.12 N-10: ChatbotRepository（3 配列集約 / LeadSettings CRUD + Scenarios・QuestionGroups save 全件型）
 
-- **N-10**: §14.2 の通り、設定系 1 種が残着手対象。N-10 = Chatbot（scenarios / questionGroups / leadSettings の 3 配列原子性）
-- **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
+#### 対象データ
+
+- `data.chatScenarios: ChatScenario[]`（必須、`[]` 初期化）
+- `data.chatQuestionGroups: ChatQuestionGroup[]`（必須、`[]` 初期化）
+- `data.chatLeadSettings?: ChatLeadSetting[]`（optional）
+
+#### API 設計
+
+```ts
+interface ChatbotRepository {
+  getScenarios(clientId): ChatScenario[];
+  saveScenarios(clientId, scenarios): ChatScenario[];
+
+  getQuestionGroups(clientId): ChatQuestionGroup[];
+  saveQuestionGroups(clientId, groups): ChatQuestionGroup[];
+
+  listLeadSettings(clientId): ChatLeadSetting[];
+  createLeadSetting(clientId, lead): ChatLeadSetting;
+  updateLeadSetting(clientId, lead): ChatLeadSetting | null;
+  deleteLeadSetting(clientId, leadId): boolean;
+}
+```
+
+#### 設計判断
+
+- **3 配列を 1 Repository に括る**: firestore-design §377 で「ChatbotRepository (3 配列管理)」と既定。Firestore 化時は WriteBatch で 3 collection を atomic 化（transaction 不要）。
+- **LeadSettings は CRUD 粒度**: 既存 UI が `onChange(lead)` / `addLead()` / `deleteLead()` の 3 操作で即時保存しているため、N-9 のような saveAll にすると UI 側で「全配列を組み立てて渡す」リファクタが発生する。CRUD で踏襲。
+- **Scenarios / QuestionGroups は save 全件型のみ**: 現状 UI 編集経路ゼロ。将来 UI が追加された場合に form state を全件 flush する想定（N-9 saveAll と同型）。CRUD 用意は yagni のため最小化。
+- **id 採番は呼出側責務**: UI が `newId(items)` で `Math.max(...ids) + 1` 採番してから create に渡す既存挙動を維持。Repository が採番すると「保存後に id を受け取って setState」往復が必要になり UX が変わる。
+- **`[]` 返却契約**: 未設定時も `[]` を返す（null は返さない）。`chatScenarios` / `chatQuestionGroups` は型上必須、`chatLeadSettings` も UI は `|| []` で受けるため契約を統一。
+- **migrate / normalize / cascade なし**: v1↔v2 のような形式変遷なし、`baseName` 参照の orphan cleanup は本 Repository では行わない（base 削除カスケードは別フェーズ）。
+- **deep copy**:
+  - `cloneScenario`: messages → buttons の 2 階層
+  - `cloneQuestionGroup`: questions の 1 階層
+  - `cloneLead`: questions → choices / interviewCalendars → methods の 2 階層
+- **no-op 検査**: `updateLeadSetting` は id 不在で `saveClientData` を呼ばず null / `deleteLeadSetting` は該当なしで `saveClientData` を呼ばず false。
+
+#### N-1〜N-9 との差分
+
+- **base-override / byJob なし**: `chatLeadSettings[].baseName` で拠点を区別するが override collection ではなく単一配列に格納。`getForX` 系 fallback API は不要。
+- **migrate / normalize なし**: N-9 Screening のような v1→v2 変換は持たない。
+- **child 編集経路あり**: N-9 ScreeningSettings は child 早期 return だったが、ChatbotManagement は `permissions.chatbot=true` の child でも編集可能。`resolveDataOwnerId(client)` で親 ownerId 解決が必須。
+- **id は number（既存仕様）**: 他の Repository は string id 主流だが、Chat 系は `newId` で `Math.max+1` の number 採番を継続。
+- **Phase N の最終フェーズ**: N-10 完了で Phase N の全 10 種が揃う。`AuthContext.updateClientData` shim は撤去候補に。
+
+#### 移行ファイル
+
+- `src/repositories/types.ts` — `ChatbotRepository` interface 追加
+- `src/repositories/localStorage/chatbotRepository.ts` — 新規 `LocalStorageChatbotRepository`
+- `src/repositories/index.ts` — `chatbotRepository` singleton + 型 re-export
+- `src/client/pages/settings/ChatbotManagement.tsx` — `useAuth` から `updateClientData` 除去、3 操作（onChange / addLead / deleteLead）を Repository 経由に置換、`resolveDataOwnerId(client)` 経路追加、`reloadClientData` で reflow
+- `src/repositories/README.md` — §7 進捗表 N-10 行追加 / §14.2 checkbox / §14.12 N-10 詳細セクション追加 / §14.13 残タスク renumber
+
+#### スコープ外（N-10 では触らない）
+
+- `Base.deleteWithCascade` 時の `chatLeadSettings.baseName` / `chatInterviewCalendars.baseName` orphan cleanup（pre-existing、後続フェーズで baseRepository 拡張時に検討）
+- `AdminApp.tsx` の `copyItems` に chat 系を追加（既存仕様で未収録、後続フェーズ）
+- `baseScope.ts` の N-9 残置関数（`resolveScreeningCriteria` / `hasScreeningJobOverride`）の削除（N-10 完了後の整理フェーズで一括）
+- `applicant.chatAnswers` 周辺（applicantRepository 側で管理済み）
+- `chatScenarios` / `chatQuestionGroups` の編集 UI 新設（現状 UI なし、Repository API のみ用意）
+- Firestore 実装 / UI 変更 / localStorage キー変更
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- 案 A: `/tenants/{tid}/settings/global` doc の 3 field に内包（低頻度設定として firestore-design §78 で言及）
+- 案 B: `/tenants/{tid}/chatScenarios/{id}` / `chatQuestionGroups/{id}` / `chatLeadSettings/{id}` を独立 subcollection 化（§139-141）
+- 実装時は WriteBatch で 3 collection の更新を atomic 化（transaction 上限 500 docs を回避）
+
+### 14.13 残タスク
+
+- **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したため `AuthContext.updateClientData` 自体を撤去候補とする。grep で残利用箇所がゼロであることを確認した上で別フェーズで削除
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。N-10 完了後に整理タイミングで `@deprecated` → 削除を検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型、N-9 (Screening) は「単一オブジェクト + byJob 職種別」型で構造が異なる別系統。共通化は型パラメータ + cascade callback で抽象化可能だが、早すぎる抽象化は避け、N-10 完了後の整理 phase で再検討
+- **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。後続の整理フェーズで `@deprecated` → 削除を検討
+- **`baseScope.ts` 全体の整理**: Phase N 完了で `resolveJobs` / `resolveSources` / `resolveEmailTemplates` 系も Repository 側に移行済（base-override は各 Repository 内で完結）。baseScope.ts の resolve 系ヘルパも UI から呼ばれなくなっている可能性があるため一斉整理を別フェーズで実施
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型、N-9 (Screening) は「単一オブジェクト + byJob 職種別」型で構造が異なる別系統。共通化は型パラメータ + cascade callback で抽象化可能だが、早すぎる抽象化は避け、後続の整理 phase で再検討
+- **base 削除時の chat 系 orphan cleanup**: `baseRepository.deleteWithCascade` 拡張で `chatLeadSettings.baseName` / `chatInterviewCalendars.baseName` 参照の整理を検討。pre-existing gap として後続フェーズで対応
+- **AdminApp `copyItems` に chat 系を追加**: 設定コピー UI が `chatScenarios` / `chatQuestionGroups` / `chatLeadSettings` を未収録。要件が上がった時点で copy 処理を追加
 - **AddApplicantModal / ApplicantList / AdminApp の filterCondition 直参照**: N-8 スコープ外として現状維持。`AddApplicantModal.checkExclusion` は legacy のみ参照（base 別を見ない既存バグ的挙動）、`ApplicantList.flagAgesByBase` は clientData 直参照、`AdminApp` 設定コピーは `dstData.filterCondition` 直書き。Repository 経由化は別フェーズ（後続のリファクタ判断で実施）
 - **FilterConditionRepository の base override 削除 API**: 現状「拠点専用 → legacy 継承戻し」UX が UI に存在しないため未実装。要件として上がった時点で `removeBaseOverride(clientId, baseName)` を新設（baseRepository.deleteBase 内の `filterConditions[baseName]` 削除とは別経路）
 - **FilterConditionRepository の updateLegacy API**: AdminApp 設定コピー経路を Repository 経由化する時に追加検討。現状は legacy 不変ポリシー（書換 API なし）で防衛

@@ -29,6 +29,7 @@ import { LocalStorageExclusionRepository } from './localStorage/exclusionReposit
 import { LocalStorageMediaCostRepository } from './localStorage/mediaCostRepository';
 import { LocalStorageFilterConditionRepository } from './localStorage/filterConditionRepository';
 import { LocalStorageScreeningRepository } from './localStorage/screeningRepository';
+import { LocalStorageChatbotRepository } from './localStorage/chatbotRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -48,6 +49,7 @@ export const exclusionRepository = new LocalStorageExclusionRepository();
 export const mediaCostRepository = new LocalStorageMediaCostRepository();
 export const filterConditionRepository = new LocalStorageFilterConditionRepository();
 export const screeningRepository = new LocalStorageScreeningRepository();
+export const chatbotRepository = new LocalStorageChatbotRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -85,6 +87,7 @@ export type {
   FilterConditionRepository,
   UpdateFilterConditionResult,
   ScreeningRepository,
+  ChatbotRepository,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,
