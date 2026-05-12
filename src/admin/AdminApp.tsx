@@ -50,7 +50,7 @@ import { clientRepository, clientDataRepository } from '@/repositories';
 import { authService } from '@/services/auth';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog, InvoiceLog, InvoiceLine } from '@/types';
-import { getClientLogs, formatLogTimestamp } from '@/utils/clientLog';
+import { getClientLogs, formatLogTimestamp, clearClientLogs } from '@/utils/clientLog';
 import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
 import { OPTION_LABELS, OPTION_DEFAULTS, getOptionUsageThisMonth } from '@/utils/clientOptions';
 import type { ClientOption, ClientOptionKey, ClientOptionStatus } from '@/types';
@@ -5309,12 +5309,12 @@ const AdminApp: React.FC = () => {
         // ※ 子アカウント単体削除時は parentId 配下の ClientData は親側にあるため触らない
         if (c.accountType === 'parent') {
           try {
-            storage.deleteClientData(c.id);
+            clientDataRepository.delete(c.id);
             // 親の操作ログ
-            localStorage.removeItem(`hireflow:client:${c.id}:logs`);
+            clearClientLogs(c.id);
             // 子アカウントの操作ログも削除（孤立防止）
             children.forEach((ch) => {
-              localStorage.removeItem(`hireflow:client:${ch.id}:logs`);
+              clearClientLogs(ch.id);
             });
           } catch { /* ignore */ }
         }
