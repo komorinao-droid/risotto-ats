@@ -1,7 +1,7 @@
 /**
  * 運営側でクライアントごとの統計を計算するヘルパー
  */
-import { storage } from '@/utils/storage';
+import { clientDataRepository } from '@/repositories';
 import { getClientLogs } from '@/utils/clientLog';
 import type { Client, ClientData, ClientOperationLog } from '@/types';
 import { smsSuccessCountThisMonth, smsOverage, smsOverageCharge } from '@/utils/sms';
@@ -56,7 +56,7 @@ export function calcClientStats(client: Client, allClients: Client[]): ClientSta
   const dataId = resolveDataId(client);
   const data: ClientData | null = (() => {
     try {
-      return storage.getClientData(dataId);
+      return clientDataRepository.get(dataId);
     } catch {
       return null;
     }

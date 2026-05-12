@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { DateRange, MatrixRow, AgeBreakdown, MonthlyBucket, StepFunnelColumn } from '@/utils/reports/types';
 import { presetToRange, formatRange, prevRangeOf } from '@/utils/reports/dateRange';
 import { buildReport } from '@/utils/reports/aggregate';
-import { storage } from '@/utils/storage';
+import { clientDataRepository } from '@/repositories';
 import { apiPost } from '@/utils/apiClient';
 
 /**
@@ -36,7 +36,7 @@ const RecruitmentReportPrint: React.FC = () => {
   const fullData = useMemo(() => {
     if (!client) return null;
     const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
-    try { return storage.getClientData(dataId); } catch { return null; }
+    try { return clientDataRepository.get(dataId); } catch { return null; }
   }, [client]);
 
   const report = useMemo(() => (fullData ? buildReport(fullData, range) : null), [fullData, range]);

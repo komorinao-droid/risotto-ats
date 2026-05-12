@@ -46,7 +46,7 @@ import {
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
 import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, fetchNotificationLogs, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags, type NotificationLogEntry, type NotificationType } from './adminApi';
 import { storage } from '@/utils/storage';
-import { clientRepository } from '@/repositories';
+import { clientRepository, clientDataRepository } from '@/repositories';
 import { authService } from '@/services/auth';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog, InvoiceLog, InvoiceLine } from '@/types';
@@ -2315,7 +2315,7 @@ const ClientDetail: React.FC<{
   const dataId = client.accountType === 'child' && client.parentId ? client.parentId : client.id;
   const clientData: ClientData | null = useMemo(() => {
     try {
-      return storage.getClientData(dataId);
+      return clientDataRepository.get(dataId);
     } catch { return null; }
   }, [dataId, dataReloadKey]);
 
@@ -3547,7 +3547,7 @@ const BulkInvoiceGenerateModal: React.FC<{
       const total = subtotal + Math.round(subtotal * INVOICE_TAX_RATE);
       let existing: InvoiceLog | undefined;
       try {
-        const d = storage.getClientData(c.id);
+        const d = clientDataRepository.get(c.id);
         existing = (d.invoices || []).find((iv) => iv.yearMonth === yearMonth);
       } catch {
         /* skip broken data */
@@ -3842,7 +3842,7 @@ const ContractPage: React.FC<{
     const map: Record<string, InvoiceLog | undefined> = {};
     clients.filter((c) => c.accountType === 'parent').forEach((c) => {
       try {
-        const d = storage.getClientData(c.id);
+        const d = clientDataRepository.get(c.id);
         map[c.id] = (d.invoices || []).find((iv) => iv.yearMonth === currentMonth);
       } catch {
         /* skip */
