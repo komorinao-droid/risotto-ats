@@ -299,14 +299,14 @@
 
 ## 5. Repository 化の残タスク (Firestore 移行前に注意)
 
-設定系画面の `updateClientData` 直叩きは **Phase N-1〜N-10 で全 10 画面の Repository 化が完了**。さらに O-3 で `AddApplicantModal.tsx` の duplicate flag 一括更新も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）も削除完了。残るのは AdminApp 系（Client 以外）の `storage.getClientData / saveClientData` 直叩きのみ。
+設定系画面の `updateClientData` 直叩きは **Phase N-1〜N-10 で全 10 画面の Repository 化が完了**。さらに O-3 で `AddApplicantModal.tsx` の duplicate flag 一括更新も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）も削除完了。O-5 で `src/utils/baseScope.ts` ファイル全体を撤去（残っていた `resolveJobs` / `resolveSources` の 2 callsite を inline 解決に置換）。残るのは AdminApp 系（Client 以外）の `storage.getClientData / saveClientData` 直叩きのみ。
 
-> **Phase N + O-1〜O-4 完了状態（2026-05-12）**:
+> **Phase N + O-1〜O-5 完了状態（2026-05-12）**:
 > - 10 設定画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済
 > - `AddApplicantModal.tsx` の duplicate flag 一括更新を `applicantRepository.markDuplicateByMatch` 経由化済（O-3）
 > - **`AuthContext.updateClientData` shim 本体を削除（O-4）**。interface / useCallback 実装 / context value から完全撤去。`filterDataByBase` / `loadClientData` / `reloadClientData` は維持
 > - **`updateClientData` のコード実装はコードベース全体で 0 件**（docs / JSDoc / inline コメントの historical mention のみ残置）
-> - O-1 で `src/utils/baseScope.ts` の dead 6 helper を削除済
+> - O-1 で `src/utils/baseScope.ts` の dead 6 helper を削除、**O-5 で `baseScope.ts` ファイル自体を削除**（`resolveJobs` / `resolveSources` は AddApplicantModal / ApplicantDetail で inline 解決に置換、JobManagement.tsx と同じパターン）
 
 ### 5.1 SlotRepository (✅ Phase K-1〜K-4 完了 — `README.md §11`)
 
@@ -387,13 +387,11 @@
 | `ChatbotManagement.tsx` | `chatScenarios` / `chatQuestionGroups` / `chatLeadSettings` | ChatbotRepository (3 配列管理) | ✅ N-10 |
 
 **Phase N 完了による副次効果**:
-- `src/utils/baseScope.ts` の dead 6 helper（`resolveScreeningCriteria` / `hasScreeningJobOverride` / `resolveEmailTemplates` / `hasJobsOverride` / `hasSourcesOverride` / `hasEmailTemplatesOverride`）を O-1 で削除済。残るは `resolveJobs` / `resolveSources` の 2 関数（AddApplicantModal / ApplicantDetail で現役）
+- `src/utils/baseScope.ts` の dead 6 helper（`resolveScreeningCriteria` / `hasScreeningJobOverride` / `resolveEmailTemplates` / `hasJobsOverride` / `hasSourcesOverride` / `hasEmailTemplatesOverride`）を O-1 で削除済。O-5 で残った `resolveJobs` / `resolveSources` も inline 解決に置換し、**`baseScope.ts` ファイル自体を削除**
 - 設定画面側の `useAuth` 分割代入から `updateClientData` を除去、`reloadClientData` に統一済
 - O-3 で `AddApplicantModal.tsx` の duplicate flag 一括更新を `applicantRepository.markDuplicateByMatch(ownerId, { name, phone }, { baseName: childBase ?? null })` 経由化。子アカウントの自拠点境界は Repository の `scope.baseName` 引数で再現（`null` = 全社対象 / 親アカウント想定）。`updateClientData(` の実 callsite は完全消滅
 - O-4 で `AuthContext.updateClientData` shim 本体を削除。`AuthContextValue` interface / `useCallback` 実装 / `AuthContext.Provider value` の 3 箇所から完全撤去。`filterDataByBase` は `loadClientData` / `reloadClientData` で利用継続のため module-internal helper として残置。Firestore 化フェーズで AuthContext から子アカウント base 絞込ロジックが消える際に削除予定
-
-**残タスク（Phase N 後継）**:
-- `baseScope.ts` 全体削除 → `resolveJobs / resolveSources` を JobRepository / SourceRepository の新規 API（`listForBase` 等）に置換した後（O-5）
+- O-5 で `src/utils/baseScope.ts` を撤去。`AddApplicantModal.tsx` / `ApplicantDetail.tsx` の 2 callsite を inline 解決（`clientData.jobsByBase?.[baseName] ?? clientData.jobs`）に置換。`JobManagement.tsx:55-61` と同じ既存パターン。新規 Repository API（`listForBase` 等）は導入せず、Firestore 化フェーズで render path 全体を async 書き換える際に Repository 経由化を一斉適用する方針
 
 ### 5.4 AdminApp 系 (未着手)
 

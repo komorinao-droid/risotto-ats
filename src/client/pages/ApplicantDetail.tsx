@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
-import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import { hasActiveOption, incrementOptionUsage, isOptionLimitReached, getOptionRemaining, getOptionUsageThisMonth } from '@/utils/clientOptions';
 import { apiPost } from '@/utils/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
@@ -982,9 +981,14 @@ const InfoTab: React.FC<InfoTabProps> = ({
   const statusOptions = clientData.statuses.map((s) => ({ value: s.name, label: s.name }));
   const hasSubStatuses = !!(currentStatus && currentStatus.subStatuses && currentStatus.subStatuses.length > 0);
 
-  // 応募者の拠点スコープで sources / jobs を解決（拠点別オーバーライド対応）
-  const scopedSources = resolveSources(clientData, applicant.base);
-  const scopedJobs = resolveJobs(clientData, applicant.base);
+  // 応募者の拠点スコープで sources / jobs を解決（拠点別オーバーライド対応）。
+  // O-5: baseScope.ts を撤去し inline 解決に変更（既存 JobManagement.tsx と同じパターン）。
+  const scopedSources = (applicant.base && clientData.sourcesByBase?.[applicant.base])
+    ? clientData.sourcesByBase[applicant.base]
+    : (clientData.sources || []);
+  const scopedJobs = (applicant.base && clientData.jobsByBase?.[applicant.base])
+    ? clientData.jobsByBase[applicant.base]
+    : (clientData.jobs || []);
 
   // Source badge color
   const sourceObj = scopedSources.find((s) => s.name === applicant.src);

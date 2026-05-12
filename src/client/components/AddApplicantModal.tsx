@@ -6,7 +6,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { warekiToDate } from '@/utils/wareki';
 import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
-import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import { applicantRepository, resolveDataOwnerId } from '@/repositories';
 import type { Applicant, ClientData } from '@/types';
 
@@ -125,9 +124,23 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
   const statuses = useMemo(() => clientData?.statuses || [], [clientData]);
   // 子アカウントは自拠点のオーバーライド（あれば）を、なければ全社共通を使用
   const scopeBaseName = isChild ? client?.baseName : (base || undefined);
-  const sources = useMemo(() => (clientData ? resolveSources(clientData, scopeBaseName) : []), [clientData, scopeBaseName]);
+  // O-5: baseScope.ts を撤去し inline 解決に変更（既存 JobManagement.tsx と同じパターン）。
+  // scopeBaseName 指定 + 拠点別オーバーライドありなら override 層、それ以外は全社共通にフォールバック。
+  const sources = useMemo(() => {
+    if (!clientData) return [];
+    if (scopeBaseName && clientData.sourcesByBase?.[scopeBaseName]) {
+      return clientData.sourcesByBase[scopeBaseName];
+    }
+    return clientData.sources || [];
+  }, [clientData, scopeBaseName]);
   const bases = useMemo(() => clientData?.bases || [], [clientData]);
-  const jobs = useMemo(() => (clientData ? resolveJobs(clientData, scopeBaseName) : []), [clientData, scopeBaseName]);
+  const jobs = useMemo(() => {
+    if (!clientData) return [];
+    if (scopeBaseName && clientData.jobsByBase?.[scopeBaseName]) {
+      return clientData.jobsByBase[scopeBaseName];
+    }
+    return clientData.jobs || [];
+  }, [clientData, scopeBaseName]);
 
   const baseOptions = useMemo(
     () => bases.map((b) => ({ value: b.name, label: b.name })),

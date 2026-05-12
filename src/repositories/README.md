@@ -1253,9 +1253,8 @@ interface ChatbotRepository {
 ### 14.13 残タスク
 
 - **`updateClientData` shim の撤去 (O-4)**: ✅ 完了。`AuthContextValue` interface / `useCallback` 実装 / `AuthContext.Provider value` の 3 箇所から削除。`filterDataByBase` / `loadClientData` / `reloadClientData` は維持。docs / JSDoc / inline コメントの historical mention のみが残置（コード経路は完全消滅）
+- **`baseScope.ts` 全体撤去 (O-5)**: ✅ 完了。O-1 で 6 dead helper 削除 → O-5 で残った `resolveJobs` / `resolveSources` の 2 callsite (`AddApplicantModal.tsx` / `ApplicantDetail.tsx`) を inline 解決に置換し、`src/utils/baseScope.ts` ファイル自体を削除。inline パターンは既存 `JobManagement.tsx:55-61` と一致（base override 構造は `clientData.jobsByBase?.[baseName] ?? clientData.jobs` で直接参照）。新規 Repository API は追加せず、`jobRepository.list` / `sourceRepository.list` の利用も見送り（Firestore 化フェーズで async 書き換えと一緒に整理する方が効率的）
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。後続の整理フェーズで `@deprecated` → 削除を検討
-- **`baseScope.ts` 全体の整理**: Phase N 完了で `resolveJobs` / `resolveSources` / `resolveEmailTemplates` 系も Repository 側に移行済（base-override は各 Repository 内で完結）。baseScope.ts の resolve 系ヘルパも UI から呼ばれなくなっている可能性があるため一斉整理を別フェーズで実施
 - **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型、N-9 (Screening) は「単一オブジェクト + byJob 職種別」型で構造が異なる別系統。共通化は型パラメータ + cascade callback で抽象化可能だが、早すぎる抽象化は避け、後続の整理 phase で再検討
 - **base 削除時の chat 系 orphan cleanup**: `baseRepository.deleteWithCascade` 拡張で `chatLeadSettings.baseName` / `chatInterviewCalendars.baseName` 参照の整理を検討。pre-existing gap として後続フェーズで対応
 - **AdminApp `copyItems` に chat 系を追加**: 設定コピー UI が `chatScenarios` / `chatQuestionGroups` / `chatLeadSettings` を未収録。要件が上がった時点で copy 処理を追加
