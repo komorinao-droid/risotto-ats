@@ -1,4 +1,4 @@
-import type { ClientData, Job, Source, EmailTemplate, ScreeningCriteria } from '@/types';
+import type { ClientData, Job, Source } from '@/types';
 
 /**
  * 拠点別オーバーライドの解決ヘルパー（継承モデル）
@@ -22,50 +22,4 @@ export function resolveSources(data: ClientData, baseName?: string): Source[] {
     return data.sourcesByBase[baseName];
   }
   return data.sources || [];
-}
-
-export function resolveEmailTemplates(data: ClientData, baseName?: string): EmailTemplate[] {
-  if (baseName && data.emailTemplatesByBase?.[baseName]) {
-    return data.emailTemplatesByBase[baseName];
-  }
-  return data.emailTemplates || [];
-}
-
-/** 拠点別オーバーライドが存在するか */
-export function hasJobsOverride(data: ClientData, baseName: string): boolean {
-  return !!data.jobsByBase?.[baseName];
-}
-export function hasSourcesOverride(data: ClientData, baseName: string): boolean {
-  return !!data.sourcesByBase?.[baseName];
-}
-export function hasEmailTemplatesOverride(data: ClientData, baseName: string): boolean {
-  return !!data.emailTemplatesByBase?.[baseName];
-}
-
-/**
- * AIスクリーニング基準を職種スコープで解決
- * - jobName が指定され、その職種のオーバーライドがあれば本文3項目を差し替え
- * - enabled / passThreshold / rejectThreshold は常に全社共通
- */
-export function resolveScreeningCriteria(
-  criteria: ScreeningCriteria | undefined,
-  jobName?: string
-): ScreeningCriteria | null {
-  if (!criteria) return null;
-  if (jobName && criteria.byJob?.[jobName]) {
-    const o = criteria.byJob[jobName];
-    return {
-      ...criteria,
-      evaluationPoints: o.evaluationPoints,
-      requiredQualities: o.requiredQualities,
-      ngQualities: o.ngQualities,
-      // 職種別オーバーライドに axes が無い場合は親の axes を継承（v2形式の保証）
-      axes: o.axes && o.axes.length > 0 ? o.axes : criteria.axes,
-    };
-  }
-  return criteria;
-}
-
-export function hasScreeningJobOverride(criteria: ScreeningCriteria | undefined, jobName: string): boolean {
-  return !!criteria?.byJob?.[jobName];
 }
