@@ -8,7 +8,8 @@ import type {
   CriteriaImportance,
   AxisImportance,
 } from '@/types';
-import { defaultAxes, migrateToAxes, normalizeWeights, recalcWeightsFromImportance, ensureAxisImportance, genId } from '@/utils/screeningDefaults';
+import { defaultAxes, normalizeWeights, recalcWeightsFromImportance, ensureAxisImportance, genId } from '@/utils/screeningDefaults';
+import { resolveDataOwnerId, screeningRepository } from '@/repositories';
 
 const inputStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
@@ -50,7 +51,7 @@ const defaultCriteria = (): ScreeningCriteria => ({
 });
 
 const ScreeningSettings: React.FC = () => {
-  const { clientData, updateClientData, client } = useAuth();
+  const { clientData, reloadClientData, client } = useAuth();
   const [form, setForm] = useState<ScreeningCriteria>(defaultCriteria());
   const [scope, setScope] = useState<string>(SHARED);
   const [saved, setSaved] = useState(false);
@@ -58,14 +59,14 @@ const ScreeningSettings: React.FC = () => {
   const [weightMode, setWeightMode] = useState<'symbol' | 'precise'>('symbol');
 
   useEffect(() => {
-    if (clientData?.screeningCriteria) {
-      const c = clientData.screeningCriteria;
-      // migrateToAxes 内で ensureAxisImportance も実行されるので二重呼び出し不要
-      const migratedAxes = migrateToAxes(c);
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    // Repository が migrate + normalize 済みで返す（未設定なら null）
+    const c = screeningRepository.getGlobal(ownerId);
+    if (c) {
       const merged: ScreeningCriteria = {
         ...defaultCriteria(),
         ...c,
-        axes: migratedAxes,
         byJob: c.byJob || {},
       };
       setForm(merged);
@@ -74,7 +75,7 @@ const ScreeningSettings: React.FC = () => {
         setExpanded(new Set([merged.axes[0].id]));
       }
     }
-  }, [clientData]);
+  }, [client, clientData?.screeningCriteria]);
 
   // スコープ切替時に展開状態を該当スコープの最初の軸にリセット
   useEffect(() => {
@@ -180,18 +181,12 @@ const ScreeningSettings: React.FC = () => {
   };
 
   const save = () => {
-    // ウェイト正規化
-    const finalForm: ScreeningCriteria = { ...form };
-    if (finalForm.axes) finalForm.axes = normalizeWeights(finalForm.axes);
-    if (finalForm.byJob) {
-      const fixed: typeof finalForm.byJob = {};
-      Object.entries(finalForm.byJob).forEach(([k, v]) => {
-        fixed[k] = { ...v, axes: v.axes ? normalizeWeights(v.axes) : v.axes };
-      });
-      finalForm.byJob = fixed;
-    }
-    updateClientData((data) => ({ ...data, screeningCriteria: finalForm }));
-    setForm(finalForm);
+    if (!client) return;
+    const ownerId = resolveDataOwnerId(client);
+    // Repository が axes / byJob[*].axes を normalize して保存、戻り値は deep copy
+    const next = screeningRepository.saveAll(ownerId, form);
+    setForm(next);
+    reloadClientData();
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };

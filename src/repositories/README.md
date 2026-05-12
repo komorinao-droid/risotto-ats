@@ -204,6 +204,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | **N-6** | **ExclusionRepository 型 + LocalStorage 実装（list / add / remove）+ ExclusionList.tsx の `updateClientData` 直更新を Repository 経由に置換。base-override なし / tenant 全体共有 / dedup 判定（email lowercase / phone strip / name_birth exact）を Repository 内に集約。add 成功後の `applicantRepository.changeStageBulk` 連携は画面側 orchestrator として維持。applicantRepository.delete 内の `applicantId?` 一致 cleanup は据え置き（cleanupByApplicantId 等は ExclusionRepository に作らない）。ExclusionEntry 型は無変更（`applicantId?` は旧データ互換隠しフィールドのまま）** | **✅ 完了** |
 | **N-7** | **MediaCostRepository 型 + LocalStorage 実装（getAll / saveDraft / removeSource）+ MediaCostManagement.tsx の `updateClientData` 2 箇所を Repository 経由に置換。ネストマップ型 `[ym][src] -> number` を扱う初の N-7 ケース。parseAmount（全角→半角 / カンマ・空白除去 / 1〜1 億円範囲）/ 月キー pruning / invalidCount 集計を Repository 内に集約。saveDraft は partial merge（draft に含まれない月/cell は触らない）/ 全 cell no-op の場合は saveClientData を呼ばない。removeSource は媒体名で全月横断 cascade 削除。Source rename/delete と mediaCosts の連動は pre-existing orphan として据え置き（別フェーズ）** | **✅ 完了** |
 | **N-8** | **FilterConditionRepository 型 + LocalStorage 実装（getLegacy / getByBaseMap / getEffective / updateForBase）+ FilterConditionSettings.tsx の `updateClientData` 直更新を Repository 経由に置換。base 別 `filterConditions[baseName]` のみを更新し、legacy `filterCondition` は読み取り fallback 専用（書換 API なし）。fallback 解決ロジック（base 別 → legacy → defaultFC）を Repository 内に集約。`applicantRepository.changeStageBulk(..., reason:'filter_condition_applied')` 連携は画面側 orchestrator として維持。AddApplicantModal / ApplicantList / AdminApp の legacy 直接参照はスコープ外として現状維持** | **✅ 完了** |
+| **N-9** | **ScreeningRepository 型 + LocalStorage 実装（getGlobal / getForJob / hasJobOverride / saveAll）+ ScreeningSettings.tsx の `updateClientData` 経由保存 + ApplicantDetail.tsx の AI 評価実行時 criteria 解決を Repository 経由に置換。`settings/global` 配下の単一オブジェクト + `byJob[jobName]` 職種別オーバーライド型。`migrateToAxes`（v1 テキスト→v2 axes）+ `ensureAxisImportance`（★3 補完）+ `normalizeWeights`（合計100% 化）を Repository 内に集約。`saveAll` は normalize のみ実行（migrate しない / UI 側 form state は v2 形式の前提）。未設定時は必ず `null` を返す（`defaultCriteria()` 相当の生成は UI 責務）。職種別 axes が空配列の場合は全社 axes を継承する `resolveScreeningCriteria` の挙動を 1:1 移植。`baseScope.ts` の `resolveScreeningCriteria` / `hasScreeningJobOverride` は他のヘルパと同居しているため残置（N-10 完了後に整理検討）。AdminApp stats / clientStats / AddApplicantModal の `clientData.screeningCriteria` 直参照はスコープ外として現状維持** | **✅ 完了** |
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
@@ -213,7 +214,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 
 > **Phase の分け方**:
 > - **Phase J 系**: Firestore / Firebase Auth / Cloud Storage への実装本体差し替え。詳細は `docs/production-handoff-checklist.md` を参照。本番リリース前チェックリストも同 handoff に集約
-> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository / N-8 = FilterConditionRepository 完了。詳細は §14 を参照
+> - **Phase N 系**: 設定系画面の Repository 化（LocalStorage のまま責務境界を引き直す）。対象は Job / Source / EmailTemplate / Hearing / FilterCondition / Screening / Chatbot / MediaCost / ReportSchedule / Exclusion の 10 種。Phase J 着手前に責務境界を確定させておくことで、Firestore 化時の作業が「実装差し替え 1 ファイルだけ」に収まる。N-1 = JobRepository / N-2 = SourceRepository / N-3 = EmailTemplateRepository / N-4 = HearingRepository / N-5 = ReportSchedule（既存 reportRepository 拡張） / N-6 = ExclusionRepository / N-7 = MediaCostRepository / N-8 = FilterConditionRepository / N-9 = ScreeningRepository 完了。詳細は §14 を参照
 
 ---
 
@@ -812,7 +813,7 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - [x] **N-6**: `ExclusionRepository` 型 + LocalStorage 実装 + ExclusionList.tsx 移行（base-override なし / tenant 全体共有 / dedup 判定 Repository 内集約 / `applicantRepository.changeStageBulk` は画面側 orchestrator として維持）
 - [x] **N-7**: `MediaCostRepository` 型 + LocalStorage 実装 + MediaCostManagement.tsx 移行（ネストマップ型 `[ym][src] -> number` / parseAmount + 月キー pruning + invalidCount 集計を Repository 内集約 / saveDraft は partial merge / removeSource は媒体名で全月横断 cascade）
 - [x] **N-8**: `FilterConditionRepository` 型 + LocalStorage 実装 + FilterConditionSettings.tsx 移行（base 別 + legacy fallback を Repository 内集約 / legacy `filterCondition` は読み取り専用 / `updateForBase` のみ提供 / `applicantRepository.changeStageBulk` は画面側 orchestrator 維持）
-- [ ] **N-9**: `ScreeningRepository`（byJob override + axes migration）
+- [x] **N-9**: `ScreeningRepository` 型 + LocalStorage 実装 + ScreeningSettings.tsx / ApplicantDetail.tsx 移行（settings/global 配下の単一オブジェクト + `byJob[jobName]` 職種別オーバーライド型 / migrate + normalize を Repository に集約 / 未設定時 null 返却 / `saveAll` 一括書込 / `baseScope.ts` の旧関数は残置）
 - [ ] **N-10**: `ChatbotRepository`（scenarios / questionGroups / leadSettings の 3 配列原子性）
 
 ### 14.3 N-1: JobRepository（base-override パターンの参照実装）
@@ -1123,12 +1124,68 @@ patch のキーすべてが既存値と一致すれば `saveClients` を呼ば�
 - `updateForBase` は `/tenants/{tid}/baseOverrides/{baseName}` を `merge: true` で部分更新
 - `getEffective` は 2 doc fetch（baseOverrides → settings/global の順、片方欠落時に他方で fallback）
 
-### 14.11 残タスク
+### 14.11 N-9: ScreeningRepository（settings/global 単一オブジェクト + byJob 職種別オーバーライド / migrate + normalize 集約）
 
-- **N-9 以降**: §14.2 の通り、設定系 2 種が残着手対象。N-9 = Screening（byJob override + axes migration） / N-10 = Chatbot（scenarios / questionGroups / leadSettings の 3 配列原子性）
+**目的**: `screeningCriteria`（AI スクリーニング基準: enabled / passThreshold / rejectThreshold / axes + byJob[jobName] 職種別オーバーライド）の CRUD を Repository に集約。`ScreeningSettings.tsx` の保存経路と `ApplicantDetail.tsx` の AI 評価実行時 criteria 解決を Repository 経由に置き換える。
+
+#### N-8 / 他フェーズとの差分
+
+- **全社書換 API あり**: N-8 FilterConditionRepository は legacy（全社）不変だったが、ScreeningRepository は `ScreeningSettings` の UI が「全社編集」を主機能とするため `saveAll` で全社も書き換える。
+- **byJob のキーは jobName 文字列**: N-1〜N-3 のような base 別配列ではなく職種別オブジェクト。Job rename 時の orphan cleanup は pre-existing で N-9 スコープ外。
+- **migrate を Repository に集約**: v1（フリーテキスト 3 項目）→ v2（axes 配列）の `migrateToAxes` を Repository 内で吸収。UI 側 `migrateToAxes` の重複呼出を削除。
+- **未設定時は必ず `null` を返す契約**: `defaultCriteria()` 相当を勝手に返さない（AdminApp clientStats の集計が「未設定 ⇄ デフォルト相当」を区別できなくなるのを防ぐ）。fallback 値の生成は UI 責務。
+
+#### 設計上の判断
+
+- **保存 API は `saveAll` 1 個**: 既存 UI は form state を一括 flush する設計（軸編集も byJob 切替も全部 form 内で済ませて、保存ボタンで 1 回書込）。`updateGlobal` / `updateForJob` / `removeJobOverride` の 3 分割は不採用。`removeOverride` は form state のみ touch する既存挙動を維持するため、専用 API も作らない。
+- **`getGlobal` は migrate + normalize 済みを返す**: 全社 axes は `migrateToAxes` → `ensureAxisImportance` → `normalizeWeights`。byJob 各 body は職種別固有の継承セマンティクスを保つため別関数（`migrateByJobBody`）で分岐: axes が空配列 `[]` の場合は「明示的に global 継承」シグナルとして空配列のまま保持し、axes が undefined + v1 テキストありの場合のみ `migrateToAxes` で 1 軸に昇格する（`migrateToAxes` を直接呼ぶと空配列が `defaultAxes()` に置き換わり、既存 `resolveScreeningCriteria` の継承挙動が壊れる）。UI 側は「null なら `defaultCriteria()`」「それ以外はそのまま `setForm`」とできる。
+- **`getForJob` は `baseScope.resolveScreeningCriteria` の 1:1 移植**: `byJob[jobName]` が存在し axes が空配列でない場合のみ職種別 axes を採用、空配列なら親 axes を継承（既存 L63 と同等）。`enabled / passThreshold / rejectThreshold` は常に全社から（職種別では上書き不可）。
+- **`saveAll` は normalize のみ実行**（migrate しない）: UI 側 form state は既に v2 形式の前提。axes と `byJob[*].axes` に対して `normalizeWeights` を適用してから save。戻り値は normalize 後の deep copy（呼出側 mutate が storage に漏れない）。
+- **deep copy**: 全階層 deep copy（top-level + axes 配列 + CriteriaItem 配列 + byJob 2 階層）で mutate isolation を強制。
+
+#### normalize / migrate / default 補完の役割分担
+
+| ロジック | 集約場所 | 理由 |
+|---|---|---|
+| `migrateToAxes` | Repository (`getGlobal`) | 永続化境界。読込時 1 回だけ実行 |
+| `ensureAxisImportance` | Repository (`getGlobal`) | `migrateToAxes` 内で連鎖実行 |
+| `normalizeWeights`（保存時） | Repository (`saveAll`) | 永続化境界 |
+| `normalizeWeights`（軸 add/remove 時の即時計算） | UI | UX 用、永続化と無関係 |
+| `recalcWeightsFromImportance` | UI | symbol モード UX 用 |
+| `defaultCriteria` / `defaultAxes` | UI | Repository が null 返却時の fallback |
+
+#### 変更ファイル
+
+- `src/repositories/types.ts` — `ScreeningRepository` interface 追加 + JSDoc
+- `src/repositories/localStorage/screeningRepository.ts` — 新規 `LocalStorageScreeningRepository`
+- `src/repositories/index.ts` — `screeningRepository` singleton + 型 re-export
+- `src/client/pages/settings/ScreeningSettings.tsx` — `useAuth` から `updateClientData` 除去（`reloadClientData` に統一） / 読込 useEffect を `screeningRepository.getGlobal(ownerId)` 経由化 / `save()` を `screeningRepository.saveAll(ownerId, form)` に置換 / UI / 文言 / child early return / removeOverride（form state のみ） / 軸編集ロジックは無変更
+- `src/client/pages/ApplicantDetail.tsx` — `resolveScreeningCriteria` / `hasScreeningJobOverride` の呼出を `screeningRepository.getForJob` / `screeningRepository.hasJobOverride` に置換（`resolveDataOwnerId(client)` 経由）。`/api/screen` 送信 body の `criteria` shape は不変
+- `src/repositories/README.md` — §7 進捗表 N-9 行追加 / §14.2 checkbox / §14.11 N-9 詳細セクション追加 / §14.12 残タスク renumber
+
+#### スコープ外（N-9 では触らない）
+
+- `src/utils/baseScope.ts` の `resolveScreeningCriteria` / `hasScreeningJobOverride` 削除（他にも `resolveJobs / resolveSources` 等を持つため、N-10 完了後に整理検討）
+- `src/utils/screeningDefaults.ts`（`migrateToAxes / normalizeWeights / ...` 等は Repository から import するのみ）
+- `src/utils/storage.ts`（`screeningCriteria` 初期値は追加しない / null 返却契約を維持）
+- `AdminApp` stats / `clientStats` の `clientData.screeningCriteria` 直参照
+- `AddApplicantModal` 等（screeningCriteria を見ない）
+- Job rename/delete による byJob orphan cleanup（pre-existing）
+- Firestore 実装 / UI 変更 / localStorage キー変更
+
+#### Firestore 化（Phase J）時の差し替え候補
+
+- `/tenants/{tid}/settings/global` doc の `screeningCriteria` field（filterCondition / recruitmentGoals / mediaCosts / reportSchedule と同居、firestore-design §6.2）
+- `saveAll` は `setDoc(..., {merge: true})` で `screeningCriteria` field を上書き
+- `getGlobal` / `getForJob` / `hasJobOverride` は 1 doc fetch（職種別 fallback も同 doc 内で完結）
+
+### 14.12 残タスク
+
+- **N-10**: §14.2 の通り、設定系 1 種が残着手対象。N-10 = Chatbot（scenarios / questionGroups / leadSettings の 3 配列原子性）
 - **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したタイミングで `AuthContext.updateClientData` 自体を撤去候補とする
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
-- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型で構造が異なるため別系統。N-9 Screening の `byJob override` を待って共通化を再検討（型パラメータ + cascade callback で抽象化可能。早すぎる抽象化は避ける）
+- **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。N-10 完了後に整理タイミングで `@deprecated` → 削除を検討
+- **共通 base-override ヘルパ**: N-1 (Job) / N-2 (Source) / N-3 (EmailTemplate) で同じ `pickLayer` / `writeLayer` パターンが 3 個。N-8 (FilterCondition) は「単一オブジェクト + base 別オブジェクト」型、N-9 (Screening) は「単一オブジェクト + byJob 職種別」型で構造が異なる別系統。共通化は型パラメータ + cascade callback で抽象化可能だが、早すぎる抽象化は避け、N-10 完了後の整理 phase で再検討
 - **AddApplicantModal / ApplicantList / AdminApp の filterCondition 直参照**: N-8 スコープ外として現状維持。`AddApplicantModal.checkExclusion` は legacy のみ参照（base 別を見ない既存バグ的挙動）、`ApplicantList.flagAgesByBase` は clientData 直参照、`AdminApp` 設定コピーは `dstData.filterCondition` 直書き。Repository 経由化は別フェーズ（後続のリファクタ判断で実施）
 - **FilterConditionRepository の base override 削除 API**: 現状「拠点専用 → legacy 継承戻し」UX が UI に存在しないため未実装。要件として上がった時点で `removeBaseOverride(clientId, baseName)` を新設（baseRepository.deleteBase 内の `filterConditions[baseName]` 削除とは別経路）
 - **FilterConditionRepository の updateLegacy API**: AdminApp 設定コピー経路を Repository 経由化する時に追加検討。現状は legacy 不変ポリシー（書換 API なし）で防衛

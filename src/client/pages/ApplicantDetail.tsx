@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { AlertTriangle, Check, Sparkles, Loader2 } from 'lucide-react';
-import { resolveJobs, resolveSources, resolveScreeningCriteria, hasScreeningJobOverride } from '@/utils/baseScope';
+import { resolveJobs, resolveSources } from '@/utils/baseScope';
 import { hasActiveOption, incrementOptionUsage, isOptionLimitReached, getOptionRemaining, getOptionUsageThisMonth } from '@/utils/clientOptions';
 import { apiPost } from '@/utils/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
-import { applicantRepository, eventRepository, messageRepository, resolveDataOwnerId } from '@/repositories';
+import { applicantRepository, eventRepository, messageRepository, resolveDataOwnerId, screeningRepository } from '@/repositories';
 import { withContactMeta } from '@/utils/applicantLifecycle';
 import { getClientOperatorLabel } from '@/utils/clientOperator';
 import Tabs from '@/components/Tabs';
@@ -1850,8 +1850,14 @@ const ScreeningTab: React.FC<ScreeningTabProps> = ({ applicant, clientData, upda
   };
 
   // 応募者の職種で評価基準を解決（職種別オーバーライドあれば優先）
-  const resolvedCriteria = resolveScreeningCriteria(clientData.screeningCriteria, applicant.job);
-  const usingJobOverride = !!applicant.job && hasScreeningJobOverride(clientData.screeningCriteria, applicant.job);
+  const ownerIdForScreening = client ? resolveDataOwnerId(client) : null;
+  const resolvedCriteria = ownerIdForScreening
+    ? screeningRepository.getForJob(ownerIdForScreening, applicant.job)
+    : null;
+  const usingJobOverride =
+    !!ownerIdForScreening &&
+    !!applicant.job &&
+    screeningRepository.hasJobOverride(ownerIdForScreening, applicant.job);
 
   async function run() {
     if (!resolvedCriteria || !resolvedCriteria.enabled) {

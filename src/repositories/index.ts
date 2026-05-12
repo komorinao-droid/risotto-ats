@@ -28,6 +28,7 @@ import { LocalStorageHearingRepository } from './localStorage/hearingRepository'
 import { LocalStorageExclusionRepository } from './localStorage/exclusionRepository';
 import { LocalStorageMediaCostRepository } from './localStorage/mediaCostRepository';
 import { LocalStorageFilterConditionRepository } from './localStorage/filterConditionRepository';
+import { LocalStorageScreeningRepository } from './localStorage/screeningRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -46,6 +47,7 @@ export const hearingRepository = new LocalStorageHearingRepository();
 export const exclusionRepository = new LocalStorageExclusionRepository();
 export const mediaCostRepository = new LocalStorageMediaCostRepository();
 export const filterConditionRepository = new LocalStorageFilterConditionRepository();
+export const screeningRepository = new LocalStorageScreeningRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -82,6 +84,7 @@ export type {
   RemoveMediaCostSourceResult,
   FilterConditionRepository,
   UpdateFilterConditionResult,
+  ScreeningRepository,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,

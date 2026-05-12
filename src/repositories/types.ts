@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1578,4 +1578,100 @@ export interface FilterConditionRepository {
     baseName: string,
     partial: Partial<FilterCondition>
   ): UpdateFilterConditionResult;
+}
+
+/**
+ * AI スクリーニング基準 (`screeningCriteria`) の CRUD を扱う Repository（Phase N-9 で追加）。
+ *
+ * 想定する移行先:
+ *  - `ScreeningSettings.tsx` の `updateClientData` 経由保存（`save`）を `saveAll` に置換
+ *  - `ApplicantDetail.tsx` の `resolveScreeningCriteria` / `hasScreeningJobOverride` 経由参照を
+ *    `getForJob` / `hasJobOverride` に置換（AI 評価実行時の criteria 解決）
+ *
+ * データ構造（参照: `src/types/index.ts:487-541`）:
+ *  - `ScreeningCriteria` = 全社設定（enabled / passThreshold / rejectThreshold + axes + byJob）
+ *  - `ScreeningCriteriaBody` = 職種別オーバーライド本体（v1 テキスト 3 項目 + axes）
+ *  - `enabled / passThreshold / rejectThreshold` は **全社のみ**（職種別では上書き不可）
+ *
+ * 方針:
+ *  - **保存 API は `saveAll` 1 個**:
+ *      既存 UI は form state を一括 flush する設計（軸編集も byJob 切替も全部 form 内で済ませて、
+ *      保存ボタンで 1 回書込）。`updateGlobal` / `updateForJob` / `removeJobOverride` の 3 分割は不採用。
+ *      `removeOverride` は form state のみ touch する既存挙動を維持するため、専用 API も作らない。
+ *  - **getGlobal は migrate + normalize 済みを返す**:
+ *      `migrateToAxes` → `ensureAxisImportance` → `normalizeWeights` を Repository 内で実行。
+ *      byJob の各 body も同様に migrate（v1 テキストのみの override が axes に昇格する）。
+ *      これにより画面側は「null なら defaultCriteria()」「それ以外はそのまま setForm」とできる。
+ *  - **getForJob は `baseScope.resolveScreeningCriteria` の 1:1 移植**:
+ *      byJob[jobName] が存在し axes が空配列でない場合のみ職種別 axes を採用、
+ *      空配列なら親 axes を継承。enabled / passThreshold / rejectThreshold は常に全社。
+ *  - **saveAll は normalize のみ実行**（migrate しない）:
+ *      UI 側 form state は既に v2 形式（axes 配列を持つ）の前提。
+ *      axes と byJob[*].axes に対して `normalizeWeights` を適用してから save。
+ *      戻り値は normalize 後の deep copy（呼出側 mutate が storage に漏れない）。
+ *  - **未設定時は必ず null を返す**:
+ *      `defaultCriteria()` 相当を勝手に返すと「未設定 ⇄ デフォルト相当」の区別がつかなくなり、
+ *      AdminApp clientStats の集計が壊れる。fallback 値の生成は UI 責務。
+ *  - **deep copy**:
+ *      `getGlobal` / `getForJob` は top-level + axes 配列 + CriteriaItem 配列まで deep copy。
+ *      byJob は 2 階層 deep copy（N-7/N-8 と同型）。
+ *
+ * N-1〜N-8 との差分:
+ *  - **全社書換 API あり**:
+ *      N-8 FilterConditionRepository は legacy（全社）不変だったが、ScreeningRepository は
+ *      ScreeningSettings の UI が「全社編集」を主機能とするため `saveAll` で全社も書き換える。
+ *  - **byJob のキーは jobName 文字列**:
+ *      base override（base 別配列）ではなく職種別オブジェクト。Job rename 時の orphan cleanup は
+ *      pre-existing で N-9 スコープ外（後続フェーズで JobRepository.deleteWithCascade 拡張検討）。
+ *  - **migrate を Repository に集約**:
+ *      Job/Source 等の base override 系は migrate ロジックを持たないが、Screening は v1→v2 axes 移行を
+ *      Repository 内で吸収（UI 側 `migrateToAxes` の重複呼出を削除可能）。
+ *
+ * スコープ外（N-9 では触らない）:
+ *  - `baseScope.ts` の `resolveScreeningCriteria` / `hasScreeningJobOverride` 削除
+ *      （他にも `resolveJobs / resolveSources` 等を持つため、N-10 完了後に整理検討）
+ *  - `AdminApp` stats / `clientStats` の `clientData.screeningCriteria` 直参照
+ *  - `AddApplicantModal` 等（screeningCriteria を見ない）
+ *  - Job rename/delete による byJob orphan cleanup
+ *  - `/api/screen` 送信 shape の変更（同じ criteria オブジェクトをそのまま積む）
+ *
+ * Firestore マッピング（Phase J / firestore-design §6.2）:
+ *  - `/tenants/{tid}/settings/global` doc の `screeningCriteria` field
+ *    （filterCondition / recruitmentGoals / mediaCosts / reportSchedule と同居）
+ *  - `saveAll` は `setDoc(..., {merge:true})` で `screeningCriteria` field を上書き
+ */
+export interface ScreeningRepository {
+  /**
+   * 全社 screeningCriteria を migrate + importance 補完 + weight normalize 済み deep copy で返す。
+   *  - `data.screeningCriteria` 未設定なら `null` を返す（UI 側 fallback 用契約）
+   *  - axes: `migrateToAxes` → `ensureAxisImportance` → `normalizeWeights` を経由
+   *  - byJob: 各 body に対しても同様に migrate（v1 テキストのみの override も axes に昇格）
+   *  - 戻り値の mutate が localStorage に漏れないように全階層 deep copy
+   */
+  getGlobal(clientId: string): ScreeningCriteria | null;
+  /**
+   * 職種別 fallback 解決済みの effective criteria を返す（deep copy）。
+   *  継承順:
+   *    1. jobName 未指定 / `byJob[jobName]` 不在 → 全社 (`getGlobal`) をそのまま
+   *    2. `byJob[jobName]` あり → v1 3 項目 (`evaluationPoints / requiredQualities / ngQualities`)
+   *       と axes を職種別で上書き
+   *    3. 職種別 axes が空配列なら全社 axes を継承（既存 `resolveScreeningCriteria` L63 と同等）
+   *  - `enabled / passThreshold / rejectThreshold` は常に全社から（職種別では上書き不可）
+   *  - 全社未設定なら `null`
+   */
+  getForJob(clientId: string, jobName?: string): ScreeningCriteria | null;
+  /**
+   * 職種別オーバーライドが存在するか（`!!data.screeningCriteria?.byJob?.[jobName]` と同等）。
+   *  - 全社未設定 / byJob 未定義 / 該当 key 不在 すべて false
+   *  - 「(職種別)」バッジ表示判定で使用
+   */
+  hasJobOverride(clientId: string, jobName: string): boolean;
+  /**
+   * 全社設定を上書き保存（form 全体を 1 回で flush する既存 `save()` に対応）。
+   *  - axes と byJob[*].axes を `normalizeWeights` で 100% 化してから save
+   *  - migrate は呼ばない（UI 側 form state が既に v2 形式である前提）
+   *  - 戻り値は normalize 後の deep copy（呼出側 setForm に反映して mutate isolation を保つ）
+   *  - `saveClientData` は 1 回のみ呼ぶ
+   */
+  saveAll(clientId: string, criteria: ScreeningCriteria): ScreeningCriteria;
 }
