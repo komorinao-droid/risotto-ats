@@ -188,6 +188,40 @@ export class LocalStorageApplicantRepository implements ApplicantRepository {
     return { clearedApplicantCount, cleanedHistoryCount };
   }
 
+  markDuplicateByMatch(
+    clientId: string,
+    matcher: { name?: string; phone?: string },
+    scope: { baseName: string | null },
+  ): { markedCount: number } {
+    const matchName = matcher.name?.trim() || '';
+    const matchPhone = (matcher.phone || '').replace(/[-\s]/g, '');
+    if (!matchName && !matchPhone) return { markedCount: 0 };
+
+    const data = storage.getClientData(clientId);
+    const list = data.applicants ?? [];
+
+    let markedCount = 0;
+    const next = list.map((a) => {
+      // 子アカウントの権限境界: scope.baseName 指定時は自拠点のみ更新（他拠点 applicants は触らない）
+      if (scope.baseName !== null && a.base !== scope.baseName) return a;
+      // 既に duplicate なら skip（updatedAt を汚さない方針と整合）
+      if (a.duplicate) return a;
+      const aPhone = (a.phone || '').replace(/[-\s]/g, '');
+      const hit =
+        (matchName && a.name === matchName) ||
+        (matchPhone && aPhone === matchPhone);
+      if (!hit) return a;
+      markedCount++;
+      // withUpdatedMeta は付与しない: duplicate は CSV cache であり updatedAt を汚さない方針
+      return { ...a, duplicate: true };
+    });
+
+    if (markedCount > 0) {
+      storage.saveClientData(clientId, { ...data, applicants: next });
+    }
+    return { markedCount };
+  }
+
   delete(clientId: string, applicantId: number): DeleteApplicantResult {
     const data = storage.getClientData(clientId);
     const applicants = data.applicants ?? [];

@@ -48,7 +48,7 @@ const requiredMark: React.CSSProperties = {
 };
 
 const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }) => {
-  const { clientData, updateClientData, reloadClientData, logAction, client } = useAuth();
+  const { clientData, reloadClientData, logAction, client } = useAuth();
   const isChild = client?.accountType === 'child';
   const lockedBaseName = isChild ? (client?.baseName || '') : '';
 
@@ -280,23 +280,17 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       chatAnswers: [],
     };
 
-    // 既存応募者の重複フラグだけは updateClientData 経由で更新（子アカウントのbase絞込ロジックを尊重）
-    updateClientData((data) => {
-      const updatedApplicants = data.applicants.map((a) => {
-        if (
-          (a.name === applicant.name && applicant.name) ||
-          (applicant.phone && a.phone.replace(/[-\s]/g, '') === applicant.phone)
-        ) {
-          return { ...a, duplicate: true };
-        }
-        return a;
-      });
-      return { ...data, applicants: updatedApplicants };
-    });
-
-    // 新規応募者は Repository 経由で作成。createdAt/updatedAt/stageChangedAt が自動付与される
+    // 新規応募者は Repository 経由で作成。createdAt/updatedAt/stageChangedAt が自動付与される。
+    // 既存応募者の重複フラグは applicantRepository.markDuplicateByMatch で更新（O-3）。
+    // scope.baseName で子アカウントの base 絞込ロジックを Repository 側に再現。
     if (client) {
       const ownerId = resolveDataOwnerId(client);
+      const scopeBase = client.accountType === 'child' ? (client.baseName || null) : null;
+      applicantRepository.markDuplicateByMatch(
+        ownerId,
+        { name: applicant.name, phone: applicant.phone },
+        { baseName: scopeBase },
+      );
       applicantRepository.create(ownerId, applicant);
       reloadClientData();
     }

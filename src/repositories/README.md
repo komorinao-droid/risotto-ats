@@ -209,7 +209,7 @@ D-2 で StatusManagement.tsx の `updateClientData` 直叩きを本 Repository �
 | — | applicantRepository.delete 内 events filter を eventRepository へ責務移譲 | 未着手（cascade service 整理時に再検討） |
 | — | InfoTab に渡している updateClientData prop の Repository 化 | ✅ H-5 で削除（未使用 dead pipeline）。将来書込が必要になったら専用 Repository 経由で再追加 |
 | — | applicantRepository.createMany（大量取込最適化） | 未着手（必要時に追加） |
-| — | AddApplicantModal の duplicate back-prop を Repository 経由に | 未着手（updatedAt 副作用評価が必要） |
+| **O-3** | **AddApplicantModal の duplicate back-prop を `applicantRepository.markDuplicateByMatch` 経由に置換。`updateClientData` の最後の実 callsite を撤去（AuthContext shim 本体の削除は O-4）。matcher = `{ name?, phone? }` の OR 一致、scope = `{ baseName: string \| null }` で子アカウントの自拠点境界を Repository 側に再現。既に `duplicate === true` の applicant は skip、markedCount 0 の場合は save なし。`withUpdatedMeta` は付与しない（duplicate は CSV cache であり `updatedAt` を汚さない方針）** | **✅ 完了** |
 | — | Firestore 実装本体 | 未着手（別タスク） |
 | — | UI 上の予約 / キャンセル / 再調整モーダルの完全な手動確認（H-2〜H-5 は Repository 直接呼出で等価カバレッジを取得済） | 推奨（リリース前回帰テストで実施） |
 
@@ -1252,7 +1252,7 @@ interface ChatbotRepository {
 
 ### 14.13 残タスク
 
-- **`updateClientData` shim の撤去**: Phase N 全 10 画面の Repository 化が完了したため `AuthContext.updateClientData` 自体を撤去候補とする。grep で残利用箇所がゼロであることを確認した上で別フェーズで削除
+- **`updateClientData` shim の撤去 (O-4)**: O-3 (AddApplicantModal の `applicantRepository.markDuplicateByMatch` 経由化) で最後の実 callsite が消滅。AuthContext 内部 (interface / useCallback / context value の 3 箇所) と applicantRepository コメント中の言及のみが残るため、次の単独 commit (O-4) で interface / 実装 / context value から削除可能
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
 - **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。後続の整理フェーズで `@deprecated` → 削除を検討
 - **`baseScope.ts` 全体の整理**: Phase N 完了で `resolveJobs` / `resolveSources` / `resolveEmailTemplates` 系も Repository 側に移行済（base-override は各 Repository 内で完結）。baseScope.ts の resolve 系ヘルパも UI から呼ばれなくなっている可能性があるため一斉整理を別フェーズで実施

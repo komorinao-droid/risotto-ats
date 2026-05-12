@@ -312,6 +312,37 @@ export interface ApplicantRepository {
     deletedStatusName: string,
   ): ClearStageForDeletedStatusResult;
   /**
+   * 新規応募者と氏名 OR 正規化電話番号が一致する既存 applicants の duplicate フラグを true にマーク。
+   *
+   * 用途:
+   *  - `AddApplicantModal` で新規応募者追加時の既存重複マーキング。
+   *    Phase O-3 で `updateClientData` 経由の一括更新を本 API 経由に置換。
+   *  - `applicant.duplicate` フィールドは CSV エクスポート用 static cache（画面表示の「重複 N 件」バッジは
+   *    ApplicantList / ApplicantDetail 側で動的に再計算しており、本フラグを読まない）。
+   *
+   * 動作:
+   *  - matcher.name が非空 → applicants の name 完全一致を対象に含める
+   *  - matcher.phone が非空 → applicants の正規化電話番号 (`[-\s]` 除去後) 一致を対象に含める
+   *  - 2 条件は OR
+   *  - matcher の両方が空 → 0 件返却 / save なし
+   *  - scope.baseName !== null → `a.base === baseName` のみ更新（子アカウント想定の権限境界）
+   *  - scope.baseName === null → 全 applicants 対象（親アカウント想定）
+   *  - 既に `duplicate === true` の applicant は更新せず skip
+   *  - markedCount が 0 の場合は saveClientData を呼ばない（無駄な書込防止）
+   *  - `withUpdatedMeta` は **付与しない**。duplicate flag は CSV cache であり「更新」意味付けを持たせない方針
+   *    （`updatedAt` を汚すと「最近更新された応募者」表示で意図せず先頭に来てしまう）
+   *
+   * Firestore マッピング:
+   *  - WriteBatch で対象 applicant doc を `update({ duplicate: true })`
+   *  - baseName scope は `where('base', '==', baseName)` クエリ後の filter
+   *  - 500 doc batch 上限は実運用ではヒットしない（同名/同電話の既存数）
+   */
+  markDuplicateByMatch(
+    clientId: string,
+    matcher: { name?: string; phone?: string },
+    scope: { baseName: string | null },
+  ): { markedCount: number };
+  /**
    * 応募者を削除する（カスケード）。
    *
    * 動作:
