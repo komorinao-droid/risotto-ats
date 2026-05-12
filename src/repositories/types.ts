@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, ChatLeadSetting, ChatQuestionGroup, ChatScenario, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, ChatLeadSetting, ChatQuestionGroup, ChatScenario, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, InvoiceLog, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -1810,4 +1810,46 @@ export interface ChatbotRepository {
    *  - `baseName` 参照の orphan cleanup は本 API ではしない（pre-existing、スコープ外）
    */
   deleteLeadSetting(clientId: string, leadId: number): boolean;
+}
+
+/**
+ * 請求書 (`InvoiceLog`) の永続化操作 (Phase O-6b)。
+ *
+ * 配置:
+ *  - 現状は `ClientData.invoices: InvoiceLog[]` 配列に格納（1 client にひも付く）。
+ *  - 親アカウントのみ請求書を持つ前提（child は持たない）。
+ *  - id 採番は呼出側責務（既存 `p.existing?.id || (Date.now() + Math.floor(Math.random() * 100000))` を踏襲）。
+ *  - InvoiceLine[] の deep copy は Repository 内で実施し、読み出し側の参照を分離する。
+ *
+ * 将来 (Firestore 化):
+ *  - `/clients/{clientId}/invoices/{invoiceId}` 独立 collection 化。
+ *  - `bulkUpsert` は WriteBatch で 1 トランザクション。
+ *  - その時点で戻り値型を Promise<...> に揃える。
+ */
+export interface InvoiceRepository {
+  /**
+   * 1 client の `InvoiceLog[]` を返す（未設定なら `[]`、deep copy）。
+   *  - lines: `InvoiceLine[]` まで 2 階層 deep copy
+   */
+  list(clientId: string): InvoiceLog[];
+  /**
+   * yearMonth 一致の `InvoiceLog` を 1 件返す（無ければ `undefined`、deep copy）。
+   *  - 当月の請求書状況プレビュー / 個別編集モーダル open / 一括生成の existing 検出で使う。
+   *  - 配列内に同一 yearMonth が複数ある場合は最初の 1 件を返す（既存 `find` 挙動踏襲）。
+   */
+  findByYearMonth(clientId: string, yearMonth: string): InvoiceLog | undefined;
+  /**
+   * 単一 `InvoiceLog` を upsert。
+   *  - id 一致のエントリがあれば置換、無ければ append。
+   *  - id 採番は Repository では行わない（呼出側責務）。
+   *  - 戻り値は永続化後の invoice の deep copy。
+   *  - 一括生成 / 個別保存の両方で使う共通 semantics（既存 `filter(...id !== inv.id).push(inv)` の 1 行化）。
+   */
+  upsert(clientId: string, invoice: InvoiceLog): InvoiceLog;
+  /**
+   * `InvoiceLog[]` を全件上書き保存（mutator 経路用）。
+   *  - 現状 InvoiceSection.onUpdateInvoices で `mutator(currentInvoices)` の戻り値を全置換するパターン。
+   *  - 戻り値は永続化後の配列の deep copy。
+   */
+  bulkUpsert(clientId: string, invoices: InvoiceLog[]): InvoiceLog[];
 }

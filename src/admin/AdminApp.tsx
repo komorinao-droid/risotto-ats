@@ -45,8 +45,7 @@ import {
 } from 'lucide-react';
 import { SMS_MONTHLY_LIMIT, SMS_OVERAGE_UNIT_PRICE, smsLimitLabel } from '@/utils/sms';
 import { fetchApiUsageSummary, fetchKillSwitches, updateKillSwitches, fetchNotificationLogs, type ApiUsageSummary, type FeatureKey, type KillSwitchFlags, type NotificationLogEntry, type NotificationType } from './adminApi';
-import { storage } from '@/utils/storage';
-import { clientRepository, clientDataRepository } from '@/repositories';
+import { clientRepository, clientDataRepository, invoiceRepository } from '@/repositories';
 import { authService } from '@/services/auth';
 import Modal from '@/components/Modal';
 import type { Client, ClientData, ClientPermissions, ClientOperationLog, InvoiceLog, InvoiceLine } from '@/types';
@@ -2523,11 +2522,12 @@ const ClientDetail: React.FC<{
           clientData={clientData}
           smsOverageCharge={stats.smsOverageChargeThisMonth}
           onUpdateInvoices={(mutator) => {
-            const cur = (() => { try { return storage.getClientData(dataId); } catch { return null; } })();
-            if (!cur) return;
-            const nextInvoices = mutator(cur.invoices || []);
-            storage.saveClientData(dataId, { ...cur, invoices: nextInvoices });
-            setDataReloadKey((k) => k + 1);
+            try {
+              const cur = invoiceRepository.list(dataId);
+              const nextInvoices = mutator(cur);
+              invoiceRepository.bulkUpsert(dataId, nextInvoices);
+              setDataReloadKey((k) => k + 1);
+            } catch { /* skip */ }
           }}
           onLog={onLogAdminAction}
         />
@@ -3547,8 +3547,7 @@ const BulkInvoiceGenerateModal: React.FC<{
       const total = subtotal + Math.round(subtotal * INVOICE_TAX_RATE);
       let existing: InvoiceLog | undefined;
       try {
-        const d = clientDataRepository.get(c.id);
-        existing = (d.invoices || []).find((iv) => iv.yearMonth === yearMonth);
+        existing = invoiceRepository.findByYearMonth(c.id, yearMonth);
       } catch {
         /* skip broken data */
       }
@@ -3613,9 +3612,7 @@ const BulkInvoiceGenerateModal: React.FC<{
         paidAt: p.existing?.paidAt,
       };
       try {
-        const d = storage.getClientData(p.client.id);
-        const filtered = (d.invoices || []).filter((iv) => iv.id !== newInvoice.id);
-        storage.saveClientData(p.client.id, { ...d, invoices: [...filtered, newInvoice] });
+        invoiceRepository.upsert(p.client.id, newInvoice);
         if (p.existing) {
           overwritten++;
           onLog?.('請求書一括上書き', p.client.companyName, `${yearMonth} / ¥${totalAmount.toLocaleString()}`);
@@ -3812,8 +3809,7 @@ const ContractPage: React.FC<{
     if (c.status !== 'active') return;
     let existing: InvoiceLog | undefined;
     try {
-      const d = storage.getClientData(c.id);
-      existing = (d.invoices || []).find((iv) => iv.yearMonth === currentMonth);
+      existing = invoiceRepository.findByYearMonth(c.id, currentMonth);
     } catch { /* skip */ }
     setEditingClient(c);
     setEditingInvoice(existing || null);
@@ -3822,9 +3818,7 @@ const ContractPage: React.FC<{
   const handleSingleSave = (inv: InvoiceLog) => {
     if (!editingClient) return;
     try {
-      const d = storage.getClientData(editingClient.id);
-      const filtered = (d.invoices || []).filter((iv) => iv.id !== inv.id);
-      storage.saveClientData(editingClient.id, { ...d, invoices: [...filtered, inv] });
+      invoiceRepository.upsert(editingClient.id, inv);
       onLogAdminAction?.(editingInvoice ? '請求書更新' : '請求書作成', editingClient.companyName, `${inv.yearMonth} / ¥${inv.totalAmount.toLocaleString()} / ${INVOICE_STATUS_LABEL[inv.status]}`);
     } catch {
       /* save failed */
@@ -3842,8 +3836,7 @@ const ContractPage: React.FC<{
     const map: Record<string, InvoiceLog | undefined> = {};
     clients.filter((c) => c.accountType === 'parent').forEach((c) => {
       try {
-        const d = clientDataRepository.get(c.id);
-        map[c.id] = (d.invoices || []).find((iv) => iv.yearMonth === currentMonth);
+        map[c.id] = invoiceRepository.findByYearMonth(c.id, currentMonth);
       } catch {
         /* skip */
       }
