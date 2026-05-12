@@ -12,9 +12,9 @@
 
 - 画面コードは **Repository 層** (`src/repositories/`) と **AuthService 層** (`src/services/auth/`) を介してデータを読み書きする境界が確定済。
 - Firestore / Firebase Auth / Cloud Storage への切替は、原則として **`src/repositories/index.ts` と `src/services/auth/index.ts` の各 1 行差し替え** + 新実装ディレクトリの追加でできる構成にしてある。
-- Slot (Phase K) / Base (Phase L) / Client (Phase M) / 設定系 10 画面 (Phase N) は完了済。さらに整理タスク O-1 (baseScope.ts dead helper 削除) / O-3 (AddApplicantModal の `updateClientData` 撤去) も完了。**残る直書き経路**は **AdminApp の Client 以外 (AdminAccount / AdminLog / MediaIntegration、媒体連携、契約・請求等)** のみ。Firestore 化と同時に立ち上げると PR が肥大化するので、**段階順序を守ること**。
+- Slot (Phase K) / Base (Phase L) / Client (Phase M) / 設定系 10 画面 (Phase N) は完了済。さらに整理タスク O-1 (baseScope.ts dead helper 削除) / O-3 (AddApplicantModal の `updateClientData` 撤去) / O-4 (AuthContext `updateClientData` shim 本体削除) も完了。**残る直書き経路**は **AdminApp の Client 以外 (AdminAccount / AdminLog / MediaIntegration、媒体連携、契約・請求等)** のみ。Firestore 化と同時に立ち上げると PR が肥大化するので、**段階順序を守ること**。
 - ClientRepository は Phase M-1〜M-8 完了（型 + LocalStorage CRUD 5 API + AccountSettings + BaseRepository + AdminApp 全 callsite + `clientOptions.incrementOptionUsage` + BaseManagement read-only 経路）。**クライアント系 `storage.getClients/saveClients` 直叩きはコードベースから完全消滅**。
-- Phase N-1〜N-10 で設定系 10 画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済。さらに O-3 で `AddApplicantModal.tsx` の最後の `updateClientData` 実 callsite も `applicantRepository.markDuplicateByMatch` 経由化済。**`updateClientData(` の実 callsite はコードベース全体で 0 件**（AuthContext 内部の interface / useCallback / context value のみ残置 → O-4 で削除予定）。
+- Phase N-1〜N-10 で設定系 10 画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済。さらに O-3 で `AddApplicantModal.tsx` の最後の `updateClientData` 実 callsite も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）を完全撤去。**`updateClientData` のコード実装はコードベース全体で 0 件**（docs / JSDoc / inline コメントの historical mention のみ残置）。
 - `src/repositories/firestore-design.md` (v1.6) が本番 DB 設計の唯一のソース。本書はその「実装着手側から見た作業順序」だけを抽出する。
 
 ---
@@ -101,7 +101,7 @@
 | K | SlotRepository 立ち上げ + Calendar.tsx の slotSettings 直書き経路を全 Repository 化 (K-1〜K-4)。K-5 = BaseManagement.deleteBase 連携は Phase L-3 で集約 |
 | L | BaseRepository 立ち上げ (L-1) + BaseManagement / Calendar の bases 直書き経路を全 Repository 化 (L-2)。L-3 で `deleteWithCascade` に 8 配列カスケード + child アカウント baseName クリアを集約 (K-5 を同時消化) |
 | M | ClientRepository CRUD 補完: 5 API 追加 (M-1) / AccountSettings (M-2) / BaseRepository 経由置換 (M-3) / AdminApp.loadClients (M-4) / AdminApp.handleToggleStatus + onUpdateClient prop (M-5a) / AdminApp.handleSave (M-5b、child companyName 追従を listChildren + update で維持) / AdminApp.handleDelete (M-6、clientData/operationLogs は orchestrator 残置) / AuthService.adminResetPassword 追加 + AdminApp.handleUpdatePassword (M-7a) / clientOptions.incrementOptionUsage (M-7b) / BaseManagement read-only 経路 (M-8)。**クライアント系 `storage.getClients/saveClients` 直叩きはコードベースから完全消滅** |
-| N | 設定系 10 画面の Repository 化: JobManagement (N-1) / SourceManagement (N-2) / EmailTemplateManagement (N-3) / HearingManagement (N-4) / ReportScheduleSettings (N-5、reportRepository 拡張) / ExclusionList (N-6) / MediaCostManagement (N-7) / FilterConditionSettings (N-8) / ScreeningSettings (N-9) / ChatbotManagement (N-10)。`useAuth` 分割代入から `updateClientData` を除去 → `reloadClientData` に統一。base-override / cascade / deep copy 方針は `README.md §14` の各 N-x 節を参照。**設定画面側の `updateClientData` 直叩きはコードベースから完全消滅**。後続整理として O-1 で `baseScope.ts` の dead 6 helper を削除、O-3 で `AddApplicantModal.tsx` の `updateClientData` 撤去 (`applicantRepository.markDuplicateByMatch` 経由化) 済 |
+| N | 設定系 10 画面の Repository 化: JobManagement (N-1) / SourceManagement (N-2) / EmailTemplateManagement (N-3) / HearingManagement (N-4) / ReportScheduleSettings (N-5、reportRepository 拡張) / ExclusionList (N-6) / MediaCostManagement (N-7) / FilterConditionSettings (N-8) / ScreeningSettings (N-9) / ChatbotManagement (N-10)。`useAuth` 分割代入から `updateClientData` を除去 → `reloadClientData` に統一。base-override / cascade / deep copy 方針は `README.md §14` の各 N-x 節を参照。**設定画面側の `updateClientData` 直叩きはコードベースから完全消滅**。後続整理として O-1 で `baseScope.ts` の dead 6 helper 削除、O-3 で `AddApplicantModal.tsx` の `updateClientData` 撤去 (`applicantRepository.markDuplicateByMatch` 経由化)、O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）を完全撤去 |
 
 ---
 
@@ -148,14 +148,14 @@
 
 ### 2.4 Phase N 完了後の整理タスク
 
-Phase N 完了で設定 10 画面の Repository 化は揃ったが、`AuthContext.updateClientData` shim と `baseScope.ts` を完全撤去するには以下の整理が残る。Firestore 化（Phase J）と独立して進めて良い。
+Phase N 完了で設定 10 画面の Repository 化は揃った。O-4 で `AuthContext.updateClientData` shim も撤去済。残るは `baseScope.ts` 全体撤去と AdminApp 系の整理。Firestore 化（Phase J）と独立して進めて良い。
 
 | ID | 内容 | 概要 | 優先度 |
 |---|---|---|---|
 | **O-1** | `baseScope.ts` dead helper 削除 | ✅ 完了（`resolveScreeningCriteria` / `hasScreeningJobOverride` / `resolveEmailTemplates` / `hasJobsOverride` / `hasSourcesOverride` / `hasEmailTemplatesOverride` を削除）| — |
 | **O-2** | docs 更新 | ✅ 完了（本書 / `firestore-design.md` §5 / §5.3 を Phase N 完了状態に書き換え）| — |
 | **O-3** | `AddApplicantModal.tsx` の `updateClientData` 撤去 | ✅ 完了（duplicate flag 一括更新を `applicantRepository.markDuplicateByMatch(ownerId, { name, phone }, { baseName: childBase ?? null })` 経由に置換。`scope.baseName` で子アカウントの自拠点境界を Repository 側に再現。既に `duplicate === true` は skip / markedCount 0 で save なし / `withUpdatedMeta` 付与なし）| — |
-| **O-4** | `AuthContext.updateClientData` shim 削除 | O-3 完了で `updateClientData(` の実 callsite はコードベース全体で 0 件（AuthContext 内部のみ残置）。次の単独 commit で interface / useCallback / context value から削除 | ★ |
+| **O-4** | `AuthContext.updateClientData` shim 削除 | ✅ 完了（`AuthContextValue` interface / `useCallback` 実装 / `AuthContext.Provider value` の 3 箇所から削除。`filterDataByBase` / `loadClientData` / `reloadClientData` は維持。`updateClientData` のコード経路はコードベースから完全消滅、docs / JSDoc / inline コメントの historical mention のみ残置）| — |
 | **O-5** | `baseScope.ts` 全体削除 | `resolveJobs` / `resolveSources` を JobRepository / SourceRepository の `listForBase(ownerId, baseName)` 等の新規 API に置換 → `baseScope.ts` ファイル自体を削除（AddApplicantModal / ApplicantDetail の 2 callsite を移行）| ★ |
 | **O-6** | AdminApp の `storage.getClientData / saveClientData` 直叩き整理 | 運営画面 invoice / clientData 直叩き（AdminApp.tsx で 10 callsite）を専用 Repository 経由に。Phase N スコープ外として残存 | ★ |
 

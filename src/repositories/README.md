@@ -1252,7 +1252,7 @@ interface ChatbotRepository {
 
 ### 14.13 残タスク
 
-- **`updateClientData` shim の撤去 (O-4)**: O-3 (AddApplicantModal の `applicantRepository.markDuplicateByMatch` 経由化) で最後の実 callsite が消滅。AuthContext 内部 (interface / useCallback / context value の 3 箇所) と applicantRepository コメント中の言及のみが残るため、次の単独 commit (O-4) で interface / 実装 / context value から削除可能
+- **`updateClientData` shim の撤去 (O-4)**: ✅ 完了。`AuthContextValue` interface / `useCallback` 実装 / `AuthContext.Provider value` の 3 箇所から削除。`filterDataByBase` / `loadClientData` / `reloadClientData` は維持。docs / JSDoc / inline コメントの historical mention のみが残置（コード経路は完全消滅）
 - **正規化（Job / Source / EmailTemplate / Hearing 等への baseName / id フィールド追加）**: Phase J（Firestore 化）時の設計判断で再検討
 - **`baseScope.ts` の screeningCriteria 関連 2 関数の整理**: `resolveScreeningCriteria` / `hasScreeningJobOverride` は N-9 で ApplicantDetail からの呼出が無くなり呼び出し元ゼロ。他の `resolveJobs / resolveSources / resolveEmailTemplates` と同居しているため即時削除はしない。後続の整理フェーズで `@deprecated` → 削除を検討
 - **`baseScope.ts` 全体の整理**: Phase N 完了で `resolveJobs` / `resolveSources` / `resolveEmailTemplates` 系も Repository 側に移行済（base-override は各 Repository 内で完結）。baseScope.ts の resolve 系ヘルパも UI から呼ばれなくなっている可能性があるため一斉整理を別フェーズで実施

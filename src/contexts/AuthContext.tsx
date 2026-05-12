@@ -31,7 +31,6 @@ interface AuthContextValue extends AuthState {
    */
   login: (clientId: string, password: string) => LoginResult;
   logout: () => void;
-  updateClientData: (updater: (data: ClientData) => ClientData) => void;
   reloadClientData: () => void;
   /** storage から最新の Client を読み直して state に反映（オプション情報の同期等に使用） */
   refreshClient: () => void;
@@ -216,43 +215,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [client, resolveClientId]
   );
 
-  const updateClientData = useCallback(
-    (updater: (data: ClientData) => ClientData) => {
-      if (!client) return;
-      const dataId = resolveClientId(client);
-      const current = clientDataRepository.get(dataId);
-
-      // 子アカウントの場合、updater にはフィルタ済みデータを渡す
-      // 結果から「自拠点のレコード」だけを取り出し、他拠点のデータと合算して保存
-      if (client.accountType === 'child' && client.baseName) {
-        const myBase = client.baseName;
-        const filteredCurrent = filterDataByBase(current, myBase);
-        const filteredUpdated = updater(filteredCurrent);
-        // 他拠点のレコードはそのまま維持
-        const othersApplicants = current.applicants.filter((a) => a.base !== myBase);
-        const othersEvents = current.events.filter((e) => e.base !== myBase);
-        // 自拠点として更新されたレコードのうち、base が他拠点に変わってしまったものは弾く（権限逸脱防止）
-        const myApplicants = filteredUpdated.applicants.filter((a) => !a.base || a.base === myBase);
-        const myEvents = filteredUpdated.events.filter((e) => !e.base || e.base === myBase);
-        const merged: ClientData = {
-          ...current, // 他拠点限定の設定（statuses など）はそのまま維持
-          ...filteredUpdated, // 子が更新した設定群を反映（メールテンプレ等は子も触れる）
-          applicants: [...othersApplicants, ...myApplicants],
-          events: [...othersEvents, ...myEvents],
-          // slotSettings は filterDataByBase で自拠点だけに絞られているので、他拠点の slotSettings をマージ
-          slotSettings: { ...(current.slotSettings || {}), ...(filteredUpdated.slotSettings || {}) },
-        };
-        clientDataRepository.save(dataId, merged);
-        setClientData(filterDataByBase(merged, myBase));
-      } else {
-        const updated = updater(current);
-        clientDataRepository.save(dataId, updated);
-        setClientData(updated);
-      }
-    },
-    [client, resolveClientId]
-  );
-
   const reloadClientData = useCallback(() => {
     if (client) {
       loadClientData(client);
@@ -320,7 +282,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clientData,
     login,
     logout,
-    updateClientData,
     reloadClientData,
     refreshClient,
     logAction,
