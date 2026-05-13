@@ -4,7 +4,7 @@
  * 設計:
  *  - 共有秘密 API_SHARED_SECRET をリクエストヘッダ x-api-secret で受け取る
  *  - フロント側はビルド時に環境変数 VITE_API_SECRET 経由で同じ値を埋め込む
- *  - シークレット未設定時はワーニングを出して開発のみ通す（本番では必須）
+ *  - シークレット未設定時は dev/test では warning のみで通す。本番(NODE_ENV=production)では 503 で fail-close
  *  - クライアントID毎に直近1分間で30リクエストまでに制限（簡易メモリ実装）
  *
  * 注意:
@@ -36,9 +36,12 @@ function apiAuth(req, res, next) {
   const expectedSecret = process.env.API_SHARED_SECRET;
   const providedSecret = req.headers['x-api-secret'];
 
-  // シークレット未設定環境では警告のみ（開発時の利便性）
+  // シークレット未設定環境では警告のみ（開発時の利便性）。本番では fail-close。
   if (!expectedSecret) {
     console.warn('[api-auth] API_SHARED_SECRET is not set. Endpoint is unprotected (dev mode).');
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ error: 'Server auth secret is not configured' });
+    }
   } else if (providedSecret !== expectedSecret) {
     return res.status(401).json({ error: 'Unauthorized: invalid API secret' });
   }

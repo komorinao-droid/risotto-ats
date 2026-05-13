@@ -3,7 +3,7 @@
  *
  * apiAuth はクライアントテナント用。これは運営側が API コスト集計などを取得するための別経路。
  *
- * - 必須環境変数 ADMIN_API_SECRET（未設定時は dev 限定で通す）
+ * - 必須環境変数 ADMIN_API_SECRET（未設定時は dev/test では通す、本番は 503 で fail-close）
  * - リクエストヘッダ x-admin-secret に同値を入れる
  * - フロントは管理画面ログイン後に sessionStorage に保管された値を都度ヘッダ付与
  * - clientId は不要
@@ -17,6 +17,9 @@ function adminAuth(req, res, next) {
 
   if (!expected) {
     console.warn('[admin-auth] ADMIN_API_SECRET / API_SHARED_SECRET is not set. Endpoint is unprotected (dev mode).');
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ error: 'Server auth secret is not configured' });
+    }
   } else if (provided !== expected) {
     return res.status(401).json({ error: 'Unauthorized: invalid admin secret' });
   }
