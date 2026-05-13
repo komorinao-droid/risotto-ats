@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
+import HelpChatWidget from '@/client/components/HelpChatWidget';
 import Login from '@/client/pages/Login';
 import Dashboard from '@/client/pages/Dashboard';
 import Calendar from '@/client/pages/Calendar';
@@ -99,6 +100,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/settings/account" element={<AccountSettings />} />
         </Routes>
       </main>
+      <HelpChatWidget />
     </div>
   );
 };
