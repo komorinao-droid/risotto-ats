@@ -58,6 +58,9 @@ const ReportNotContractedNotice: React.FC<{ feature: string }> = ({ feature }) =
   </div>
 );
 
+// Help widget is temporarily disabled until support content is finalized.
+const showHelpWidget = false;
+
 const AuthenticatedApp: React.FC = () => {
   const { client, logout } = useAuth();
   const isPrintRoute = window.location.pathname.startsWith('/reports/print');
@@ -100,7 +103,8 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/settings/account" element={<AccountSettings />} />
         </Routes>
       </main>
-      <HelpChatWidget />
+      {/* Help widget is temporarily disabled until support content is finalized. */}
+      {showHelpWidget && <HelpChatWidget />}
     </div>
   );
 };
