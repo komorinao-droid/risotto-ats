@@ -9,13 +9,16 @@ import {
   ChevronLeft,
   CircleHelp,
   Copy,
+  Image as ImageIcon,
   ListChecks,
   MessageCircle,
+  Plus,
   Search,
   Send,
   Settings,
   Sparkles,
   Tags,
+  UserCheck,
   UserPlus,
   X,
   Zap,
@@ -36,6 +39,20 @@ interface HelpLink {
   href: string;
 }
 
+type HelpGuideVariant =
+  | 'applicant_add'
+  | 'status_change'
+  | 'interview_schedule'
+  | 'report_view'
+  | 'ai_screening';
+
+interface HelpGuide {
+  title: string;
+  variant: HelpGuideVariant;
+  /** 将来用。値がある場合も <video> ではなくテキストリンクで表示する */
+  videoUrl?: string;
+}
+
 interface HelpQuestion {
   id: string;
   title: string;
@@ -43,6 +60,8 @@ interface HelpQuestion {
   intro: string;
   /** 番号付き手順。省略時は intro と note のみの簡易回答 */
   steps?: string[];
+  /** スクショ風ミニガイド（任意） */
+  guide?: HelpGuide;
   /** 補足・注意点 */
   note?: string;
   /** 関連画面リンク（SPA遷移） */
@@ -86,6 +105,7 @@ const HELP_CATEGORIES: HelpCategory[] = [
           '画面上部の「応募者追加」ボタンを押す',
           '氏名・電話番号・応募職種・応募媒体・拠点を入力して保存',
         ],
+        guide: { title: '応募者追加の流れ', variant: 'applicant_add' },
         note: '同じ氏名または電話番号の応募者がいると、自動で重複候補として検知されます。',
         link: { label: '応募者一覧を開く', href: '/applicants' },
       },
@@ -132,6 +152,7 @@ const HELP_CATEGORIES: HelpCategory[] = [
           '変更後のステータスを選択',
           '理由やメモを残したい場合は詳細画面から変更',
         ],
+        guide: { title: 'ステータス変更の流れ', variant: 'status_change' },
         note: '対象外（辞退・不合格など）に変更すると、アクティブな選考対象から外れます。',
         link: { label: '応募者一覧を開く', href: '/applicants' },
       },
@@ -166,6 +187,7 @@ const HELP_CATEGORIES: HelpCategory[] = [
           '日付・時間帯・拠点・面接方法を入力',
           '保存するとカレンダーに反映され、ステータスも面接確定へ更新',
         ],
+        guide: { title: '面接日程登録の流れ', variant: 'interview_schedule' },
         note: '時間帯の空き枠は面接カレンダーで事前確認できます。',
         link: { label: '面接カレンダーを開く', href: '/calendar' },
       },
@@ -212,6 +234,7 @@ const HELP_CATEGORIES: HelpCategory[] = [
           'ファネル分析・月次推移・媒体費用分析タブを切り替えて確認',
           '対象期間と拠点・媒体を絞り込んで分析',
         ],
+        guide: { title: 'レポート画面のイメージ', variant: 'report_view' },
         note: 'オプション未契約の場合は案内画面が表示されます。',
         link: { label: '採用レポートを開く', href: '/reports' },
       },
@@ -282,6 +305,7 @@ const HELP_CATEGORIES: HelpCategory[] = [
           '一覧では AI評価でソート・絞り込みが可能',
           '詳細画面で評価軸ごとのコメントを確認',
         ],
+        guide: { title: 'AI判定の補助イメージ', variant: 'ai_screening' },
         note: 'AI評価は判断材料の1つです。最終判断は必ず担当者が内容を確認してください。',
         link: { label: '応募者一覧を開く', href: '/applicants' },
       },
@@ -348,6 +372,251 @@ function findCategory(id: HelpCategoryId | null): HelpCategory | undefined {
 
 function normalize(text: string): string {
   return text.toLowerCase().trim();
+}
+
+// ── HelpGuidePreview: variantごとにスクショ風ミニ画面を描画 ─────────────────────
+// 親の .help-chat-answer から --accent / --accent-soft を継承する想定。
+
+function GuideWindowBar({ label }: { label: string }) {
+  return (
+    <div className="help-chat-guide-bar">
+      <span className="help-chat-guide-dot" />
+      <span className="help-chat-guide-dot" />
+      <span className="help-chat-guide-dot" />
+      <span className="help-chat-guide-bar-label">{label}</span>
+    </div>
+  );
+}
+
+function ApplicantAddGuide() {
+  return (
+    <div className="help-chat-guide-screen">
+      <GuideWindowBar label="応募者一覧" />
+      <div className="help-chat-guide-toolbar">
+        <span className="help-chat-guide-crumb">応募者管理</span>
+        <span className="help-chat-guide-cta">
+          <Plus size={11} />
+          追加
+        </span>
+      </div>
+      <div className="help-chat-guide-form">
+        <div className="help-chat-guide-field">
+          <span className="help-chat-guide-field-label">氏名</span>
+          <span className="help-chat-guide-field-bar" />
+        </div>
+        <div className="help-chat-guide-field">
+          <span className="help-chat-guide-field-label">電話番号</span>
+          <span className="help-chat-guide-field-bar" />
+        </div>
+        <div className="help-chat-guide-field">
+          <span className="help-chat-guide-field-label">応募媒体</span>
+          <span className="help-chat-guide-field-bar help-chat-guide-field-bar--short" />
+        </div>
+        <div className="help-chat-guide-saved">
+          <Check size={12} />
+          保存しました
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusChangeGuide() {
+  return (
+    <div className="help-chat-guide-screen">
+      <GuideWindowBar label="進捗ボード" />
+      <div className="help-chat-guide-kanban">
+        <div className="help-chat-guide-col">
+          <span className="help-chat-guide-col-title">応募</span>
+          <span className="help-chat-guide-card-mini help-chat-guide-card-mini--ghost">山田 太郎</span>
+        </div>
+        <div className="help-chat-guide-flow" aria-hidden>
+          <ArrowRight size={14} />
+        </div>
+        <div className="help-chat-guide-col help-chat-guide-col--target">
+          <span className="help-chat-guide-col-title">面接</span>
+          <span className="help-chat-guide-card-mini help-chat-guide-card-mini--active">山田 太郎</span>
+        </div>
+        <div className="help-chat-guide-flow help-chat-guide-flow--dim" aria-hidden>
+          <ArrowRight size={14} />
+        </div>
+        <div className="help-chat-guide-col">
+          <span className="help-chat-guide-col-title">採用</span>
+          <span className="help-chat-guide-card-mini help-chat-guide-card-mini--empty" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InterviewScheduleGuide() {
+  // 3週間 × 7日のミニカレンダー。12 日目を accent でハイライト
+  const cells = Array.from({ length: 21 }, (_, i) => i + 1);
+  return (
+    <div className="help-chat-guide-screen">
+      <GuideWindowBar label="面接カレンダー" />
+      <div className="help-chat-guide-cal-wrap">
+        <div className="help-chat-guide-cal">
+          <div className="help-chat-guide-cal-head">
+            {['月', '火', '水', '木', '金', '土', '日'].map((d) => (
+              <span key={d}>{d}</span>
+            ))}
+          </div>
+          <div className="help-chat-guide-cal-grid">
+            {cells.map((n) => (
+              <span
+                key={n}
+                className={
+                  n === 12
+                    ? 'help-chat-guide-cal-cell help-chat-guide-cal-cell--active'
+                    : 'help-chat-guide-cal-cell'
+                }
+              >
+                {n}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="help-chat-guide-detail">
+          <div className="help-chat-guide-detail-row">
+            <span className="help-chat-guide-detail-label">面接方法</span>
+            <span className="help-chat-guide-detail-value">オンライン</span>
+          </div>
+          <div className="help-chat-guide-detail-row">
+            <span className="help-chat-guide-detail-label">メモ</span>
+            <span className="help-chat-guide-detail-value">1次面接</span>
+          </div>
+          <div className="help-chat-guide-detail-row help-chat-guide-detail-row--ok">
+            <Check size={11} />
+            確定
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportViewGuide() {
+  const bars = [40, 70, 55, 90];
+  const rows = [
+    { src: 'Indeed', apply: 32, hire: 4, cost: '¥120k' },
+    { src: 'タウンワーク', apply: 18, hire: 2, cost: '¥80k' },
+    { src: '自社サイト', apply: 9, hire: 3, cost: '¥0' },
+  ];
+  return (
+    <div className="help-chat-guide-screen">
+      <GuideWindowBar label="採用レポート" />
+      <div className="help-chat-guide-report">
+        <div className="help-chat-guide-report-head">
+          <BarChart3 size={12} />
+          媒体別効果
+        </div>
+        <div className="help-chat-guide-chart">
+          {bars.map((h, i) => (
+            <span
+              key={i}
+              className="help-chat-guide-chart-bar"
+              style={{ height: `${h}%` }}
+            />
+          ))}
+        </div>
+        <table className="help-chat-guide-table">
+          <thead>
+            <tr>
+              <th>媒体</th>
+              <th>応募</th>
+              <th>採用</th>
+              <th>費用</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.src}>
+                <td>{r.src}</td>
+                <td>{r.apply}</td>
+                <td>{r.hire}</td>
+                <td>{r.cost}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AiScreeningGuide() {
+  return (
+    <div className="help-chat-guide-screen">
+      <GuideWindowBar label="AIスクリーニング" />
+      <div className="help-chat-guide-pipeline">
+        <div className="help-chat-guide-pipe-card">
+          <span className="help-chat-guide-pipe-title">条件</span>
+          <span className="help-chat-guide-pill">必須条件</span>
+          <span className="help-chat-guide-pill help-chat-guide-pill--ng">NG条件</span>
+        </div>
+        <ArrowRight size={14} className="help-chat-guide-pipe-arrow" />
+        <div className="help-chat-guide-pipe-card help-chat-guide-pipe-card--ai">
+          <span className="help-chat-guide-pipe-title">
+            <Sparkles size={11} />
+            AI判定
+          </span>
+          <span className="help-chat-guide-pipe-score">スコア 78</span>
+          <span className="help-chat-guide-pipe-note">理由を自動コメント</span>
+        </div>
+        <ArrowRight size={14} className="help-chat-guide-pipe-arrow" />
+        <div className="help-chat-guide-pipe-card help-chat-guide-pipe-card--human">
+          <span className="help-chat-guide-pipe-title">
+            <UserCheck size={11} />
+            担当者確認
+          </span>
+          <span className="help-chat-guide-pipe-note">最終判断は人が確認</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HelpGuidePreview({ guide }: { guide: HelpGuide }) {
+  let body: React.ReactNode = null;
+  switch (guide.variant) {
+    case 'applicant_add':
+      body = <ApplicantAddGuide />;
+      break;
+    case 'status_change':
+      body = <StatusChangeGuide />;
+      break;
+    case 'interview_schedule':
+      body = <InterviewScheduleGuide />;
+      break;
+    case 'report_view':
+      body = <ReportViewGuide />;
+      break;
+    case 'ai_screening':
+      body = <AiScreeningGuide />;
+      break;
+    default:
+      return null;
+  }
+  return (
+    <figure className="help-chat-guide" aria-label={guide.title}>
+      <figcaption className="help-chat-guide-title">
+        <ImageIcon size={13} />
+        {guide.title}
+      </figcaption>
+      {body}
+      {guide.videoUrl && (
+        <a
+          className="help-chat-guide-video"
+          href={guide.videoUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          操作動画を見る
+        </a>
+      )}
+    </figure>
+  );
 }
 
 const HelpChatWidget: React.FC = () => {
@@ -598,6 +867,10 @@ const HelpChatWidget: React.FC = () => {
                 ))}
               </ol>
             </div>
+          )}
+
+          {selectedQuestion.guide && (
+            <HelpGuidePreview guide={selectedQuestion.guide} />
           )}
 
           {selectedQuestion.note && (
