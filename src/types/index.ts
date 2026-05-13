@@ -438,6 +438,10 @@ export interface ChatInterviewCalendar {
   id: number;
   baseName: string;
   methods: string[];
+  /** 日程確定方式。'instant_booking'=即時面接設定（チャット内で枠提示して確定） /
+   *  'request_candidates'=面接希望回収（第1〜第3希望を集めて運用側で手動確定）。
+   *  未設定（既存データ）は 'request_candidates' として扱う。 */
+  scheduleMode?: 'instant_booking' | 'request_candidates';
   preDateMessage: string;
   chatEndMessage: string;
   confirmedMessage: string;

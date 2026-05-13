@@ -219,6 +219,28 @@ const CalendarCard: React.FC<{
           </div>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
+          <span style={S.lbl}>
+            日程確定方式
+            <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: '6px', fontSize: '0.75rem' }}>
+              （即時=チャット内で枠提示して確定 / 希望回収=第1〜第3希望を集めて手動確定）
+            </span>
+          </span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {([
+              { v: 'instant_booking', label: '即時面接設定' },
+              { v: 'request_candidates', label: '面接希望回収' },
+            ] as const).map(opt => {
+              const active = (cal.scheduleMode ?? 'request_candidates') === opt.v;
+              return (
+                <label key={opt.v} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', padding: '5px 12px', border: `1px solid ${active ? '#3b82f6' : '#d1d5db'}`, borderRadius: '6px', background: active ? '#eff6ff' : '#fff', fontSize: '0.85rem', color: active ? '#2563eb' : '#374151', fontWeight: active ? 600 : 400 }}>
+                  <input type="radio" name={`scheduleMode-${cal.id}`} checked={active} onChange={() => upd({ scheduleMode: opt.v })} style={{ display: 'none' }} />
+                  {opt.label}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
           <span style={S.lbl}>面接希望日/面接日選択前メッセージ</span>
           <textarea value={cal.preDateMessage} onChange={e => upd({ preDateMessage: e.target.value })}
             style={ta(2)} placeholder="面接希望日程（第1〜第3）を入力してください。" />
@@ -463,7 +485,8 @@ const LeadEditor: React.FC<{
   const addCal = () => upd({
     interviewCalendars: [...lead.interviewCalendars, {
       id: newId(lead.interviewCalendars), baseName: bases[0] || '',
-      methods: ['対面'], preDateMessage: '', chatEndMessage: '', confirmedMessage: '', methodDecidedMessage: '',
+      methods: ['対面'], scheduleMode: 'request_candidates',
+      preDateMessage: '', chatEndMessage: '', confirmedMessage: '', methodDecidedMessage: '',
     }],
   });
 
