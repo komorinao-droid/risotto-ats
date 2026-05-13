@@ -4,6 +4,8 @@
 >
 > **対象読者**: 別エンジニアが Firestore 実装を担当する前提。
 > **本書のスコープ外**: 実装、UI 変更、SMS / メール本送信、新機能追加、コスト試算。
+>
+> **実装前の必読**: まず `docs/firestore-engineer-handoff.md` を読み、現在地・触ってよい境界・未決定論点を確認すること。Firestore / Firebase Auth / Cloud Storage の実装本体は別エンジニア担当であり、この設計書は実装指示ではなく引き継ぎ資料である。
 
 ---
 
@@ -297,16 +299,18 @@
 
 ---
 
-## 5. Repository 化の残タスク (Firestore 移行前に注意)
+## 5. Repository 化の完了状態と Firestore 移行前の注意
 
-設定系画面の `updateClientData` 直叩きは **Phase N-1〜N-10 で全 10 画面の Repository 化が完了**。さらに O-3 で `AddApplicantModal.tsx` の duplicate flag 一括更新も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）も削除完了。O-5 で `src/utils/baseScope.ts` ファイル全体を撤去（残っていた `resolveJobs` / `resolveSources` の 2 callsite を inline 解決に置換）。残るのは AdminApp 系（Client 以外）の `storage.getClientData / saveClientData` 直叩きのみ。
+設定系画面の `updateClientData` 直叩きは **Phase N-1〜N-10 で全 10 画面の Repository 化が完了**。さらに O-3 で `AddApplicantModal.tsx` の duplicate flag 一括更新も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）も削除完了。O-5 で `src/utils/baseScope.ts` ファイル全体を撤去（残っていた `resolveJobs` / `resolveSources` の 2 callsite を inline 解決に置換）。O-6 で AdminApp / client 配下の `storage.{getClientData,saveClientData,deleteClientData}` 直叩きと raw `localStorage.{get,set,remove}Item('hireflow:client:...')` 直叩きも完全撤去済。Firestore 化前の Repository 境界整理は完了している。
 
-> **Phase N + O-1〜O-5 完了状態（2026-05-12）**:
+> **Phase N + O-1〜O-6 完了状態（2026-05-13）**:
 > - 10 設定画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済
 > - `AddApplicantModal.tsx` の duplicate flag 一括更新を `applicantRepository.markDuplicateByMatch` 経由化済（O-3）
 > - **`AuthContext.updateClientData` shim 本体を削除（O-4）**。interface / useCallback 実装 / context value から完全撤去。`filterDataByBase` / `loadClientData` / `reloadClientData` は維持
 > - **`updateClientData` のコード実装はコードベース全体で 0 件**（docs / JSDoc / inline コメントの historical mention のみ残置）
 > - O-1 で `src/utils/baseScope.ts` の dead 6 helper を削除、**O-5 で `baseScope.ts` ファイル自体を削除**（`resolveJobs` / `resolveSources` は AddApplicantModal / ApplicantDetail で inline 解決に置換、JobManagement.tsx と同じパターン）
+> - O-6a〜d で AdminApp の read-only / invoice CRUD / tenant copy / delete cascade を `clientDataRepository` / `invoiceRepository` / `clientLog.clearClientLogs` 経由に整理
+> - **`src/admin` / `src/client` 配下の `storage.*ClientData` と raw `localStorage.*hireflow:client` 直叩きは 0 件**
 
 ### 5.1 SlotRepository (✅ Phase K-1〜K-4 完了 — `README.md §11`)
 
@@ -393,14 +397,14 @@
 - O-4 で `AuthContext.updateClientData` shim 本体を削除。`AuthContextValue` interface / `useCallback` 実装 / `AuthContext.Provider value` の 3 箇所から完全撤去。`filterDataByBase` は `loadClientData` / `reloadClientData` で利用継続のため module-internal helper として残置。Firestore 化フェーズで AuthContext から子アカウント base 絞込ロジックが消える際に削除予定
 - O-5 で `src/utils/baseScope.ts` を撤去。`AddApplicantModal.tsx` / `ApplicantDetail.tsx` の 2 callsite を inline 解決（`clientData.jobsByBase?.[baseName] ?? clientData.jobs`）に置換。`JobManagement.tsx:55-61` と同じ既存パターン。新規 Repository API（`listForBase` 等）は導入せず、Firestore 化フェーズで render path 全体を async 書き換える際に Repository 経由化を一斉適用する方針
 
-### 5.4 AdminApp 系 (未着手)
+### 5.4 AdminApp 系 (Firestore 移行時に新設 / 分離するもの)
 
-| 直書き対象 | 必要 Repository | 備考 |
+| 対象 | 必要 Repository / Service | 備考 |
 |---|---|---|
 | `risotto:admin:accounts` | AdminAccountRepository | Firebase Auth + Firestore `/admins/{id}` で代替 |
 | `risotto:admin:operation_logs` | AdminLogRepository | hash chain は Cloud Functions 側で計算 |
 | `risotto:admin:media` | MediaIntegrationRepository | apiKey は KMS 暗号化必須 |
-| `localStorage.getItem('hireflow:client:${id}:data')` 直読み | (admin がクライアントデータをコピー / 移管する経路で発生) | テナント間データ移動 = Cloud Functions 専用 API に分離 |
+| テナント間データ移動 | Cloud Functions 専用 API | O-6c で UI 側の raw localStorage 直読みは撤去済。Firestore 化時は cross-tenant 操作を Cloud Functions に分離 |
 
 #### 5.4.1 ClientRepository の CRUD 補完 (Phase M — ✅ M-1〜M-8 すべて完了)
 

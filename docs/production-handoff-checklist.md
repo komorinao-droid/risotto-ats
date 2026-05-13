@@ -6,6 +6,8 @@
 
 本書は `src/repositories/firestore-design.md` (v1.6) と `src/repositories/README.md` / `src/services/auth/README.md` の上位インデックスとして機能する。詳細はそれぞれの本書を参照。
 
+> **実装引き継ぎ方針 (2026-05-13)**: Firestore / Firebase Auth / Cloud Storage の実装本体は別エンジニア担当。Claude 側ではここから先の Firebase SDK 導入・Firestore 実装・Auth 差し替えは開始しない。担当者は最初に `docs/firestore-engineer-handoff.md` を読むこと。
+
 ---
 
 ## 0. 30 秒サマリ
@@ -16,6 +18,7 @@
 - ClientRepository は Phase M-1〜M-8 完了（型 + LocalStorage CRUD 5 API + AccountSettings + BaseRepository + AdminApp 全 callsite + `clientOptions.incrementOptionUsage` + BaseManagement read-only 経路）。**クライアント系 `storage.getClients/saveClients` 直叩きはコードベースから完全消滅**。
 - Phase N-1〜N-10 で設定系 10 画面（Job / Source / EmailTemplate / Hearing / ReportSchedule / Exclusion / MediaCost / FilterCondition / Screening / Chatbot）が Repository 経由化済。さらに O-3 で `AddApplicantModal.tsx` の最後の `updateClientData` 実 callsite も `applicantRepository.markDuplicateByMatch` 経由化済。O-4 で `AuthContext.updateClientData` shim 本体（interface / useCallback / context value）を完全撤去。**`updateClientData` のコード実装はコードベース全体で 0 件**（docs / JSDoc / inline コメントの historical mention のみ残置）。
 - `src/repositories/firestore-design.md` (v1.6) が本番 DB 設計の唯一のソース。本書はその「実装着手側から見た作業順序」だけを抽出する。
+- Firestore 実装担当向けの最短導線は `docs/firestore-engineer-handoff.md` に分離済。ここには「触ってよいもの / 最初の PR では触らないもの / 未決定論点」を集約している。
 
 ---
 
@@ -179,16 +182,17 @@ Phase N 完了で設定 10 画面の Repository 化は揃った。O-4 で `AuthC
 
 | 順 | ファイル | 読む目的 |
 |---|---|---|
-| 1 | **本書 (`docs/production-handoff-checklist.md`)** | 全体像・作業順 |
-| 2 | **`src/repositories/firestore-design.md`** | Collection / Index / Transaction / Migration / Security Rules / Cloud Storage の設計案 |
-| 3 | **`src/repositories/README.md`** | Repository 段階移行方針、画面 1 つずつ async 化のルール、transaction 候補一覧 |
-| 4 | **`src/repositories/types.ts`** | 全 Repository インターフェース定義。Firestore 実装が満たすべき契約 |
-| 5 | **`src/services/auth/README.md`** | AuthService 境界、SafeClient、本番認証への切替手順 |
-| 6 | **`src/services/auth/types.ts`** | AuthService インターフェース |
-| 7 | **`src/types/index.ts`** | データ型定義の正本 (`Applicant / ClientData / Client / InterviewEvent / SlotSetting / FileAttachment` 等) |
-| 8 | **`src/repositories/localStorage/*.ts`** | 既存 LocalStorage 実装 (Firestore 実装のロジック踏襲の参考) |
-| 9 | **`src/utils/applicantLifecycle.ts`** | `withStageChange / withCreatedMeta / withUpdatedMeta` の純関数群 |
-| 10 | **`src/contexts/AuthContext.tsx`** | 画面側がどう Repository / AuthService を呼んでいるかの実例 |
+| 1 | **`docs/firestore-engineer-handoff.md`** | 実装担当向けの現在地・着手境界・未決定論点 |
+| 2 | **本書 (`docs/production-handoff-checklist.md`)** | 全体像・作業順 |
+| 3 | **`src/repositories/firestore-design.md`** | Collection / Index / Transaction / Migration / Security Rules / Cloud Storage の設計案 |
+| 4 | **`src/repositories/README.md`** | Repository 段階移行方針、画面 1 つずつ async 化のルール、transaction 候補一覧 |
+| 5 | **`src/repositories/types.ts`** | 全 Repository インターフェース定義。Firestore 実装が満たすべき契約 |
+| 6 | **`src/services/auth/README.md`** | AuthService 境界、SafeClient、本番認証への切替手順 |
+| 7 | **`src/services/auth/types.ts`** | AuthService インターフェース |
+| 8 | **`src/types/index.ts`** | データ型定義の正本 (`Applicant / ClientData / Client / InterviewEvent / SlotSetting / FileAttachment` 等) |
+| 9 | **`src/repositories/localStorage/*.ts`** | 既存 LocalStorage 実装 (Firestore 実装のロジック踏襲の参考) |
+| 10 | **`src/utils/applicantLifecycle.ts`** | `withStageChange / withCreatedMeta / withUpdatedMeta` の純関数群 |
+| 11 | **`src/contexts/AuthContext.tsx`** | 画面側がどう Repository / AuthService を呼んでいるかの実例 |
 
 > **注**: 本書 → 設計書 → README → types の順で 60〜90 分程度を見込む。実装着手前に必ず通読すること。
 
