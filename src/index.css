@@ -1221,6 +1221,11 @@ button {
   .sidebar-hamburger {
     display: flex !important;
   }
+
+  /* モバイル時はハンバーガー(top:0.75rem + 2.5rem)に被らないよう main を下に押し下げる */
+  .client-main {
+    padding-top: 3rem;
+  }
 }
 
 /* 600px以下: テーブル横スクロール等 */

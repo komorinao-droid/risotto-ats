@@ -79,7 +79,7 @@ const AuthenticatedApp: React.FC = () => {
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar client={client} onLogout={logout} />
-      <main style={{ flex: 1, overflow: 'auto', backgroundColor: '#fff' }}>
+      <main className="client-main" style={{ flex: 1, overflow: 'auto', backgroundColor: '#fff' }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/applicants" element={<ApplicantList />} />

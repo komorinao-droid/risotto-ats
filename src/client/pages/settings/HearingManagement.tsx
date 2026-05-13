@@ -42,16 +42,31 @@ const HearingManagement: React.FC = () => {
     setSaveState('idle');
   }, [activeJob, hearingTemplates]);
 
+  const savedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const doSave = useCallback(
     (value: string) => {
       if (!ownerId || !activeJob) return;
       setSaveState('saving');
       hearingRepository.upsert(ownerId, activeJob, value);
       reloadClientData();
-      setTimeout(() => setSaveState('saved'), 300);
+      setTimeout(() => {
+        setSaveState('saved');
+        if (savedClearTimerRef.current) clearTimeout(savedClearTimerRef.current);
+        savedClearTimerRef.current = setTimeout(() => {
+          setSaveState((s) => (s === 'saved' ? 'idle' : s));
+        }, 2500);
+      }, 300);
     },
     [activeJob, ownerId, reloadClientData]
   );
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (savedClearTimerRef.current) clearTimeout(savedClearTimerRef.current);
+    };
+  }, []);
 
   const handleChange = (value: string) => {
     setTemplate(value);
@@ -87,11 +102,24 @@ const HearingManagement: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Job tabs */}
-          <div style={{ display: 'flex', gap: '0', borderBottom: '2px solid #e5e7eb', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          {/* Job tabs (モバイルでは横スクロール) */}
+          <div
+            role="tablist"
+            style={{
+              display: 'flex',
+              gap: '0',
+              borderBottom: '2px solid #e5e7eb',
+              marginBottom: '1rem',
+              flexWrap: 'nowrap',
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
             {jobs.map((j) => (
               <button
                 key={j.id}
+                role="tab"
+                aria-selected={activeJob === j.name}
                 onClick={() => setActiveJob(j.name)}
                 style={{
                   padding: '0.5rem 1.25rem',
@@ -103,6 +131,8 @@ const HearingManagement: React.FC = () => {
                   fontSize: '0.875rem',
                   fontWeight: activeJob === j.name ? 600 : 400,
                   color: activeJob === j.name ? '#3B82F6' : '#6b7280',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
                 {j.name}

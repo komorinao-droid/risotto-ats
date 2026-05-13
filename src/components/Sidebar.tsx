@@ -242,8 +242,13 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
     <>
       {/* モバイルハンバーガー */}
       <button
+        type="button"
         className="sidebar-hamburger"
         onClick={() => setMobileOpen(true)}
+        aria-label="メニューを開く"
+        aria-expanded={mobileOpen}
+        aria-controls="client-sidebar"
+        title="メニュー"
         style={{
           position: 'fixed',
           top: '0.75rem',
@@ -279,6 +284,7 @@ const Sidebar: React.FC<SidebarProps> = ({ client, onLogout }) => {
 
       {/* サイドバー */}
       <aside
+        id="client-sidebar"
         className={`sidebar ${mobileOpen ? 'sidebar--open' : ''}`}
         style={{
           width: '240px',
