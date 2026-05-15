@@ -10,6 +10,12 @@ import AddApplicantModal from '@/client/components/AddApplicantModal';
 import Modal from '@/components/Modal';
 import { formatShortDate } from '@/utils/date';
 import type { Applicant, InterviewEvent, PrefDateTime } from '@/types';
+import {
+  getApplicantAutomationStatusLabel,
+  getApplicantAutomationStatusTone,
+  getApplicantAutomationTagLabel,
+  getApplicantAutomationTagTone,
+} from '@/utils/applicantAutomation';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
 function normalizePrefDate(d: PrefDateTime | string): PrefDateTime {
@@ -28,6 +34,60 @@ function genderAvatarIcon(gender: string): string {
   if (gender === '男' || gender === '男性') return '♂';
   if (gender === '女' || gender === '女性') return '♀';
   return '○';
+}
+
+// ─── Automation badges (自動ステータス / 自動タグ) ───
+// 未設定かつタグなしの場合は何も描画しない。一覧の縦幅を増やさないために
+// 1 行に flex-wrap で並べる。スタイルは既存の pill 系に合わせる。
+function ApplicantAutomationBadges({ applicant }: { applicant: Applicant }) {
+  const status = applicant.automationStatus;
+  const tags = applicant.automationTags || [];
+  if (!status && tags.length === 0) return null;
+  const statusTone = getApplicantAutomationStatusTone(status);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
+      {status && (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: statusTone.bg,
+            color: statusTone.fg,
+            border: `1px solid ${statusTone.border}`,
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            padding: '0.0625rem 0.375rem',
+            borderRadius: '4px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          自動: {getApplicantAutomationStatusLabel(status)}
+        </span>
+      )}
+      {tags.map((tag) => {
+        const tone = getApplicantAutomationTagTone(tag);
+        return (
+          <span
+            key={tag}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: tone.bg,
+              color: tone.fg,
+              border: `1px solid ${tone.border}`,
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              padding: '0.0625rem 0.375rem',
+              borderRadius: '4px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {getApplicantAutomationTagLabel(tag)}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── CSV helpers ───
@@ -1019,6 +1079,7 @@ const ApplicantList: React.FC = () => {
                               {a.furigana}
                             </div>
                           )}
+                          <ApplicantAutomationBadges applicant={a} />
                         </div>
                       </div>
                     </td>
@@ -1276,6 +1337,7 @@ const ApplicantList: React.FC = () => {
                     {a.stage}
                   </span>
                 </div>
+                <ApplicantAutomationBadges applicant={a} />
                 <div
                   style={{
                     display: 'grid',
@@ -1283,6 +1345,7 @@ const ApplicantList: React.FC = () => {
                     gap: '0.25rem 1rem',
                     fontSize: '0.75rem',
                     color: '#6b7280',
+                    marginTop: '0.25rem',
                   }}
                 >
                   <div>応募日: {formatShortDate(a.date)}</div>

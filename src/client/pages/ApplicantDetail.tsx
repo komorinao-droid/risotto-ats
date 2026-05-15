@@ -15,6 +15,12 @@ import { normalizeFurigana } from '@/utils/furigana';
 import { warekiToDate, dateToWareki } from '@/utils/wareki';
 import { calcAge, formatDateJP, today, dayOfWeekJP } from '@/utils/date';
 import type { Applicant, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
+import {
+  getApplicantAutomationStatusLabel,
+  getApplicantAutomationStatusTone,
+  getApplicantAutomationTagLabel,
+  getApplicantAutomationTagTone,
+} from '@/utils/applicantAutomation';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
 function normalizePrefDate(d: PrefDateTime | string): PrefDateTime {
@@ -1112,6 +1118,59 @@ const InfoTab: React.FC<InfoTabProps> = ({
                 {baseChangeWarning}
               </div>
             )}
+
+            {/* 自動ステータス / 自動タグ（手動 stage とは別軸） */}
+            {(() => {
+              const autoStatus = applicant.automationStatus;
+              const autoTags = applicant.automationTags || [];
+              const statusTone = getApplicantAutomationStatusTone(autoStatus);
+              return (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                  <span style={{ ...tableLabelStyle, fontWeight: 600, paddingTop: '0.1875rem' }}>自動ステータス</span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '0.1875rem 0.625rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      backgroundColor: statusTone.bg,
+                      color: statusTone.fg,
+                      border: `1px solid ${statusTone.border}`,
+                    }}
+                  >
+                    {getApplicantAutomationStatusLabel(autoStatus)}
+                  </span>
+                  {autoTags.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.6875rem', color: '#9CA3AF', fontWeight: 500 }}>タグ:</span>
+                      {autoTags.map((tag) => {
+                        const tone = getApplicantAutomationTagTone(tag);
+                        return (
+                          <span
+                            key={tag}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0.125rem 0.5rem',
+                              borderRadius: '4px',
+                              fontSize: '0.6875rem',
+                              fontWeight: 600,
+                              backgroundColor: tone.bg,
+                              color: tone.fg,
+                              border: `1px solid ${tone.border}`,
+                            }}
+                          >
+                            {getApplicantAutomationTagLabel(tag)}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Info table */}
             <div>

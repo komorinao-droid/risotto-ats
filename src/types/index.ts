@@ -153,7 +153,55 @@ export interface Applicant {
   consentStatus?: 'pending' | 'agreed' | 'withdrawn';
   /** データ保持期限 (ISO 8601 / 日付のみ)。経過後は削除候補。 */
   dataRetentionUntil?: string;
+
+  // ============================================================
+  // 自動フロー用メタ情報（手動 stage とは別軸、全て optional・後方互換）
+  //  - automationStatus: 「今どの自動フロー状態にいるか」原則1つ
+  //  - automationTags: 例外理由・分岐理由・エラー理由の0個以上
+  // 自動付与ロジックは別フェーズで追加予定。本フェーズでは型と表示のみ。
+  // ============================================================
+  /** 自動フロー上の現状況。未設定なら表示上「未設定」扱い。 */
+  automationStatus?: ApplicantAutomationStatus;
+  /** 自動フロー上の例外理由 / 分岐理由 / エラー理由。0 個以上。 */
+  automationTags?: ApplicantAutomationTag[];
 }
+
+/**
+ * 応募者の自動ステータス（手動 stage とは別軸）。
+ *
+ * - 「今どの自動フロー状態にいるか」を表す
+ * - 原則 1 つ。Applicant.automationStatus に保持
+ * - 表示ラベルは src/utils/applicantAutomation.ts を参照
+ */
+export type ApplicantAutomationStatus =
+  | 'schedule_not_sent'
+  | 'scheduling'
+  | 'questions_answered_no_schedule'
+  | 'preferred_dates_collected'
+  | 'interview_pending_confirmation'
+  | 'interview_confirmed'
+  | 'interview_completed'
+  | 'no_response'
+  | 'following_up'
+  | 'interview_no_show'
+  | 'filled_received'
+  | 'excluded';
+
+/**
+ * 応募者の自動タグ（例外理由・分岐理由・エラー理由）。
+ *
+ * - 通常フローでは tags が空でもよい
+ * - Applicant.automationTags に 0 個以上保持
+ * - 表示ラベルは src/utils/applicantAutomation.ts を参照
+ */
+export type ApplicantAutomationTag =
+  | 'invalid_contact'
+  | 'condition_mismatch'
+  | 'outside_interview_slots'
+  | 'excluded_list_match'
+  | 'filled_opening_application'
+  | 'email_send_failed'
+  | 'chat_send_failed';
 
 /**
  * ステージ変更1件分のスナップショット。
