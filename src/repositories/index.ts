@@ -31,6 +31,7 @@ import { LocalStorageFilterConditionRepository } from './localStorage/filterCond
 import { LocalStorageScreeningRepository } from './localStorage/screeningRepository';
 import { LocalStorageChatbotRepository } from './localStorage/chatbotRepository';
 import { LocalStorageInvoiceRepository } from './localStorage/invoiceRepository';
+import { LocalStorageRecruitmentOpeningRepository } from './localStorage/recruitmentOpeningRepository';
 import type { Client } from '@/types';
 
 export const clientRepository = new LocalStorageClientRepository();
@@ -52,6 +53,7 @@ export const filterConditionRepository = new LocalStorageFilterConditionReposito
 export const screeningRepository = new LocalStorageScreeningRepository();
 export const chatbotRepository = new LocalStorageChatbotRepository();
 export const invoiceRepository = new LocalStorageInvoiceRepository();
+export const recruitmentOpeningRepository = new LocalStorageRecruitmentOpeningRepository();
 
 /**
  * 子アカウントの場合は親clientId に変換するヘルパ。
@@ -91,6 +93,7 @@ export type {
   ScreeningRepository,
   ChatbotRepository,
   InvoiceRepository,
+  RecruitmentOpeningRepository,
   DeleteBaseCascadeResult,
   BulkStageChangePatch,
   BulkStageChangeOptions,

@@ -82,7 +82,7 @@ export class LocalStorageJobRepository implements JobRepository {
     const target = this.pickLayer(data, baseName);
     const job = target.find((j) => j.id === jobId);
     if (!job) {
-      return { removed: false, clearedApplicantJobCount: 0 };
+      return { removed: false, clearedApplicantJobCount: 0, removedRecruitmentOpeningCount: 0 };
     }
 
     const nextLayer = target.filter((j) => j.id !== jobId);
@@ -96,14 +96,28 @@ export class LocalStorageJobRepository implements JobRepository {
       return { ...a, job: '' };
     });
 
+    // recruitmentOpenings から jobName 一致を除去 (Step 1, 2026-05 追加)
+    //  - applicantBaseFilter 指定時はその base 一致のみ対象（applicants クリアと同じスコープ）
+    //  - 未指定時は全 base 横断
+    const recruitmentOpenings = data.recruitmentOpenings ?? [];
+    const nextRecruitmentOpenings = recruitmentOpenings.filter((o) => {
+      if (o.jobName !== job.name) return true;
+      if (applicantBaseFilter !== undefined && o.baseName !== applicantBaseFilter) return true;
+      return false;
+    });
+    const removedRecruitmentOpeningCount =
+      recruitmentOpenings.length - nextRecruitmentOpenings.length;
+
     const nextData = this.writeLayer(data, nextLayer, baseName);
     nextData.applicants = nextApplicants;
+    nextData.recruitmentOpenings = nextRecruitmentOpenings;
     storage.saveClientData(clientId, nextData);
 
     return {
       removed: true,
       removedJobName: job.name,
       clearedApplicantJobCount,
+      removedRecruitmentOpeningCount,
     };
   }
 

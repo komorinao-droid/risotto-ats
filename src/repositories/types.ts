@@ -10,7 +10,7 @@
  *  - 将来 Firestore 等に切り替える際は Promise<T> に揃えるが、その時点でまとめて async/await 化する
  *  - 段階移行のため、まずは AuthContext と RecruitmentReport の参照箇所だけが利用する
  */
-import type { Applicant, Base, ChatLeadSetting, ChatQuestionGroup, ChatScenario, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, InvoiceLog, Job, MessageLog, MessageStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
+import type { Applicant, Base, ChatLeadSetting, ChatQuestionGroup, ChatScenario, Client, ClientData, EmailTemplate, ExclusionEntry, FilterCondition, HearingTemplate, InterviewEvent, InvoiceLog, Job, MessageLog, MessageStatus, RecruitmentOpening, RecruitmentOpeningStatus, ReportScheduleSetting, ScreeningCriteria, SlotSetting, Source, StageChangeReason, Status } from '@/types';
 import type { StageChangeOptions } from '@/utils/applicantLifecycle';
 
 /**
@@ -761,6 +761,8 @@ export interface DeleteBaseCascadeResult {
   removedFilterCondition: boolean;
   /** child アカウント (accountType === 'child' && parentId === clientId && baseName === removedBaseName) の baseName をクリアした件数 */
   detachedChildAccountCount: number;
+  /** recruitmentOpenings から baseName 一致を削除した件数 (Step 1, 2026-05 追加) */
+  removedRecruitmentOpeningCount: number;
 }
 
 /**
@@ -899,6 +901,12 @@ export interface DeleteJobCascadeResult {
   removedJobName?: string;
   /** applicants[].job === removedJobName を '' にクリアした件数 */
   clearedApplicantJobCount: number;
+  /**
+   * recruitmentOpenings から jobName 一致を削除した件数 (Step 1, 2026-05 追加)。
+   *  - opts.applicantBaseFilter 指定時はその base 一致のみ対象
+   *  - 未指定時は全 base 横断（applicants クリアと同じスコープ）
+   */
+  removedRecruitmentOpeningCount: number;
 }
 
 /** `JobRepository.removeBaseOverride` の戻り値（Phase N-1 で追加）。 */
@@ -1852,4 +1860,101 @@ export interface InvoiceRepository {
    *  - 戻り値は永続化後の配列の deep copy。
    */
   bulkUpsert(clientId: string, invoices: InvoiceLog[]): InvoiceLog[];
+}
+
+/**
+ * 拠点×職種 募集状況 (RecruitmentOpening) Repository（2026-05 追加, Step 1）。
+ *
+ * 目的:
+ *  - 拠点×職種 単位で `open / filled` を管理する
+ *  - Step 1 では「状態の保存・読み出し・拠点/職種削除時のカスケード」のみ提供
+ *  - Step 2 以降で `isOpeningFilled` ヘルパ経由で応募 intake / メール / 面接予約 / チャットボットの分岐に接続予定
+ *
+ * 設計方針:
+ *  - id は `${baseSlug}__${jobSlug}` の natural key（`makeOpeningId` で生成）
+ *      → LocalStorage / Firestore で同じ id を共有し移行コストを下げる
+ *      → (baseName, jobName) ユニーク制約を id レベルで強制
+ *  - 未登録の組み合わせは `'open'` 扱い（呼び出し側の null チェック不要）
+ *  - rename カスケードは Step 1 では実装しない（既存 baseRepository.update /
+ *    jobRepository.update も rename 追従しないため、`recruitmentOpenings` のみ追従させると
+ *    `applicants[].base` / `jobsByBase` などとの整合が崩れる。Step 1 ではドキュメント化のみ）
+ *  - delete カスケードは baseRepository.deleteWithCascade / jobRepository.deleteWithCascade
+ *    から呼び出される removeForBase / removeForJob を提供（1 saveClientData にまとめ込み済）
+ *
+ * Firestore マッピング (将来):
+ *  - clients/{clientId}/recruitmentOpenings/{openingId}
+ *  - openingId = makeOpeningId(baseName, jobName)
+ */
+export interface RecruitmentOpeningRepository {
+  /** 全 RecruitmentOpening を返す。順序は保存時のまま。未設定時は `[]`。 */
+  list(clientId: string): RecruitmentOpening[];
+  /**
+   * (baseName, jobName) ペアで 1 件取得。
+   *  - 厳密一致（slug 衝突を避けるため id ではなく baseName/jobName で照合）
+   *  - 該当なしは `undefined`
+   */
+  get(clientId: string, baseName: string, jobName: string): RecruitmentOpening | undefined;
+  /** id 一致で 1 件取得。該当なしは `undefined`。 */
+  getById(clientId: string, id: string): RecruitmentOpening | undefined;
+  /**
+   * (baseName, jobName) の status を返す。未登録なら `'open'`。
+   * 呼び出し側で null チェック不要にすることで、応募 intake / UI 表示で
+   * フォールバック分岐を 1 箇所に集約する。
+   */
+  getStatus(clientId: string, baseName: string, jobName: string): RecruitmentOpeningStatus;
+  /**
+   * 1 件 upsert する。
+   *  - id = makeOpeningId(baseName, jobName)
+   *  - 既存エントリ ((baseName, jobName) 一致) があれば patch + updatedAt 更新
+   *    - status === 'filled' に切り替わる遷移時のみ filledAt / filledBy を更新
+   *    - filledMessageTemplateId / note は input に含まれていれば上書き
+   *  - 既存無しなら createdAt + updatedAt を付与して append
+   *  - 戻り値は永続化後の RecruitmentOpening（呼び出し側で deep copy 不要）
+   */
+  setStatus(
+    clientId: string,
+    input: {
+      baseName: string;
+      jobName: string;
+      status: RecruitmentOpeningStatus;
+      filledMessageTemplateId?: number;
+      operator?: string;
+      note?: string;
+    },
+  ): RecruitmentOpening;
+  /**
+   * 複数件をまとめて upsert する。
+   *  - 1 saveClientData に集約する（拠点詳細ページの保存ボタン想定）
+   *  - 入力順は維持しないが、戻り値は入力と同じ順序で永続化後エントリを返す
+   *  - operator は filled 遷移時に filledBy として記録される
+   */
+  bulkSetStatus(
+    clientId: string,
+    inputs: Array<{
+      baseName: string;
+      jobName: string;
+      status: RecruitmentOpeningStatus;
+      filledMessageTemplateId?: number;
+      note?: string;
+    }>,
+    operator?: string,
+  ): RecruitmentOpening[];
+  /**
+   * 指定拠点に紐づく全 RecruitmentOpening を削除する。
+   *  - baseRepository.deleteWithCascade から呼ばれる用途を想定
+   *  - 該当 0 件の場合は `removed: 0` で saveClientData を呼ばない
+   *  - 戻り値の removed は削除件数
+   */
+  removeForBase(clientId: string, baseName: string): { removed: number };
+  /**
+   * 指定職種に紐づく RecruitmentOpening を削除する。
+   *  - jobRepository.deleteWithCascade から呼ばれる用途を想定
+   *  - opts.baseName 指定時はその拠点 + 職種一致のエントリのみ削除
+   *  - 該当 0 件の場合は `removed: 0` で saveClientData を呼ばない
+   */
+  removeForJob(
+    clientId: string,
+    jobName: string,
+    opts?: { baseName?: string },
+  ): { removed: number };
 }

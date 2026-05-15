@@ -278,6 +278,31 @@ export interface Job {
   color: string;
 }
 
+// 募集状況（拠点×職種ごと）
+export type RecruitmentOpeningStatus = 'open' | 'filled';
+
+/**
+ * 拠点×職種 単位の募集状況。
+ * 未登録の (baseName, jobName) は 'open' 扱い（呼び出し側でフォールバック）。
+ * id は makeOpeningId(baseName, jobName) で生成し Firestore doc id に流用する。
+ */
+export interface RecruitmentOpening {
+  /** `${baseSlug}__${jobSlug}` 形式の natural key */
+  id: string;
+  baseName: string;
+  jobName: string;
+  status: RecruitmentOpeningStatus;
+  /** 拠点×職種ごとに充足返信メールテンプレを差し替えたい場合（Step 3 で利用予定） */
+  filledMessageTemplateId?: number;
+  /** filled に切り替えた時刻 ISO 8601 */
+  filledAt?: string;
+  /** filled に切り替えた操作者表示名 */
+  filledBy?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // クライアント操作ログ
 export interface ClientOperationLog {
   id: string;
@@ -588,6 +613,12 @@ export interface ClientData {
   apiCallLogs?: ApiCallLog[];
   /** 月次請求書履歴（2026-05 追加） */
   invoices?: InvoiceLog[];
+  /**
+   * 拠点×職種ごとの募集状況 (2026-05 追加, Step 1)。
+   * 未登録の組み合わせは 'open' 扱い。
+   * id は `${baseSlug}__${jobSlug}` の natural key で重複を防ぐ。
+   */
+  recruitmentOpenings?: RecruitmentOpening[];
 }
 
 /** SMS送信1件の記録 */

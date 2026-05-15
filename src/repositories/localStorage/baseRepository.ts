@@ -101,12 +101,13 @@ export class LocalStorageBaseRepository implements BaseRepository {
         removedEmailTemplatesByBase: false,
         removedFilterCondition: false,
         detachedChildAccountCount: 0,
+        removedRecruitmentOpeningCount: 0,
       };
     }
 
     const baseName = target.name;
 
-    // ── ClientData 側 7 配列を 1 saveClientData にまとめる ──
+    // ── ClientData 側 8 配列を 1 saveClientData にまとめる (Step 1 で recruitmentOpenings 追加) ──
     const nextBases = list.filter((b) => b.id !== baseId);
 
     // applicants[].base === baseName を '' にクリア（updatedAt は touch しない）
@@ -150,6 +151,12 @@ export class LocalStorageBaseRepository implements BaseRepository {
     const nextFilterConditions = { ...filterConditions };
     delete nextFilterConditions[baseName];
 
+    // recruitmentOpenings から baseName 一致を除去 (Step 1, 2026-05 追加)
+    const recruitmentOpenings = data.recruitmentOpenings ?? [];
+    const nextRecruitmentOpenings = recruitmentOpenings.filter((o) => o.baseName !== baseName);
+    const removedRecruitmentOpeningCount =
+      recruitmentOpenings.length - nextRecruitmentOpenings.length;
+
     storage.saveClientData(clientId, {
       ...data,
       bases: nextBases,
@@ -160,6 +167,7 @@ export class LocalStorageBaseRepository implements BaseRepository {
       sourcesByBase: nextSourcesByBase,
       emailTemplatesByBase: nextEmailTemplatesByBase,
       filterConditions: nextFilterConditions,
+      recruitmentOpenings: nextRecruitmentOpenings,
     });
 
     // ── 別 storage: 子アカウント baseName のクリア ──
@@ -182,6 +190,7 @@ export class LocalStorageBaseRepository implements BaseRepository {
       removedEmailTemplatesByBase,
       removedFilterCondition,
       detachedChildAccountCount,
+      removedRecruitmentOpeningCount,
     };
   }
 }
