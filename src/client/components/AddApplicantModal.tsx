@@ -7,6 +7,8 @@ import { warekiToDate } from '@/utils/wareki';
 import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
 import { applicantRepository, resolveDataOwnerId } from '@/repositories';
+import { isOpeningFilled } from '@/utils/recruitmentOpening';
+import { withAutomationTag } from '@/utils/applicantAutomation';
 import type { Applicant, ClientData } from '@/types';
 
 interface AddApplicantModalProps {
@@ -304,7 +306,17 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         { name: applicant.name, phone: applicant.phone },
         { baseName: scopeBase },
       );
-      applicantRepository.create(ownerId, applicant);
+      // 拠点×職種が「充足 (filled)」の場合は応募者を保存しつつ自動ステータス/タグを付与する。
+      // 手動 stage / 重複判定 / 除外判定はここでは上書きしない（Step 2-α 仕様）。
+      const filled = isOpeningFilled(clientData, applicant.base, applicant.job);
+      const applicantToCreate: Applicant = filled
+        ? {
+            ...applicant,
+            automationStatus: 'filled_received',
+            automationTags: withAutomationTag(applicant.automationTags, 'filled_opening_application'),
+          }
+        : applicant;
+      applicantRepository.create(ownerId, applicantToCreate);
       reloadClientData();
     }
     logAction('applicant', '応募者追加', applicant.name || '(名前なし)', applicant.job || undefined);

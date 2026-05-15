@@ -45,3 +45,31 @@ export function makeOpeningId(baseName: string, jobName: string): string {
   const encode = (value: string) => encodeURIComponent(value.trim().toLowerCase());
   return `${encode(baseName)}__${encode(jobName)}`;
 }
+
+/**
+ * 拠点×職種が「充足 (filled)」かを判定する pure helper (2026-05 Step 2 で追加)。
+ *
+ * 採用方針:
+ *  - ClientData だけを引数に取り、Repository を呼ばない pure 関数
+ *  - 手動応募追加 / CSV / 将来のチャットボット / Webhook で同じ判定式を再利用するための共通入口
+ *  - 引数欠落時 (clientData / baseName / jobName のいずれかが空) は false を返す
+ *    → 「未設定 → open 扱い」と等価。呼び出し側の null チェックを不要にする
+ *  - 完全一致のみ (前後空白除去や case insensitive はしない)
+ *    既存 `recruitmentOpenings[].baseName/jobName` は Base / Job の name と
+ *    そのまま一致するように保存されており、Applicant.base / Applicant.job も同じ文字列を持つ前提
+ */
+import type { ClientData } from '../types';
+
+export function isOpeningFilled(
+  clientData: ClientData | null | undefined,
+  baseName: string | undefined,
+  jobName: string | undefined,
+): boolean {
+  if (!clientData || !baseName || !jobName) return false;
+  return (clientData.recruitmentOpenings ?? []).some(
+    (opening) =>
+      opening.baseName === baseName &&
+      opening.jobName === jobName &&
+      opening.status === 'filled',
+  );
+}

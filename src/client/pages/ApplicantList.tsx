@@ -15,7 +15,9 @@ import {
   getApplicantAutomationStatusTone,
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
+  withAutomationTag,
 } from '@/utils/applicantAutomation';
+import { isOpeningFilled } from '@/utils/recruitmentOpening';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
 function normalizePrefDate(d: PrefDateTime | string): PrefDateTime {
@@ -589,13 +591,24 @@ const ApplicantList: React.FC = () => {
       // stage が CSV で明示されていた行のみ initialStageReason='csv_import' を渡し、
       // stageHistory に 1 件「初期 stage」エントリを残す。
       for (const item of pendingItems) {
+        // 拠点×職種が「充足 (filled)」の行は、保存はそのまま行いつつ
+        // automationStatus / automationTags を付与する (Step 2-α)。
+        // 既存 item.applicant は mutate せず、新しい object を作って create() に渡す。
+        const filled = isOpeningFilled(clientData, item.applicant.base, item.applicant.job);
+        const applicantToCreate: Applicant = filled
+          ? {
+              ...item.applicant,
+              automationStatus: 'filled_received',
+              automationTags: withAutomationTag(item.applicant.automationTags, 'filled_opening_application'),
+            }
+          : item.applicant;
         if (item.stageExplicit) {
-          applicantRepository.create(ownerId, item.applicant, {
+          applicantRepository.create(ownerId, applicantToCreate, {
             initialStageReason: 'csv_import',
             operator,
           });
         } else {
-          applicantRepository.create(ownerId, item.applicant);
+          applicantRepository.create(ownerId, applicantToCreate);
         }
       }
       reloadClientData();

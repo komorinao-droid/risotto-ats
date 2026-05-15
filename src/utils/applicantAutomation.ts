@@ -42,6 +42,24 @@ export function getApplicantAutomationTagLabel(tag: ApplicantAutomationTag): str
   return APPLICANT_AUTOMATION_TAG_LABELS[tag];
 }
 
+/**
+ * automationTags に新しいタグを追加するときの dedup helper (2026-05 Step 2-α)。
+ *
+ * - 既存タグの順序を保ったまま、末尾に新規タグを追加する
+ * - 既に同タグが含まれていれば配列はそのまま（重複追加しない）
+ * - 入力 `tags` を mutate しない。常に新しい配列を返す
+ *
+ * 用途:
+ *  - filled_received 付与時に filled_opening_application を 1 回だけ付ける
+ *  - 将来 excluded_list_match などを追加するときも同じ helper を使う
+ */
+export function withAutomationTag(
+  tags: ApplicantAutomationTag[] | undefined,
+  tag: ApplicantAutomationTag,
+): ApplicantAutomationTag[] {
+  return Array.from(new Set([...(tags ?? []), tag]));
+}
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;
