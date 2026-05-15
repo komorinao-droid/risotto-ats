@@ -1,8 +1,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { baseRepository, clientRepository, resolveDataOwnerId } from '@/repositories';
-import type { Base } from '@/types';
+import {
+  baseRepository,
+  clientRepository,
+  recruitmentOpeningRepository,
+  resolveDataOwnerId,
+} from '@/repositories';
+import type { Base, Job, RecruitmentOpeningStatus } from '@/types';
 import Modal from '@/components/Modal';
 import ColorPalette from '@/components/ColorPalette';
 import { COLORS } from '@/components/ColorPalette';
@@ -60,6 +65,192 @@ const DetailRow: React.FC<{ label: string; value: string }> = ({ label, value })
     <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: '#111827' }}>{value || '-'}</td>
   </tr>
 );
+
+// ── 職種別募集状況セクション (Step 1, 2026-05 追加) ──
+//   拠点詳細内で「拠点 × 職種」ごとに `募集中 / 充足` を切り替えるカード。
+//   応募フロー (AddApplicantModal / CSV / 面接予約 / チャットボット) には Step 1 では接続せず、
+//   状態の保存・読み出し・操作ログ記録のみを行う。
+const RecruitmentOpeningSection: React.FC<{ base: Base }> = ({ base }) => {
+  const { clientData, client, logAction, reloadClientData } = useAuth();
+
+  // 子アカウントは自拠点のみ編集可。親アカウントは全拠点編集可。
+  const editable = useMemo(() => {
+    if (!client) return false;
+    if (client.accountType === 'parent') return true;
+    // 子アカウント: 自拠点と一致する場合のみ編集可
+    return client.baseName === base.name;
+  }, [client, base.name]);
+
+  // 拠点の職種一覧（拠点別 override があれば優先）
+  const jobs: Job[] = useMemo(() => {
+    if (!clientData) return [];
+    return clientData.jobsByBase?.[base.name] ?? clientData.jobs ?? [];
+  }, [clientData, base.name]);
+
+  // 現状のステータスマップ（未登録は 'open' 扱い）
+  const initialMap = useMemo<Record<string, RecruitmentOpeningStatus>>(() => {
+    const map: Record<string, RecruitmentOpeningStatus> = {};
+    const openings = clientData?.recruitmentOpenings ?? [];
+    for (const j of jobs) {
+      const found = openings.find((o) => o.baseName === base.name && o.jobName === j.name);
+      map[j.name] = found?.status ?? 'open';
+    }
+    return map;
+  }, [clientData?.recruitmentOpenings, jobs, base.name]);
+
+  const [pending, setPending] = useState(initialMap);
+  const [saving, setSaving] = useState(false);
+
+  // initialMap が再生成されたら pending を同期（拠点切替 / リロード後）
+  useEffect(() => {
+    setPending(initialMap);
+  }, [initialMap]);
+
+  const dirty = useMemo(() => {
+    return jobs.some((j) => (pending[j.name] ?? 'open') !== (initialMap[j.name] ?? 'open'));
+  }, [jobs, pending, initialMap]);
+
+  // 「充足」ステータスが statuses に登録されているか
+  //  - Step 1 ではガイダンス表示のみ。自動作成はしない
+  //  - Step 2 で filled 応募者を「充足」ステータスに自動振り分けする予定
+  const hasFilledStatus = useMemo(() => {
+    return (clientData?.statuses ?? []).some((s) => s.name === '充足');
+  }, [clientData?.statuses]);
+
+  const handleSave = () => {
+    if (!client || !dirty || saving) return;
+    const ownerId = resolveDataOwnerId(client);
+    // 変更があった行のみ送る（無駄な書込を避ける）
+    const changedInputs = jobs
+      .filter((j) => (pending[j.name] ?? 'open') !== (initialMap[j.name] ?? 'open'))
+      .map((j) => ({
+        baseName: base.name,
+        jobName: j.name,
+        status: pending[j.name] ?? 'open',
+      }));
+    if (changedInputs.length === 0) return;
+    setSaving(true);
+    const operator = client.contactName || client.companyName;
+    recruitmentOpeningRepository.bulkSetStatus(ownerId, changedInputs, operator);
+    const summary = changedInputs
+      .map((c) => `${c.jobName}: ${c.status === 'filled' ? '充足' : '募集中'}`)
+      .join(' / ');
+    logAction('setting', '募集状況変更', base.name, summary);
+    reloadClientData();
+    setSaving(false);
+  };
+
+  const handleReset = () => {
+    setPending(initialMap);
+  };
+
+  if (jobs.length === 0) {
+    return (
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginTop: '1rem' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb' }}>
+          <span style={{ fontWeight: 600, fontSize: '1rem' }}>職種別募集状況</span>
+        </div>
+        <div style={{ padding: '1rem 1.25rem', fontSize: '0.875rem', color: '#9ca3af' }}>
+          職種が登録されていません。先に「職種管理」から職種を追加してください。
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', marginTop: '1rem' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div>
+          <span style={{ fontWeight: 600, fontSize: '1rem' }}>職種別募集状況</span>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+            この拠点で募集中か充足かを職種ごとに管理します。応募フローへの自動反映は今後のアップデートで追加されます。
+          </div>
+        </div>
+        {editable && (
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={handleReset}
+              disabled={!dirty || saving}
+              style={{ ...btnStyle('#374151', '#F3F4F6'), opacity: !dirty || saving ? 0.5 : 1, cursor: !dirty || saving ? 'not-allowed' : 'pointer' }}
+            >
+              戻す
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              style={{ ...btnStyle('#fff', '#3B82F6'), opacity: !dirty || saving ? 0.5 : 1, cursor: !dirty || saving ? 'not-allowed' : 'pointer' }}
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        )}
+      </div>
+      {!editable && (
+        <div style={{ padding: '0.5rem 1.25rem', backgroundColor: '#F3F4F6', fontSize: '0.75rem', color: '#4B5563' }}>
+          閲覧のみ可能です（編集は本部アカウントまたは自拠点の子アカウントから）。
+        </div>
+      )}
+      {!hasFilledStatus && (
+        <div style={{ padding: '0.625rem 1.25rem', backgroundColor: '#FFF7ED', borderBottom: '1px solid #FED7AA', fontSize: '0.75rem', color: '#9A3412' }}>
+          ヒント: 「ステータス管理」に <strong>「充足」</strong> ステータスを追加しておくと、今後のアップデートで充足拠点への応募が自動でこのステータスに振り分けられます。
+        </div>
+      )}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '420px' }}>
+          <thead>
+            <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #e5e7eb' }}>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>職種</th>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>状況</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => {
+              const current = pending[j.name] ?? 'open';
+              return (
+                <tr key={j.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: '#111827', display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
+                    <div style={{ width: '0.75rem', height: '0.75rem', borderRadius: '50%', backgroundColor: j.color || '#9ca3af', flexShrink: 0 }} />
+                    {j.name}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
+                      {([
+                        { value: 'open' as const, label: '募集中', activeBg: '#3B82F6', activeColor: '#fff' },
+                        { value: 'filled' as const, label: '充足', activeBg: '#DC2626', activeColor: '#fff' },
+                      ]).map((opt) => {
+                        const active = current === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => editable && setPending((p) => ({ ...p, [j.name]: opt.value }))}
+                            disabled={!editable}
+                            aria-pressed={active}
+                            style={{
+                              padding: '0.375rem 0.875rem',
+                              border: 'none',
+                              backgroundColor: active ? opt.activeBg : '#fff',
+                              color: active ? opt.activeColor : '#6b7280',
+                              fontSize: '0.8125rem',
+                              fontWeight: active ? 600 : 400,
+                              cursor: editable ? 'pointer' : 'not-allowed',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
 
 // ── 詳細ページ ──
 const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) => void; onDelete: (id: number) => void; onNavigate: (path: string) => void; canMutate: boolean }> = ({ base, onBack, onEdit, onDelete, onNavigate, canMutate }) => (
@@ -119,6 +310,8 @@ const BaseDetail: React.FC<{ base: Base; onBack: () => void; onEdit: (b: Base) =
         </tbody>
       </table>
     </div>
+
+    <RecruitmentOpeningSection base={base} />
 
   </div>
 );
