@@ -308,6 +308,79 @@ export function isFilterConditionMismatch(
   return findConditionMismatches(clientData, applicant).length > 0;
 }
 
+/**
+ * 反応なし候補の判定結果 (2026-05 Step 6-B)。
+ *
+ * - 表示専用の derived state。応募者の `automationStatus` は書き換えない。
+ * - 自動付与 / 自動更新は本フェーズでは行わない。
+ */
+export type NoResponseCandidateResult = {
+  isCandidate: boolean;
+  daysSinceLastContact: number | null;
+  thresholdDays: number;
+  lastContactedAt: string | null;
+};
+
+/**
+ * 応募者の「最終連絡日時」を返す (Step 6-B)。
+ * - `lastContactedAt` を優先、なければ `firstContactedAt` にフォールバック
+ * - どちらも空 / 未設定なら null
+ */
+export function getApplicantLastContactedAt(
+  applicant: Pick<Applicant, 'lastContactedAt' | 'firstContactedAt'>,
+): string | null {
+  return applicant.lastContactedAt || applicant.firstContactedAt || null;
+}
+
+/**
+ * 「反応なし候補」かどうかを判定する (Step 6-B)。
+ *
+ * 判定ルール（短絡）:
+ *  - automationStatus が filled_received / excluded / no_response / following_up → false
+ *  - lastContactedAt / firstContactedAt がない → false
+ *  - 日時パース失敗 → false
+ *  - now - lastContactedAt が thresholdDays 未満 → false
+ *  - thresholdDays 以上 → true
+ *
+ * 戻り値の `daysSinceLastContact` は連絡日時が解釈可能な場合のみ
+ * `Math.floor(ms / 86400000)` で日数化する（負数は 0 にクランプ）。
+ */
+export function getNoResponseCandidate(
+  applicant: Pick<Applicant, 'automationStatus' | 'lastContactedAt' | 'firstContactedAt'>,
+  thresholdDays: number,
+  now: Date = new Date(),
+): NoResponseCandidateResult {
+  const lastContactedAt = getApplicantLastContactedAt(applicant);
+  const base: NoResponseCandidateResult = {
+    isCandidate: false,
+    daysSinceLastContact: null,
+    thresholdDays,
+    lastContactedAt,
+  };
+
+  const status = applicant.automationStatus;
+  if (
+    status === 'filled_received' ||
+    status === 'excluded' ||
+    status === 'no_response' ||
+    status === 'following_up'
+  ) {
+    return base;
+  }
+
+  if (!lastContactedAt) return base;
+  const ts = Date.parse(lastContactedAt);
+  if (Number.isNaN(ts)) return base;
+
+  const diffMs = now.getTime() - ts;
+  const days = diffMs < 0 ? 0 : Math.floor(diffMs / 86400000);
+  return {
+    ...base,
+    daysSinceLastContact: days,
+    isCandidate: days >= thresholdDays,
+  };
+}
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;

@@ -15,10 +15,12 @@ import {
   getApplicantAutomationStatusTone,
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
+  getNoResponseCandidate,
   isExcludedListMatch,
   isFilterConditionMismatch,
   withAutomationTag,
 } from '@/utils/applicantAutomation';
+import { getNoResponseThresholdDays } from '@/utils/clientAutomationSettings';
 import { isOpeningFilled } from '@/utils/recruitmentOpening';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
@@ -43,10 +45,18 @@ function genderAvatarIcon(gender: string): string {
 // ─── Automation badges (自動ステータス / 自動タグ) ───
 // 未設定かつタグなしの場合は何も描画しない。一覧の縦幅を増やさないために
 // 1 行に flex-wrap で並べる。スタイルは既存の pill 系に合わせる。
-function ApplicantAutomationBadges({ applicant }: { applicant: Applicant }) {
+function ApplicantAutomationBadges({
+  applicant,
+  thresholdDays,
+}: {
+  applicant: Applicant;
+  thresholdDays: number;
+}) {
   const status = applicant.automationStatus;
   const tags = applicant.automationTags || [];
-  if (!status && tags.length === 0) return null;
+  // 反応なし候補は表示専用の derived state。automationStatus は書き換えない。
+  const noResp = getNoResponseCandidate(applicant, thresholdDays);
+  if (!status && tags.length === 0 && !noResp.isCandidate) return null;
   const statusTone = getApplicantAutomationStatusTone(status);
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
@@ -90,6 +100,29 @@ function ApplicantAutomationBadges({ applicant }: { applicant: Applicant }) {
           </span>
         );
       })}
+      {noResp.isCandidate && (
+        <span
+          title={
+            noResp.daysSinceLastContact != null
+              ? `最終連絡から ${noResp.daysSinceLastContact}日経過 / 判定 ${noResp.thresholdDays}日`
+              : `判定日数 ${noResp.thresholdDays}日`
+          }
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            backgroundColor: '#FEF3C7',
+            color: '#92400E',
+            border: '1px solid #FDE68A',
+            fontSize: '0.625rem',
+            fontWeight: 600,
+            padding: '0.0625rem 0.375rem',
+            borderRadius: '4px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          反応なし候補
+        </span>
+      )}
     </div>
   );
 }
@@ -227,6 +260,8 @@ const IMPORT_FIELDS = [
 const ApplicantList: React.FC = () => {
   const navigate = useNavigate();
   const { clientData, reloadClientData, logAction, client } = useAuth();
+  // 反応なし候補のしきい値。client 設定未指定なら DEFAULT (3日)。
+  const noResponseThresholdDays = getNoResponseThresholdDays(client);
 
   // ─── State ───
   const [page, setPage] = useState(1);
@@ -1115,7 +1150,7 @@ const ApplicantList: React.FC = () => {
                               {a.furigana}
                             </div>
                           )}
-                          <ApplicantAutomationBadges applicant={a} />
+                          <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} />
                         </div>
                       </div>
                     </td>
@@ -1373,7 +1408,7 @@ const ApplicantList: React.FC = () => {
                     {a.stage}
                   </span>
                 </div>
-                <ApplicantAutomationBadges applicant={a} />
+                <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} />
                 <div
                   style={{
                     display: 'grid',

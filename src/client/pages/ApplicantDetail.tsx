@@ -26,7 +26,9 @@ import {
   getInterviewSchedulingBlockedReasonShort,
   findFulfillmentEmailTemplate,
   renderEmailTemplate,
+  getNoResponseCandidate,
 } from '@/utils/applicantAutomation';
+import { getNoResponseThresholdDays } from '@/utils/clientAutomationSettings';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
 function normalizePrefDate(d: PrefDateTime | string): PrefDateTime {
@@ -1333,6 +1335,35 @@ const InfoTab: React.FC<InfoTabProps> = ({
                       })}
                     </div>
                   )}
+                </div>
+              );
+            })()}
+
+            {/* 反応なし候補（Step 6-B、表示専用 derived state） */}
+            {(() => {
+              const thresholdDays = getNoResponseThresholdDays(client);
+              const noResp = getNoResponseCandidate(applicant, thresholdDays);
+              if (!noResp.isCandidate) return null;
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    backgroundColor: '#FEF3C7',
+                    border: '1px solid #FDE68A',
+                    color: '#92400E',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    marginBottom: '0.75rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>反応なし候補</span>
+                  <span>
+                    最終連絡から {noResp.daysSinceLastContact ?? '-'}日経過しています（判定日数: {noResp.thresholdDays}日）
+                  </span>
                 </div>
               );
             })()}
