@@ -3,7 +3,9 @@ import type {
   ApplicantAutomationStatus,
   ApplicantAutomationTag,
   Base,
+  ClientData,
   EmailTemplate,
+  ExclusionEntry,
 } from '@/types';
 
 /**
@@ -91,6 +93,129 @@ export const FILLED_RECEIVED_BLOCK_MESSAGE =
 /** disabled ボタンの title / aria-label 用の短い理由文。 */
 export const FILLED_RECEIVED_BLOCK_REASON_SHORT =
   '充足求人への応募のため面接予約できません';
+
+/**
+ * 除外リスト該当応募者かを判定する (2026-05 Step 4)。
+ *
+ * 用途:
+ *  - filled_received と同じく、通常の日程調整／面接予約導線を停止する
+ *  - 充足返信メールボタンは表示しない（excluded 専用導線は別フェーズ）
+ */
+export function isExcludedApplicant(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): boolean {
+  return applicant?.automationStatus === 'excluded';
+}
+
+/**
+ * 通常の日程調整／面接予約導線を停止すべき応募者かを判定する (2026-05 Step 4)。
+ *
+ * 現状: filled_received もしくは excluded で停止。
+ * 既存 `isFilledReceivedApplicant` は残しているが、面接予約停止の判定は本 helper に寄せる。
+ */
+export function isInterviewSchedulingBlockedApplicant(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): boolean {
+  return (
+    applicant?.automationStatus === 'filled_received' ||
+    applicant?.automationStatus === 'excluded'
+  );
+}
+
+/** 警告パネル本文。 */
+export const EXCLUDED_BLOCK_MESSAGE =
+  'この応募者は除外リストに該当するため、通常の日程調整は停止されています。';
+
+/** disabled ボタンの title / aria-label 用の短い理由文。 */
+export const EXCLUDED_BLOCK_REASON_SHORT = '除外リスト該当のため面接予約できません';
+
+/** 面接予約停止の理由文を automationStatus に応じて返す。 */
+export function getInterviewSchedulingBlockedMessage(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): string {
+  if (applicant?.automationStatus === 'excluded') return EXCLUDED_BLOCK_MESSAGE;
+  return FILLED_RECEIVED_BLOCK_MESSAGE;
+}
+
+/** disabled ボタンの短い理由文を automationStatus に応じて返す。 */
+export function getInterviewSchedulingBlockedReasonShort(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): string {
+  if (applicant?.automationStatus === 'excluded') return EXCLUDED_BLOCK_REASON_SHORT;
+  return FILLED_RECEIVED_BLOCK_REASON_SHORT;
+}
+
+/**
+ * 除外リスト一致判定 (2026-05 Step 4) — 共通 source-of-truth。
+ *
+ * 判定種別:
+ *  - email: 両側 trim + toLowerCase 後一致
+ *  - phone: 両側 `[-\s]` を除去後一致
+ *  - name_birth: name 完全一致 + birthDate 完全一致
+ *  - 値が空のエントリ / 応募者値が空の組合せは一致扱いしない
+ *
+ * 戻り値: 一致した ExclusionEntry とアラート表示用ラベルの配列。
+ *  - 0 件なら空配列
+ *  - alert 文言は既存 `AddApplicantModal.checkExclusion` の表記をそのまま採用
+ *
+ * 用途:
+ *  - `isExcludedListMatch` (boolean 版) のバックエンド
+ *  - 手動応募追加の alert メッセージ (`checkExclusion`)
+ *  - 自動ステータス／自動タグ自動付与 (AddApplicantModal / ApplicantList CSV)
+ *
+ * 重要: 判定ロジックは本 helper に集約する。複製しない。
+ */
+export interface ExclusionListMatch {
+  entry: ExclusionEntry;
+  label: string;
+}
+
+export function findExclusionListMatches(
+  clientData: ClientData | null | undefined,
+  applicant: Partial<Pick<Applicant, 'email' | 'phone' | 'name' | 'birthDate'>>,
+): ExclusionListMatch[] {
+  if (!clientData?.exclusionList?.length) return [];
+  const rawEmail = applicant.email || '';
+  const email = rawEmail.trim().toLowerCase();
+  const phone = (applicant.phone || '').replace(/[-\s]/g, '');
+  const name = applicant.name || '';
+  const birthDate = applicant.birthDate || '';
+
+  const matches: ExclusionListMatch[] = [];
+  for (const entry of clientData.exclusionList as ExclusionEntry[]) {
+    if (entry.type === 'email') {
+      if (!entry.email || !email) continue;
+      if (entry.email.trim().toLowerCase() === email) {
+        matches.push({ entry, label: `メール(${rawEmail})が除外リストに該当します` });
+      }
+    } else if (entry.type === 'phone') {
+      if (!entry.phone || !phone) continue;
+      if (entry.phone.replace(/[-\s]/g, '') === phone) {
+        matches.push({ entry, label: '電話番号が除外リストに該当します' });
+      }
+    } else {
+      // name_birth
+      if (!entry.name || !entry.birthDate || !name || !birthDate) continue;
+      if (entry.name === name && entry.birthDate === birthDate) {
+        matches.push({ entry, label: '氏名+生年月日が除外リストに該当します' });
+      }
+    }
+  }
+  return matches;
+}
+
+/**
+ * 除外リスト一致判定 (boolean 版)。
+ *
+ * `findExclusionListMatches` のラッパで、判定ロジックは複製しない。
+ * automationStatus 自動付与など、true/false のみ必要な箇所で使う。
+ */
+export function isExcludedListMatch(
+  clientData: ClientData | null | undefined,
+  applicant: Partial<Pick<Applicant, 'email' | 'phone' | 'name' | 'birthDate'>>,
+): boolean {
+  return findExclusionListMatches(clientData, applicant).length > 0;
+}
 
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {

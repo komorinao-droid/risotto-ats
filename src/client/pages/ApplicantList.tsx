@@ -15,6 +15,7 @@ import {
   getApplicantAutomationStatusTone,
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
+  isExcludedListMatch,
   withAutomationTag,
 } from '@/utils/applicantAutomation';
 import { isOpeningFilled } from '@/utils/recruitmentOpening';
@@ -591,11 +592,20 @@ const ApplicantList: React.FC = () => {
       // stage が CSV で明示されていた行のみ initialStageReason='csv_import' を渡し、
       // stageHistory に 1 件「初期 stage」エントリを残す。
       for (const item of pendingItems) {
-        // 拠点×職種が「充足 (filled)」の行は、保存はそのまま行いつつ
-        // automationStatus / automationTags を付与する (Step 2-α)。
+        // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4):
+        //   1. 除外リスト該当 → automationStatus = 'excluded' + tag 'excluded_list_match'
+        //   2. 充足求人応募   → automationStatus = 'filled_received' + tag 'filled_opening_application'
+        //   3. どちらでもない → 未設定
         // 既存 item.applicant は mutate せず、新しい object を作って create() に渡す。
-        const filled = isOpeningFilled(clientData, item.applicant.base, item.applicant.job);
-        const applicantToCreate: Applicant = filled
+        const excluded = isExcludedListMatch(clientData, item.applicant);
+        const filled = !excluded && isOpeningFilled(clientData, item.applicant.base, item.applicant.job);
+        const applicantToCreate: Applicant = excluded
+          ? {
+              ...item.applicant,
+              automationStatus: 'excluded',
+              automationTags: withAutomationTag(item.applicant.automationTags, 'excluded_list_match'),
+            }
+          : filled
           ? {
               ...item.applicant,
               automationStatus: 'filled_received',

@@ -8,7 +8,11 @@ import { normalizeFurigana, isKatakanaOnly } from '@/utils/furigana';
 import { today, calcAge } from '@/utils/date';
 import { applicantRepository, resolveDataOwnerId } from '@/repositories';
 import { isOpeningFilled } from '@/utils/recruitmentOpening';
-import { withAutomationTag } from '@/utils/applicantAutomation';
+import {
+  findExclusionListMatches,
+  isExcludedListMatch,
+  withAutomationTag,
+} from '@/utils/applicantAutomation';
 import type { Applicant, ClientData } from '@/types';
 
 interface AddApplicantModalProps {
@@ -183,25 +187,11 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
       }
     }
 
-    // Exclusion list check
-    const normalizedPhone = (applicant.phone || '').replace(/[-\s]/g, '');
-    for (const entry of data.exclusionList) {
-      if (entry.type === 'email' && entry.email && applicant.email) {
-        if (entry.email.toLowerCase() === applicant.email.toLowerCase()) {
-          alerts.push(`メール(${applicant.email})が除外リストに該当します`);
-        }
-      }
-      if (entry.type === 'phone' && entry.phone && normalizedPhone) {
-        if (entry.phone.replace(/[-\s]/g, '') === normalizedPhone) {
-          alerts.push(`電話番号が除外リストに該当します`);
-        }
-      }
-      if (entry.type === 'name_birth' && entry.name && entry.birthDate) {
-        const parsedBirth = warekiToDate(birthDateInput);
-        if (applicant.name === entry.name && parsedBirth === entry.birthDate) {
-          alerts.push(`氏名+生年月日が除外リストに該当します`);
-        }
-      }
+    // Exclusion list check — 共通 helper に集約 (Step 4)。
+    // `findExclusionListMatches` が email / phone / name_birth の判定 + 文言生成を一手に担う。
+    // 自動ステータス自動付与 (`isExcludedListMatch`) と CSV 取込側も同じ helper を使う。
+    for (const match of findExclusionListMatches(data, applicant)) {
+      alerts.push(match.label);
     }
 
     return alerts.length > 0 ? alerts.join('\n') : null;
@@ -306,10 +296,20 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         { name: applicant.name, phone: applicant.phone },
         { baseName: scopeBase },
       );
-      // 拠点×職種が「充足 (filled)」の場合は応募者を保存しつつ自動ステータス/タグを付与する。
-      // 手動 stage / 重複判定 / 除外判定はここでは上書きしない（Step 2-α 仕様）。
-      const filled = isOpeningFilled(clientData, applicant.base, applicant.job);
-      const applicantToCreate: Applicant = filled
+      // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4):
+      //   1. 除外リスト該当 → automationStatus = 'excluded' + tag 'excluded_list_match'
+      //   2. 充足求人応募   → automationStatus = 'filled_received' + tag 'filled_opening_application'
+      //   3. どちらでもない → 未設定
+      // 手動 stage / 重複判定 / 既存 alert 用 exclusionMsg はここでは上書きしない。
+      const excluded = isExcludedListMatch(clientData, applicant);
+      const filled = !excluded && isOpeningFilled(clientData, applicant.base, applicant.job);
+      const applicantToCreate: Applicant = excluded
+        ? {
+            ...applicant,
+            automationStatus: 'excluded',
+            automationTags: withAutomationTag(applicant.automationTags, 'excluded_list_match'),
+          }
+        : filled
         ? {
             ...applicant,
             automationStatus: 'filled_received',

@@ -21,8 +21,9 @@ import {
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
   isFilledReceivedApplicant,
-  FILLED_RECEIVED_BLOCK_MESSAGE,
-  FILLED_RECEIVED_BLOCK_REASON_SHORT,
+  isInterviewSchedulingBlockedApplicant,
+  getInterviewSchedulingBlockedMessage,
+  getInterviewSchedulingBlockedReasonShort,
   findFulfillmentEmailTemplate,
   renderEmailTemplate,
 } from '@/utils/applicantAutomation';
@@ -947,8 +948,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
   //  - client 未取得時は no-op
   function handleScheduled(event: InterviewEvent) {
     if (!client) return;
-    if (isFilledReceivedApplicant(applicant)) {
-      alert(FILLED_RECEIVED_BLOCK_MESSAGE);
+    if (isInterviewSchedulingBlockedApplicant(applicant)) {
+      alert(getInterviewSchedulingBlockedMessage(applicant));
       return;
     }
     const operator = getClientOperatorLabel(client);
@@ -983,8 +984,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
   //  - client 未取得時は no-op（更新不能状態でモーダルだけ開く事故を避ける）
   function handleReschedule(event: InterviewEvent) {
     if (!client) return;
-    if (isFilledReceivedApplicant(applicant)) {
-      alert(FILLED_RECEIVED_BLOCK_MESSAGE);
+    if (isInterviewSchedulingBlockedApplicant(applicant)) {
+      alert(getInterviewSchedulingBlockedMessage(applicant));
       return;
     }
     const ownerId = resolveDataOwnerId(client);
@@ -995,7 +996,15 @@ const InfoTab: React.FC<InfoTabProps> = ({
     setScheduleOpen(true);
   }
 
-  // 充足受付 (filled_received): 通常の日程調整／面接予約導線を停止する
+  // 通常の日程調整／面接予約導線を停止する条件 (Step 2-β + Step 4)
+  //   - filled_received: 充足求人への応募
+  //   - excluded: 除外リスト該当
+  // 文言は automationStatus に応じて切り替える (getInterviewSchedulingBlockedMessage)。
+  const isSchedulingBlocked = isInterviewSchedulingBlockedApplicant(applicant);
+  const blockedMessage = getInterviewSchedulingBlockedMessage(applicant);
+  const blockedReasonShort = getInterviewSchedulingBlockedReasonShort(applicant);
+
+  // 充足返信メールボタンは filled_received 専用 (excluded には表示しない)
   const isFilledReceived = isFilledReceivedApplicant(applicant);
 
   // 充足返信メール: 拠点別オーバーライドがあればそちらを優先、無ければ全社共通から選ぶ
@@ -1201,8 +1210,12 @@ const InfoTab: React.FC<InfoTabProps> = ({
               </div>
             )}
 
-            {/* 充足受付 (filled_received) の警告: 通常の日程調整／面接予約導線が停止していることを明示 */}
-            {isFilledReceived && (
+            {/* 通常の日程調整／面接予約導線が停止していることを明示 (Step 2-β + Step 4)。
+                  - filled_received: 充足求人への応募
+                  - excluded: 除外リスト該当
+                文言は automationStatus に応じて切り替える。
+                充足返信メールボタンは filled_received のみで表示する。 */}
+            {isSchedulingBlocked && (
               <div
                 role="alert"
                 style={{
@@ -1218,8 +1231,8 @@ const InfoTab: React.FC<InfoTabProps> = ({
                   gap: '0.5rem',
                 }}
               >
-                <div>{FILLED_RECEIVED_BLOCK_MESSAGE}</div>
-                {fulfillmentTemplate ? (
+                <div>{blockedMessage}</div>
+                {!isFilledReceived ? null : fulfillmentTemplate ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <button
                       onClick={openFulfillmentMail}
@@ -1497,14 +1510,14 @@ const InfoTab: React.FC<InfoTabProps> = ({
             <h3 style={cardTitleStyle}>面接情報</h3>
             <button
               onClick={() => { setScheduleDate(''); setScheduleTime(''); setScheduleOpen(true); }}
-              disabled={isFilledReceived}
-              title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
-              aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+              disabled={isSchedulingBlocked}
+              title={isSchedulingBlocked ? blockedReasonShort : undefined}
+              aria-label={isSchedulingBlocked ? blockedReasonShort : undefined}
               style={{
                 ...btnOrange,
                 fontSize: '0.75rem',
                 padding: '0.25rem 0.625rem',
-                ...(isFilledReceived
+                ...(isSchedulingBlocked
                   ? { backgroundColor: '#E5E7EB', color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.7 }
                   : {}),
               }}
@@ -1624,14 +1637,14 @@ const InfoTab: React.FC<InfoTabProps> = ({
                     <div style={{ display: 'flex', gap: '0.25rem' }}>
                       <button
                         onClick={() => handleReschedule(ev)}
-                        disabled={isFilledReceived}
-                        title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
-                        aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+                        disabled={isSchedulingBlocked}
+                        title={isSchedulingBlocked ? blockedReasonShort : undefined}
+                        aria-label={isSchedulingBlocked ? blockedReasonShort : undefined}
                         style={{
                           ...btnSecondary,
                           fontSize: '0.6875rem',
                           padding: '0.125rem 0.375rem',
-                          ...(isFilledReceived
+                          ...(isSchedulingBlocked
                             ? { color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.6 }
                             : {}),
                         }}
@@ -1663,9 +1676,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
                       <button
                         key={i}
                         onClick={() => { setScheduleDate(d.date); setScheduleTime(d.time); setScheduleOpen(true); }}
-                        disabled={isFilledReceived}
-                        title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
-                        aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+                        disabled={isSchedulingBlocked}
+                        title={isSchedulingBlocked ? blockedReasonShort : undefined}
+                        aria-label={isSchedulingBlocked ? blockedReasonShort : undefined}
                         style={{
                           ...btnSecondary,
                           fontSize: '0.6875rem',
@@ -1673,12 +1686,12 @@ const InfoTab: React.FC<InfoTabProps> = ({
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.25rem',
-                          ...(isFilledReceived
+                          ...(isSchedulingBlocked
                             ? { color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.6 }
                             : {}),
                         }}
                       >
-                        <span style={{ color: isFilledReceived ? '#9CA3AF' : '#F97316', fontWeight: 600 }}>+</span>
+                        <span style={{ color: isSchedulingBlocked ? '#9CA3AF' : '#F97316', fontWeight: 600 }}>+</span>
                         {formatDateJP(d.date) || d.date}{d.time ? ` ${d.time}` : ''}
                       </button>
                     );
