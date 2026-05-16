@@ -52,6 +52,12 @@ import type { Client, ClientData, ClientPermissions, ClientOperationLog, Invoice
 import { getClientLogs, formatLogTimestamp, clearClientLogs } from '@/utils/clientLog';
 import { calcAllClientStats, calcAdminAggregates, formatRelative, type ClientStats } from './clientStats';
 import { OPTION_LABELS, OPTION_DEFAULTS, getOptionUsageThisMonth } from '@/utils/clientOptions';
+import {
+  DEFAULT_NO_RESPONSE_THRESHOLD_DAYS,
+  NO_RESPONSE_THRESHOLD_DAYS_OPTIONS,
+  getNoResponseThresholdDays,
+  normalizeNoResponseThresholdDays,
+} from '@/utils/clientAutomationSettings';
 import type { ClientOption, ClientOptionKey, ClientOptionStatus } from '@/types';
 import {
   generateSalt,
@@ -1844,6 +1850,104 @@ const CancellationSection: React.FC<{
 };
 
 /* ============================================================
+   自動処理設定（クライアント詳細内のセクション, 2026-05 Step 6-A 追加）
+   ----------------------------------------------------------------
+   現状は「反応なし判定日数」のみ。Step 6-B 以降で送信失敗や面接欠席
+   などの自動付与閾値もここに集約する想定。
+   Step 6-A では設定保存のみで、応募者ステータスは自動更新しない。
+   ============================================================ */
+
+const AutomationSettingsSection: React.FC<{
+  client: Client;
+  onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
+  onLog?: (action: string, target: string, detail?: string) => void;
+}> = ({ client, onUpdateClient, onLog }) => {
+  const currentValue = getNoResponseThresholdDays(client);
+  const isUnset = client.noResponseThresholdDays == null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<number>(currentValue);
+  const [savedAt, setSavedAt] = useState<string>('');
+
+  const startEdit = () => {
+    setDraft(currentValue);
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    const next = normalizeNoResponseThresholdDays(draft);
+    if (next === currentValue && !isUnset) {
+      setEditing(false);
+      return;
+    }
+    onUpdateClient(client.id, (c) => ({ ...c, noResponseThresholdDays: next }));
+    // 変更前→変更後を文言化。未設定からの初回保存は「未設定→Xd」表記。
+    const beforeLabel = isUnset ? `未設定(${DEFAULT_NO_RESPONSE_THRESHOLD_DAYS}日扱い)` : `${currentValue}日`;
+    onLog?.('反応なし判定日数 変更', client.companyName, `${beforeLabel} → ${next}日`);
+    setSavedAt(new Date().toLocaleTimeString());
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setDraft(currentValue);
+    setEditing(false);
+  };
+
+  return (
+    <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#111827', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+          <Settings size={16} color="#0891B2" />
+          自動処理設定
+        </h3>
+        {!editing && (
+          <button onClick={startEdit} style={btnSecondary}>編集</button>
+        )}
+      </div>
+
+      <div style={{ marginTop: '0.5rem' }}>
+        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>
+          反応なし判定日数
+        </div>
+        <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '0.625rem' }}>
+          日程調整や連絡後、この日数を超えて応募者の反応がない場合に「反応なし」候補として扱います。
+        </div>
+
+        {!editing && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+            <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#111827' }}>{currentValue}日</div>
+            {isUnset && (
+              <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>
+                （未設定のためデフォルト {DEFAULT_NO_RESPONSE_THRESHOLD_DAYS}日 を表示）
+              </span>
+            )}
+            {savedAt && !isUnset && (
+              <span style={{ fontSize: '0.6875rem', color: '#059669' }}>{savedAt} 保存済</span>
+            )}
+          </div>
+        )}
+
+        {editing && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <select
+              value={draft}
+              onChange={(e) => setDraft(normalizeNoResponseThresholdDays(e.target.value))}
+              style={{ ...inputStyle, width: 'auto', minWidth: '100px' }}
+            >
+              {NO_RESPONSE_THRESHOLD_DAYS_OPTIONS.map((d) => (
+                <option key={d} value={d}>{d}日</option>
+              ))}
+            </select>
+            <button onClick={handleSave} style={btnPrimary}>保存</button>
+            <button onClick={handleCancel} style={btnSecondary}>キャンセル</button>
+            <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>1〜30日の範囲で設定できます</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
    請求管理（クライアント詳細内のセクション）
    ============================================================ */
 
@@ -2471,6 +2575,15 @@ const ClientDetail: React.FC<{
           )}
         </div>
       </div>
+      )}
+
+      {/* 自動処理設定（概要タブ内）。子アカウントは親側設定を継承する想定なので親のみ表示 */}
+      {activeTab === 'overview' && client.accountType === 'parent' && (
+        <AutomationSettingsSection
+          client={client}
+          onUpdateClient={onUpdateClient}
+          onLog={onLogAdminAction}
+        />
       )}
 
       {/* 危険操作タブ：パスワード管理 + 機能キルスイッチ + 解約管理 */}

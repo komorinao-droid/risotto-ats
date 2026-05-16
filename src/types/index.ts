@@ -446,6 +446,15 @@ export interface Client {
   };
   /** 強制ログアウト指示（このタイムスタンプより前に発行されたセッションを無効化） */
   sessionInvalidatedAt?: string;
+
+  // ─── 自動処理設定（2026-05 Step 6-A 追加） ───
+  /**
+   * 反応なし判定日数（1〜30、未設定なら DEFAULT_NO_RESPONSE_THRESHOLD_DAYS 扱い）。
+   * 日程調整等のあと、この日数を超えて応募者から反応が無ければ
+   * automationStatus='no_response' 候補として扱う。
+   * Step 6-A では設定保存のみで、自動付与は次フェーズで実装する。
+   */
+  noResponseThresholdDays?: number;
 }
 
 // メールテンプレート カテゴリ (2026-05 Step 3 追加)。
