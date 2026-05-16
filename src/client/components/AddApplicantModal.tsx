@@ -9,8 +9,10 @@ import { today, calcAge } from '@/utils/date';
 import { applicantRepository, resolveDataOwnerId } from '@/repositories';
 import { isOpeningFilled } from '@/utils/recruitmentOpening';
 import {
+  findConditionMismatches,
   findExclusionListMatches,
   isExcludedListMatch,
+  isFilterConditionMismatch,
   withAutomationTag,
 } from '@/utils/applicantAutomation';
 import type { Applicant, ClientData } from '@/types';
@@ -156,35 +158,12 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
   // Exclusion / filter check
   const checkExclusion = (data: ClientData, applicant: Partial<Applicant>): string | null => {
     const alerts: string[] = [];
-    const fc = data.filterCondition;
 
-    // Age check
-    if (fc.ageEnabled && applicant.age) {
-      const ageNum = typeof applicant.age === 'string' ? parseInt(applicant.age, 10) : applicant.age;
-      if (!isNaN(ageNum) && (ageNum < fc.ageMin || ageNum > fc.ageMax)) {
-        alerts.push(`年齢(${ageNum}歳)がフィルタ条件外です`);
-      }
-    }
-
-    // Gender check
-    if (fc.genderFilter.length > 0 && applicant.gender) {
-      if (!fc.genderFilter.includes(applicant.gender)) {
-        alerts.push(`性別(${applicant.gender})がフィルタ条件外です`);
-      }
-    }
-
-    // Source check
-    if (fc.sourceFilter.length > 0 && applicant.src) {
-      if (!fc.sourceFilter.includes(applicant.src)) {
-        alerts.push(`応募媒体(${applicant.src})がフィルタ条件外です`);
-      }
-    }
-
-    // Job check
-    if (fc.jobFilter.length > 0 && applicant.job) {
-      if (!fc.jobFilter.includes(applicant.job)) {
-        alerts.push(`職種(${applicant.job})がフィルタ条件外です`);
-      }
+    // Filter condition check (age / gender / source / job) — 共通 helper に集約 (Step 5)。
+    // `findConditionMismatches` が判定 + 文言生成を一手に担う。
+    // 自動ステータス自動付与 (`isFilterConditionMismatch`) と CSV 取込側も同じ helper を使う。
+    for (const mismatch of findConditionMismatches(data, applicant)) {
+      alerts.push(mismatch.label);
     }
 
     // Exclusion list check — 共通 helper に集約 (Step 4)。
@@ -296,18 +275,27 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         { name: applicant.name, phone: applicant.phone },
         { baseName: scopeBase },
       );
-      // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4):
-      //   1. 除外リスト該当 → automationStatus = 'excluded' + tag 'excluded_list_match'
-      //   2. 充足求人応募   → automationStatus = 'filled_received' + tag 'filled_opening_application'
-      //   3. どちらでもない → 未設定
+      // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5):
+      //   1. 除外リスト該当       → automationStatus = 'excluded' + tag 'excluded_list_match'
+      //   2. 応募条件フィルタ該当 → automationStatus = 'excluded' + tag 'condition_mismatch'
+      //   3. 充足求人応募         → automationStatus = 'filled_received' + tag 'filled_opening_application'
+      //   4. どれでもない         → 未設定
       // 手動 stage / 重複判定 / 既存 alert 用 exclusionMsg はここでは上書きしない。
       const excluded = isExcludedListMatch(clientData, applicant);
-      const filled = !excluded && isOpeningFilled(clientData, applicant.base, applicant.job);
+      const conditionMismatch = !excluded && isFilterConditionMismatch(clientData, applicant);
+      const filled =
+        !excluded && !conditionMismatch && isOpeningFilled(clientData, applicant.base, applicant.job);
       const applicantToCreate: Applicant = excluded
         ? {
             ...applicant,
             automationStatus: 'excluded',
             automationTags: withAutomationTag(applicant.automationTags, 'excluded_list_match'),
+          }
+        : conditionMismatch
+        ? {
+            ...applicant,
+            automationStatus: 'excluded',
+            automationTags: withAutomationTag(applicant.automationTags, 'condition_mismatch'),
           }
         : filled
         ? {

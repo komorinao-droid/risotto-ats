@@ -16,6 +16,7 @@ import {
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
   isExcludedListMatch,
+  isFilterConditionMismatch,
   withAutomationTag,
 } from '@/utils/applicantAutomation';
 import { isOpeningFilled } from '@/utils/recruitmentOpening';
@@ -592,18 +593,30 @@ const ApplicantList: React.FC = () => {
       // stage が CSV で明示されていた行のみ initialStageReason='csv_import' を渡し、
       // stageHistory に 1 件「初期 stage」エントリを残す。
       for (const item of pendingItems) {
-        // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4):
-        //   1. 除外リスト該当 → automationStatus = 'excluded' + tag 'excluded_list_match'
-        //   2. 充足求人応募   → automationStatus = 'filled_received' + tag 'filled_opening_application'
-        //   3. どちらでもない → 未設定
+        // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5):
+        //   1. 除外リスト該当       → automationStatus = 'excluded' + tag 'excluded_list_match'
+        //   2. 応募条件フィルタ該当 → automationStatus = 'excluded' + tag 'condition_mismatch'
+        //   3. 充足求人応募         → automationStatus = 'filled_received' + tag 'filled_opening_application'
+        //   4. どれでもない         → 未設定
         // 既存 item.applicant は mutate せず、新しい object を作って create() に渡す。
         const excluded = isExcludedListMatch(clientData, item.applicant);
-        const filled = !excluded && isOpeningFilled(clientData, item.applicant.base, item.applicant.job);
+        const conditionMismatch =
+          !excluded && isFilterConditionMismatch(clientData, item.applicant);
+        const filled =
+          !excluded &&
+          !conditionMismatch &&
+          isOpeningFilled(clientData, item.applicant.base, item.applicant.job);
         const applicantToCreate: Applicant = excluded
           ? {
               ...item.applicant,
               automationStatus: 'excluded',
               automationTags: withAutomationTag(item.applicant.automationTags, 'excluded_list_match'),
+            }
+          : conditionMismatch
+          ? {
+              ...item.applicant,
+              automationStatus: 'excluded',
+              automationTags: withAutomationTag(item.applicant.automationTags, 'condition_mismatch'),
             }
           : filled
           ? {

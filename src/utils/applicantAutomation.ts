@@ -122,26 +122,44 @@ export function isInterviewSchedulingBlockedApplicant(
   );
 }
 
-/** 警告パネル本文。 */
+/** 警告パネル本文（除外リスト該当）。 */
 export const EXCLUDED_BLOCK_MESSAGE =
   'この応募者は除外リストに該当するため、通常の日程調整は停止されています。';
 
-/** disabled ボタンの title / aria-label 用の短い理由文。 */
+/** disabled ボタンの title / aria-label 用の短い理由文（除外リスト該当）。 */
 export const EXCLUDED_BLOCK_REASON_SHORT = '除外リスト該当のため面接予約できません';
 
-/** 面接予約停止の理由文を automationStatus に応じて返す。 */
-export function getInterviewSchedulingBlockedMessage(
-  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
-): string {
-  if (applicant?.automationStatus === 'excluded') return EXCLUDED_BLOCK_MESSAGE;
+/** 警告パネル本文（応募条件フィルタ該当, Step 5）。 */
+export const CONDITION_MISMATCH_BLOCK_MESSAGE =
+  'この応募者は応募条件外として判定されたため、通常の日程調整は停止されています。';
+
+/** disabled ボタンの短い理由文（応募条件フィルタ該当, Step 5）。 */
+export const CONDITION_MISMATCH_BLOCK_REASON_SHORT = '応募条件外のため面接予約できません';
+
+type BlockedSource =
+  | { automationStatus?: ApplicantAutomationStatus; automationTags?: ApplicantAutomationTag[] }
+  | null
+  | undefined;
+
+/** 面接予約停止の理由文を automationStatus / automationTags に応じて返す。 */
+export function getInterviewSchedulingBlockedMessage(applicant: BlockedSource): string {
+  if (applicant?.automationStatus === 'excluded') {
+    // excluded は「除外リスト」or「応募条件フィルタ」のどちらか。tag で識別する。
+    // 両方付いている異常ケースは excluded_list_match を優先（より強い理由）。
+    if (applicant.automationTags?.includes('excluded_list_match')) return EXCLUDED_BLOCK_MESSAGE;
+    if (applicant.automationTags?.includes('condition_mismatch')) return CONDITION_MISMATCH_BLOCK_MESSAGE;
+    return EXCLUDED_BLOCK_MESSAGE;
+  }
   return FILLED_RECEIVED_BLOCK_MESSAGE;
 }
 
-/** disabled ボタンの短い理由文を automationStatus に応じて返す。 */
-export function getInterviewSchedulingBlockedReasonShort(
-  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
-): string {
-  if (applicant?.automationStatus === 'excluded') return EXCLUDED_BLOCK_REASON_SHORT;
+/** disabled ボタンの短い理由文を automationStatus / automationTags に応じて返す。 */
+export function getInterviewSchedulingBlockedReasonShort(applicant: BlockedSource): string {
+  if (applicant?.automationStatus === 'excluded') {
+    if (applicant.automationTags?.includes('excluded_list_match')) return EXCLUDED_BLOCK_REASON_SHORT;
+    if (applicant.automationTags?.includes('condition_mismatch')) return CONDITION_MISMATCH_BLOCK_REASON_SHORT;
+    return EXCLUDED_BLOCK_REASON_SHORT;
+  }
   return FILLED_RECEIVED_BLOCK_REASON_SHORT;
 }
 
@@ -215,6 +233,79 @@ export function isExcludedListMatch(
   applicant: Partial<Pick<Applicant, 'email' | 'phone' | 'name' | 'birthDate'>>,
 ): boolean {
   return findExclusionListMatches(clientData, applicant).length > 0;
+}
+
+/**
+ * 応募条件フィルタ不一致判定 (2026-05 Step 5) — 共通 source-of-truth。
+ *
+ * 既存 `AddApplicantModal.checkExclusion` の filter-condition 判定と完全一致させる:
+ *  - age: `fc.ageEnabled && age && (age < fc.ageMin || age > fc.ageMax)`
+ *  - gender: `fc.genderFilter.length > 0 && gender && !fc.genderFilter.includes(gender)`
+ *  - source: `fc.sourceFilter.length > 0 && src && !fc.sourceFilter.includes(src)`
+ *  - job: `fc.jobFilter.length > 0 && job && !fc.jobFilter.includes(job)`
+ *  - 参照する設定は `clientData.filterCondition` (legacy global)。
+ *    `clientData.filterConditions` (拠点別) は intake 経路では従来から参照していないため踏襲。
+ *
+ * 戻り値: 不一致内容の配列。alert 表示用 label と判定種別 kind を含む。
+ *  - 0 件なら空配列
+ *  - alert 文言は既存 `checkExclusion` の表記をそのまま採用
+ *
+ * 用途:
+ *  - `isFilterConditionMismatch` (boolean) のバックエンド
+ *  - 手動応募追加の alert メッセージ (`checkExclusion`)
+ *  - 自動ステータス／自動タグ自動付与 (AddApplicantModal / ApplicantList CSV)
+ *
+ * 重要: 判定ロジックは本 helper に集約する。複製しない。
+ */
+export interface ConditionMismatchEntry {
+  kind: 'age' | 'gender' | 'source' | 'job';
+  label: string;
+}
+
+export function findConditionMismatches(
+  clientData: ClientData | null | undefined,
+  applicant: Partial<Pick<Applicant, 'age' | 'gender' | 'src' | 'job'>>,
+): ConditionMismatchEntry[] {
+  const fc = clientData?.filterCondition;
+  if (!fc) return [];
+  const out: ConditionMismatchEntry[] = [];
+
+  if (fc.ageEnabled && applicant.age) {
+    const ageNum =
+      typeof applicant.age === 'string' ? parseInt(applicant.age, 10) : (applicant.age as number);
+    if (typeof ageNum === 'number' && !Number.isNaN(ageNum) && (ageNum < fc.ageMin || ageNum > fc.ageMax)) {
+      out.push({ kind: 'age', label: `年齢(${ageNum}歳)がフィルタ条件外です` });
+    }
+  }
+  if (fc.genderFilter.length > 0 && applicant.gender) {
+    if (!fc.genderFilter.includes(applicant.gender)) {
+      out.push({ kind: 'gender', label: `性別(${applicant.gender})がフィルタ条件外です` });
+    }
+  }
+  if (fc.sourceFilter.length > 0 && applicant.src) {
+    if (!fc.sourceFilter.includes(applicant.src)) {
+      out.push({ kind: 'source', label: `応募媒体(${applicant.src})がフィルタ条件外です` });
+    }
+  }
+  if (fc.jobFilter.length > 0 && applicant.job) {
+    if (!fc.jobFilter.includes(applicant.job)) {
+      out.push({ kind: 'job', label: `職種(${applicant.job})がフィルタ条件外です` });
+    }
+  }
+  return out;
+}
+
+/**
+ * 応募条件フィルタ不一致判定 (boolean 版)。
+ *
+ * `findConditionMismatches` のラッパで、判定ロジックは複製しない。
+ * automationStatus 自動付与など、true/false のみ必要な箇所で使う。
+ */
+export function isFilterConditionMismatch(
+  clientData: ClientData | null | undefined,
+  applicant: Partial<Pick<Applicant, 'age' | 'gender' | 'src' | 'job'>>,
+): boolean {
+  return findConditionMismatches(clientData, applicant).length > 0;
 }
 
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
