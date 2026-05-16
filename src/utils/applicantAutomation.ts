@@ -60,6 +60,32 @@ export function withAutomationTag(
   return Array.from(new Set([...(tags ?? []), tag]));
 }
 
+/**
+ * 「充足受付 (filled_received)」状態の応募者かを判定する (2026-05 Step 2-β)。
+ *
+ * 用途:
+ *  - 応募者詳細で通常の日程調整 / 面接予約導線を disabled にする
+ *  - ScheduleInterview 系のハンドラ手前で軽い実行ガードを入れる
+ *  - 将来の自動メール送信 / チャット送信側でも同じ判定式を使い回す
+ *
+ * Pick で `automationStatus` だけを要求する形にしたのは、テスト用のミニマム
+ * オブジェクト渡しや、Repository 経由で取得した Partial<Applicant> でも
+ * そのまま判定できるようにするため。
+ */
+export function isFilledReceivedApplicant(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): boolean {
+  return applicant?.automationStatus === 'filled_received';
+}
+
+/** filled_received のブロック表示で使う共通文言。UI / alert で再利用する。 */
+export const FILLED_RECEIVED_BLOCK_MESSAGE =
+  'この応募は充足求人への応募のため、通常の日程調整は停止されています。';
+
+/** disabled ボタンの title / aria-label 用の短い理由文。 */
+export const FILLED_RECEIVED_BLOCK_REASON_SHORT =
+  '充足求人への応募のため面接予約できません';
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;

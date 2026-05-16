@@ -20,6 +20,9 @@ import {
   getApplicantAutomationStatusTone,
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
+  isFilledReceivedApplicant,
+  FILLED_RECEIVED_BLOCK_MESSAGE,
+  FILLED_RECEIVED_BLOCK_REASON_SHORT,
 } from '@/utils/applicantAutomation';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
@@ -942,6 +945,10 @@ const InfoTab: React.FC<InfoTabProps> = ({
   //  - client 未取得時は no-op
   function handleScheduled(event: InterviewEvent) {
     if (!client) return;
+    if (isFilledReceivedApplicant(applicant)) {
+      alert(FILLED_RECEIVED_BLOCK_MESSAGE);
+      return;
+    }
     const operator = getClientOperatorLabel(client);
     const ownerId = resolveDataOwnerId(client);
     eventRepository.scheduleInterview(ownerId, applicant.id, event, {
@@ -974,6 +981,10 @@ const InfoTab: React.FC<InfoTabProps> = ({
   //  - client 未取得時は no-op（更新不能状態でモーダルだけ開く事故を避ける）
   function handleReschedule(event: InterviewEvent) {
     if (!client) return;
+    if (isFilledReceivedApplicant(applicant)) {
+      alert(FILLED_RECEIVED_BLOCK_MESSAGE);
+      return;
+    }
     const ownerId = resolveDataOwnerId(client);
     eventRepository.remove(ownerId, event.id);
     reloadClientData();
@@ -981,6 +992,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
     setScheduleTime('');
     setScheduleOpen(true);
   }
+
+  // 充足受付 (filled_received): 通常の日程調整／面接予約導線を停止する
+  const isFilledReceived = isFilledReceivedApplicant(applicant);
 
   // Status
   const currentStatus = clientData.statuses.find((s) => s.name === applicant.stage);
@@ -1116,6 +1130,24 @@ const InfoTab: React.FC<InfoTabProps> = ({
             {baseChangeWarning && (
               <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#FEF3C7', borderRadius: '6px', fontSize: '0.75rem', color: '#92400E', marginBottom: '0.75rem' }}>
                 {baseChangeWarning}
+              </div>
+            )}
+
+            {/* 充足受付 (filled_received) の警告: 通常の日程調整／面接予約導線が停止していることを明示 */}
+            {isFilledReceived && (
+              <div
+                role="alert"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: '#FEF3C7',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  color: '#92400E',
+                  marginBottom: '0.75rem',
+                  border: '1px solid #FDE68A',
+                }}
+              >
+                {FILLED_RECEIVED_BLOCK_MESSAGE}
               </div>
             )}
 
@@ -1345,7 +1377,17 @@ const InfoTab: React.FC<InfoTabProps> = ({
             <h3 style={cardTitleStyle}>面接情報</h3>
             <button
               onClick={() => { setScheduleDate(''); setScheduleTime(''); setScheduleOpen(true); }}
-              style={{ ...btnOrange, fontSize: '0.75rem', padding: '0.25rem 0.625rem' }}
+              disabled={isFilledReceived}
+              title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+              aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+              style={{
+                ...btnOrange,
+                fontSize: '0.75rem',
+                padding: '0.25rem 0.625rem',
+                ...(isFilledReceived
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.7 }
+                  : {}),
+              }}
             >
               + 面接を設定
             </button>
@@ -1462,7 +1504,17 @@ const InfoTab: React.FC<InfoTabProps> = ({
                     <div style={{ display: 'flex', gap: '0.25rem' }}>
                       <button
                         onClick={() => handleReschedule(ev)}
-                        style={{ ...btnSecondary, fontSize: '0.6875rem', padding: '0.125rem 0.375rem' }}
+                        disabled={isFilledReceived}
+                        title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+                        aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+                        style={{
+                          ...btnSecondary,
+                          fontSize: '0.6875rem',
+                          padding: '0.125rem 0.375rem',
+                          ...(isFilledReceived
+                            ? { color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.6 }
+                            : {}),
+                        }}
                       >
                         変更
                       </button>
@@ -1491,6 +1543,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
                       <button
                         key={i}
                         onClick={() => { setScheduleDate(d.date); setScheduleTime(d.time); setScheduleOpen(true); }}
+                        disabled={isFilledReceived}
+                        title={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
+                        aria-label={isFilledReceived ? FILLED_RECEIVED_BLOCK_REASON_SHORT : undefined}
                         style={{
                           ...btnSecondary,
                           fontSize: '0.6875rem',
@@ -1498,9 +1553,12 @@ const InfoTab: React.FC<InfoTabProps> = ({
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.25rem',
+                          ...(isFilledReceived
+                            ? { color: '#9CA3AF', cursor: 'not-allowed', opacity: 0.6 }
+                            : {}),
                         }}
                       >
-                        <span style={{ color: '#F97316', fontWeight: 600 }}>+</span>
+                        <span style={{ color: isFilledReceived ? '#9CA3AF' : '#F97316', fontWeight: 600 }}>+</span>
                         {formatDateJP(d.date) || d.date}{d.time ? ` ${d.time}` : ''}
                       </button>
                     );
