@@ -23,6 +23,8 @@ import {
   isFilledReceivedApplicant,
   FILLED_RECEIVED_BLOCK_MESSAGE,
   FILLED_RECEIVED_BLOCK_REASON_SHORT,
+  findFulfillmentEmailTemplate,
+  renderEmailTemplate,
 } from '@/utils/applicantAutomation';
 
 /** 旧フォーマット（string）と新フォーマット（PrefDateTime）両方に対応 */
@@ -996,6 +998,72 @@ const InfoTab: React.FC<InfoTabProps> = ({
   // 充足受付 (filled_received): 通常の日程調整／面接予約導線を停止する
   const isFilledReceived = isFilledReceivedApplicant(applicant);
 
+  // 充足返信メール: 拠点別オーバーライドがあればそちらを優先、無ければ全社共通から選ぶ
+  const scopedEmailTemplates = (applicant.base && clientData.emailTemplatesByBase?.[applicant.base])
+    ? clientData.emailTemplatesByBase[applicant.base]
+    : (clientData.emailTemplates || []);
+  const fulfillmentTemplate = isFilledReceived
+    ? findFulfillmentEmailTemplate(scopedEmailTemplates)
+    : undefined;
+
+  /**
+   * 充足返信メール mailto を開く (2026-05 Step 3)。
+   * - subject / body は fulfillment テンプレートから差し込み変数を解決して使う
+   * - 実送信はせず、ブラウザ既定のメールクライアントを起動するだけ
+   * - 開いたタイミングで messageRepository.create で連絡履歴に1件記録（status='draft', templateId 付き）
+   * - applicant.firstContactedAt / lastContactedAt / contactAttemptCount は通常メールログと同じ要領で更新
+   * - client / template 未取得時は no-op
+   */
+  function openFulfillmentMail() {
+    if (!client) return;
+    if (!fulfillmentTemplate) {
+      alert('充足返信テンプレートが未設定です。メールテンプレート設定で「充足返信」カテゴリのテンプレートを作成してください。');
+      return;
+    }
+    if (!applicant.email) {
+      alert('応募者のメールアドレスが未登録のため、メーラーを起動できません。');
+      return;
+    }
+    const baseObj = clientData.bases.find((b) => b.name === applicant.base);
+    const renderedSubject = renderEmailTemplate(fulfillmentTemplate.subject || '', {
+      applicant,
+      base: baseObj ?? null,
+      companyName: client.companyName,
+      confirmedInterviewDate: confirmedEvent ? formatDateJP(confirmedEvent.date) : '',
+    });
+    const renderedBody = renderEmailTemplate(fulfillmentTemplate.body || '', {
+      applicant,
+      base: baseObj ?? null,
+      companyName: client.companyName,
+      confirmedInterviewDate: confirmedEvent ? formatDateJP(confirmedEvent.date) : '',
+    });
+    const mailto = `mailto:${encodeURIComponent(applicant.email)}?subject=${encodeURIComponent(renderedSubject)}&body=${encodeURIComponent(renderedBody)}`;
+    window.location.href = mailto;
+
+    // 連絡履歴を残す。実送信ではないので status='draft'。templateId / createdBy は記録。
+    const ownerId = resolveDataOwnerId(client);
+    const operator = client.contactName || client.companyName || '';
+    const bodyPreview = renderedBody.trim().slice(0, 200) || '(本文未入力)';
+    const log = messageRepository.create(ownerId, {
+      applicantId: applicant.id,
+      channel: 'email',
+      direction: 'outbound',
+      status: 'draft',
+      templateId: fulfillmentTemplate.id,
+      subject: renderedSubject || undefined,
+      bodyPreview,
+      createdBy: operator || undefined,
+    });
+    const withContact = withContactMeta(applicant, { contactedAt: log.createdAt });
+    applicantRepository.update(ownerId, applicant.id, {
+      firstContactedAt: withContact.firstContactedAt,
+      lastContactedAt: withContact.lastContactedAt,
+      contactAttemptCount: withContact.contactAttemptCount,
+    });
+    reloadClientData();
+    logAction('email', '充足返信メール作成（mailto起動）', applicant.name || '(名前なし)', renderedSubject || fulfillmentTemplate.name);
+  }
+
   // Status
   const currentStatus = clientData.statuses.find((s) => s.name === applicant.stage);
   const statusOptions = clientData.statuses.map((s) => ({ value: s.name, label: s.name }));
@@ -1145,9 +1213,61 @@ const InfoTab: React.FC<InfoTabProps> = ({
                   color: '#92400E',
                   marginBottom: '0.75rem',
                   border: '1px solid #FDE68A',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
                 }}
               >
-                {FILLED_RECEIVED_BLOCK_MESSAGE}
+                <div>{FILLED_RECEIVED_BLOCK_MESSAGE}</div>
+                {fulfillmentTemplate ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={openFulfillmentMail}
+                      style={{
+                        ...btnOrange,
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.75rem',
+                      }}
+                    >
+                      充足返信メールを開く
+                    </button>
+                    <span style={{ fontSize: '0.6875rem', color: '#92400E' }}>
+                      テンプレ: {fulfillmentTemplate.name}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={openFulfillmentMail}
+                      disabled
+                      title="メールテンプレート設定で「充足返信」カテゴリのテンプレートを作成してください"
+                      style={{
+                        ...btnOrange,
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.75rem',
+                        backgroundColor: '#E5E7EB',
+                        color: '#9CA3AF',
+                        cursor: 'not-allowed',
+                        opacity: 0.7,
+                      }}
+                    >
+                      充足返信メールを開く
+                    </button>
+                    <span style={{ fontSize: '0.6875rem', color: '#92400E' }}>
+                      充足返信テンプレートが未設定です。
+                      <a
+                        href="#/settings/email-templates"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          window.location.href = '/settings?section=email-templates';
+                        }}
+                        style={{ color: '#1D4ED8', textDecoration: 'underline', marginLeft: '0.25rem' }}
+                      >
+                        メールテンプレート設定へ
+                      </a>
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 

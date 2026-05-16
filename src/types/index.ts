@@ -448,12 +448,26 @@ export interface Client {
   sessionInvalidatedAt?: string;
 }
 
+// メールテンプレート カテゴリ (2026-05 Step 3 追加)。
+//  - general: 汎用（既存テンプレート互換のデフォルト）
+//  - interview: 面接案内
+//  - rejection: 不採用通知
+//  - fulfillment: 充足返信（filled_received 応募者向け）
+// 既存テンプレートに category が無い場合は general 扱い。
+export type EmailTemplateCategory =
+  | 'general'
+  | 'interview'
+  | 'rejection'
+  | 'fulfillment';
+
 // メールテンプレート
 export interface EmailTemplate {
   id: number;
   name: string;
   subject: string;
   body: string;
+  /** カテゴリ（未指定は 'general' 扱い）。Step 3 で追加 */
+  category?: EmailTemplateCategory;
 }
 
 // 除外リスト

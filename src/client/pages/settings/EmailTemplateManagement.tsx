@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { EmailTemplate } from '@/types';
+import type { EmailTemplate, EmailTemplateCategory } from '@/types';
 import Modal from '@/components/Modal';
 import { emailTemplateRepository, resolveDataOwnerId } from '@/repositories';
 
@@ -28,12 +28,25 @@ const VARIABLES = ['{{氏名}}', '{{職種}}', '{{応募日}}', '{{拠点}}', '{
 
 const SHARED = '__shared__';
 
+// カテゴリ選択肢 (2026-05 Step 3 追加)。既存テンプレートは未指定で 'general' 扱い。
+const CATEGORY_OPTIONS: Array<{ value: EmailTemplateCategory; label: string }> = [
+  { value: 'general', label: '汎用' },
+  { value: 'interview', label: '面接案内' },
+  { value: 'rejection', label: '不採用' },
+  { value: 'fulfillment', label: '充足返信' },
+];
+
+function getCategoryLabel(category: EmailTemplateCategory | undefined): string {
+  return CATEGORY_OPTIONS.find((c) => c.value === (category ?? 'general'))?.label ?? '汎用';
+}
+
 const EmailTemplateManagement: React.FC = () => {
   const { clientData, reloadClientData, client, logAction } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [category, setCategory] = useState<EmailTemplateCategory>('general');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [modalOpen, setModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -72,6 +85,7 @@ const EmailTemplateManagement: React.FC = () => {
         setName(t.name);
         setSubject(t.subject);
         setBody(t.body);
+        setCategory(t.category ?? 'general');
         setSaveState('idle');
       }
     }
@@ -87,10 +101,10 @@ const EmailTemplateManagement: React.FC = () => {
   const doSave = useCallback(() => {
     if (selectedId === null || !ownerId) return;
     setSaveState('saving');
-    emailTemplateRepository.update(ownerId, selectedId, { name, subject, body }, targetBaseName);
+    emailTemplateRepository.update(ownerId, selectedId, { name, subject, body, category }, targetBaseName);
     reloadClientData();
     setTimeout(() => setSaveState('saved'), 300);
-  }, [selectedId, name, subject, body, ownerId, targetBaseName, reloadClientData]);
+  }, [selectedId, name, subject, body, category, ownerId, targetBaseName, reloadClientData]);
 
   const scheduleAutoSave = () => {
     setSaveState('idle');
@@ -221,9 +235,14 @@ const EmailTemplateManagement: React.FC = () => {
                   setSelectedId(t.id);
                 }}
               >
-                <span style={{ fontSize: '0.875rem', fontWeight: selectedId === t.id ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t.name}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: '0.875rem', fontWeight: selectedId === t.id ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.name}
+                  </span>
+                  <span style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '0.125rem' }}>
+                    {getCategoryLabel(t.category)}
+                  </span>
+                </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '0.875rem', padding: '0 0.25rem' }}
@@ -246,6 +265,21 @@ const EmailTemplateManagement: React.FC = () => {
                   onChange={(e) => { setName(e.target.value); scheduleAutoSave(); }}
                   style={inputStyle}
                 />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.875rem', fontWeight: 500 }}>カテゴリ</label>
+                <select
+                  value={category}
+                  onChange={(e) => { setCategory(e.target.value as EmailTemplateCategory); scheduleAutoSave(); }}
+                  style={{ ...inputStyle, width: 'auto', minWidth: '180px' }}
+                >
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#6B7280' }}>
+                  「充足返信」は充足求人応募者の詳細画面から開かれます。
+                </div>
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.875rem', fontWeight: 500 }}>件名</label>

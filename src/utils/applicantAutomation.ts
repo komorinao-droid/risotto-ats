@@ -1,4 +1,10 @@
-import type { ApplicantAutomationStatus, ApplicantAutomationTag } from '@/types';
+import type {
+  Applicant,
+  ApplicantAutomationStatus,
+  ApplicantAutomationTag,
+  Base,
+  EmailTemplate,
+} from '@/types';
 
 /**
  * 自動ステータス・自動タグ表示用のユーティリティ (2026-05 追加)。
@@ -113,6 +119,80 @@ export function getApplicantAutomationStatusTone(status?: ApplicantAutomationSta
     return NEUTRAL_TONE;
   }
   return BLUE_TONE;
+}
+
+/**
+ * 充足返信用 EmailTemplate を 1 件選ぶ (2026-05 Step 3)。
+ *
+ * - category === 'fulfillment' のテンプレートを先頭から探す
+ * - 複数あれば最初の 1 件
+ * - 拠点別オーバーライドを使う場合は、呼び出し側で base スコープに絞った
+ *   templates 配列を渡すこと（このヘルパは絞り込みを行わない）
+ */
+export function findFulfillmentEmailTemplate(
+  templates: EmailTemplate[] | undefined | null,
+): EmailTemplate | undefined {
+  if (!templates) return undefined;
+  return templates.find((t) => t.category === 'fulfillment');
+}
+
+/**
+ * メールテンプレ差し込み変数のレンダリング (2026-05 Step 3)。
+ *
+ * 既存テンプレ管理画面 (EmailTemplateManagement.tsx VARIABLES) の変数:
+ *   {{氏名}} / {{職種}} / {{応募日}} / {{拠点}} / {{拠点住所}} / {{確定面接日}} / {{応募媒体}}
+ * Step 3 で別名として下記もサポート（仕様書互換）:
+ *   {{応募者名}} = {{氏名}}, {{拠点名}} = {{拠点}}, {{職種名}} = {{職種}}, {{会社名}}
+ *
+ * - 未取得の変数は空文字に置換（残置しない）
+ * - 単純な文字列置換のみ。条件分岐 / loop はサポートしない
+ */
+export interface EmailTemplateRenderContext {
+  applicant: Pick<
+    Applicant,
+    'name' | 'base' | 'job' | 'date' | 'src'
+  >;
+  /** 応募者の拠点に対応する Base（住所差し込み用）。無ければ undefined で OK */
+  base?: Pick<Base, 'address'> | null;
+  /** 自社情報。useAuth().client.companyName を渡す想定 */
+  companyName?: string;
+  /** 確定面接日（formatDateJP 等で整形済の文字列）。無ければ空 */
+  confirmedInterviewDate?: string;
+}
+
+export function renderEmailTemplate(
+  text: string,
+  ctx: EmailTemplateRenderContext,
+): string {
+  const applicantName = ctx.applicant.name ?? '';
+  const baseName = ctx.applicant.base ?? '';
+  const jobName = ctx.applicant.job ?? '';
+  const baseAddress = ctx.base?.address ?? '';
+  const applicationDate = ctx.applicant.date ?? '';
+  const source = ctx.applicant.src ?? '';
+  const confirmed = ctx.confirmedInterviewDate ?? '';
+  const company = ctx.companyName ?? '';
+
+  const map: Record<string, string> = {
+    '{{氏名}}': applicantName,
+    '{{応募者名}}': applicantName,
+    '{{職種}}': jobName,
+    '{{職種名}}': jobName,
+    '{{拠点}}': baseName,
+    '{{拠点名}}': baseName,
+    '{{拠点住所}}': baseAddress,
+    '{{応募日}}': applicationDate,
+    '{{応募媒体}}': source,
+    '{{確定面接日}}': confirmed,
+    '{{会社名}}': company,
+  };
+
+  let out = text;
+  for (const [key, value] of Object.entries(map)) {
+    // 単純な split/join で全置換（RegExp の特殊文字エスケープ不要）
+    if (out.indexOf(key) >= 0) out = out.split(key).join(value);
+  }
+  return out;
 }
 
 /**
