@@ -186,7 +186,7 @@ const Dashboard: React.FC = () => {
 
   /* Summary calculations */
   const summary = useMemo(() => {
-    const thisMonth = applicants.filter((a) => a.date.startsWith(ym)).length;
+    const thisMonth = applicants.filter((a) => a.date?.startsWith(ym) ?? false).length;
 
     const activeStatusNames = statuses.filter((s) => s.active).map((s) => s.name);
     const activeCount = applicants.filter((a) => activeStatusNames.includes(a.stage)).length;
