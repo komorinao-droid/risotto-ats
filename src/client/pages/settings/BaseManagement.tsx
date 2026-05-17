@@ -110,13 +110,6 @@ const RecruitmentOpeningSection: React.FC<{ base: Base }> = ({ base }) => {
     return jobs.some((j) => (pending[j.name] ?? 'open') !== (initialMap[j.name] ?? 'open'));
   }, [jobs, pending, initialMap]);
 
-  // 「充足」ステータスが statuses に登録されているか
-  //  - Step 1 ではガイダンス表示のみ。自動作成はしない
-  //  - Step 2 で filled 応募者を「充足」ステータスに自動振り分けする予定
-  const hasFilledStatus = useMemo(() => {
-    return (clientData?.statuses ?? []).some((s) => s.name === '充足');
-  }, [clientData?.statuses]);
-
   const handleSave = () => {
     if (!client || !dirty || saving) return;
     const ownerId = resolveDataOwnerId(client);
@@ -163,7 +156,10 @@ const RecruitmentOpeningSection: React.FC<{ base: Base }> = ({ base }) => {
         <div>
           <span style={{ fontWeight: 600, fontSize: '1rem' }}>職種別募集状況</span>
           <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-            この拠点で募集中か充足かを職種ごとに管理します。応募フローへの自動反映は今後のアップデートで追加されます。
+            この拠点で募集中か充足かを職種ごとに管理します。充足にした拠点×職種への応募は「充足受付」として自動分類され、通常の日程調整が停止されます。
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+            充足返信メールテンプレートを設定しておくと、応募者詳細から返信メールを開けます。
           </div>
         </div>
         {editable && (
@@ -188,11 +184,6 @@ const RecruitmentOpeningSection: React.FC<{ base: Base }> = ({ base }) => {
       {!editable && (
         <div style={{ padding: '0.5rem 1.25rem', backgroundColor: '#F3F4F6', fontSize: '0.75rem', color: '#4B5563' }}>
           閲覧のみ可能です（編集は本部アカウントまたは自拠点の子アカウントから）。
-        </div>
-      )}
-      {!hasFilledStatus && (
-        <div style={{ padding: '0.625rem 1.25rem', backgroundColor: '#FFF7ED', borderBottom: '1px solid #FED7AA', fontSize: '0.75rem', color: '#9A3412' }}>
-          ヒント: 「ステータス管理」に <strong>「充足」</strong> ステータスを追加しておくと、今後のアップデートで充足拠点への応募が自動でこのステータスに振り分けられます。
         </div>
       )}
       <div style={{ overflowX: 'auto' }}>
