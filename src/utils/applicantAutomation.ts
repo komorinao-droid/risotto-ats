@@ -402,6 +402,30 @@ export function isResponseTrackingStatus(
   return status === 'no_response' || status === 'following_up';
 }
 
+/**
+ * 面接終了／面接欠席の手動切替を許容するかを判定する (Step 8)。
+ *
+ * - filled_received / excluded は通常選考対象外のため操作不可
+ * - 通常応募者 / no_response / following_up / interview_completed / interview_no_show は操作可
+ *   → 反応なし／追いかけ中状態の応募者を面接結果ステータスに切替えるケースも許容する
+ *
+ * canSetResponseTrackingStatus と判定基準は同じだが、将来面接結果固有の
+ * 制約（例: 面接イベントの有無で操作可否を分岐）を加えやすいよう別 helper に分けている。
+ */
+export function canSetInterviewOutcomeStatus(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): boolean {
+  const status = applicant?.automationStatus;
+  return status !== 'filled_received' && status !== 'excluded';
+}
+
+/** 面接終了／面接欠席のいずれかの「面接結果ステータス」かを判定する (Step 8)。 */
+export function isInterviewOutcomeStatus(
+  status: ApplicantAutomationStatus | undefined,
+): boolean {
+  return status === 'interview_completed' || status === 'interview_no_show';
+}
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;

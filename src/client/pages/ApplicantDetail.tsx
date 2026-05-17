@@ -28,6 +28,8 @@ import {
   renderEmailTemplate,
   getNoResponseCandidate,
   canSetResponseTrackingStatus,
+  canSetInterviewOutcomeStatus,
+  isInterviewOutcomeStatus,
 } from '@/utils/applicantAutomation';
 import { getNoResponseThresholdDays } from '@/utils/clientAutomationSettings';
 
@@ -962,6 +964,34 @@ const InfoTab: React.FC<InfoTabProps> = ({
     );
   }
 
+  /**
+   * 面接結果用 automationStatus の手動切替 (Step 8)。
+   *  - 面接終了 (interview_completed) / 面接欠席 (interview_no_show) / 未設定 (undefined) のみ取り扱う
+   *  - filled_received / excluded は呼び出し側 UI で抑止（canSetInterviewOutcomeStatus）
+   *  - stage / stageHistory / automationTags / contactAttemptCount / MessageLog / 面接イベントは変更しない
+   *  - undefined は Repository merge + 永続化（JSON.stringify）でフィールド省略となり、
+   *    再読込時に「未設定」扱いに戻る (Step 6-C と同じパターン)
+   *  - automationStatus は 1 軸のため no_response / following_up からの遷移は上書きになる
+   */
+  function handleSetInterviewOutcomeStatus(next: ApplicantAutomationStatus | undefined) {
+    if (!applicant) return;
+    if (!client) return;
+    if (!canSetInterviewOutcomeStatus(applicant)) return;
+    const prev = applicant.automationStatus;
+    if (prev === next) return;
+    const ownerId = resolveDataOwnerId(client);
+    applicantRepository.update(ownerId, applicant.id, { automationStatus: next });
+    reloadClientData();
+    const prevLabel = getApplicantAutomationStatusLabel(prev);
+    const nextLabel = getApplicantAutomationStatusLabel(next);
+    logAction(
+      'applicant',
+      '自動ステータス変更',
+      applicant.name || String(applicant.id),
+      `${prevLabel} → ${nextLabel}`,
+    );
+  }
+
   function handleSubStatusChange(sub: string) {
     updateApplicant((a) => ({ ...a, subStatus: sub }));
   }
@@ -1475,6 +1505,107 @@ const InfoTab: React.FC<InfoTabProps> = ({
                       <button
                         type="button"
                         onClick={() => handleSetResponseTrackingStatus(undefined)}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#6B7280',
+                          borderColor: '#E5E7EB',
+                        }}
+                      >
+                        通常状態に戻す
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/*
+              面接結果操作 (Step 8) — filled_received / excluded では非表示。
+              面接イベント（events: 過去・未来含む全件）または cancelledInterviews がある応募者のみ表示。
+              面接が一度も発生していない応募者には「面接終了 / 欠席」は意味を持たないため UI を抑止する。
+            */}
+            {canSetInterviewOutcomeStatus(applicant)
+              && (events.length > 0 || (applicant.cancelledInterviews?.length ?? 0) > 0)
+              && (() => {
+              const cur = applicant.automationStatus;
+              const isCompleted = cur === 'interview_completed';
+              const isNoShow = cur === 'interview_no_show';
+              const showRevert = isInterviewOutcomeStatus(cur);
+              const baseBtn = {
+                padding: '0.375rem 0.75rem',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: '1px solid',
+              } as const;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', marginBottom: '0.75rem' }}>
+                  {/* 補足表示 */}
+                  {isCompleted && (
+                    <div
+                      style={{
+                        backgroundColor: '#F3F4F6',
+                        color: '#4B5563',
+                        border: '1px solid #E5E7EB',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      面接は終了済みとして管理されています。
+                    </div>
+                  )}
+                  {isNoShow && (
+                    <div
+                      style={{
+                        backgroundColor: '#F3F4F6',
+                        color: '#4B5563',
+                        border: '1px solid #E5E7EB',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      面接欠席として管理されています。
+                    </div>
+                  )}
+                  {/* ボタン群 */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.375rem' }}>
+                    <span style={{ fontSize: '0.6875rem', color: '#6B7280', marginRight: '0.25rem' }}>面接結果</span>
+                    {!isCompleted && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetInterviewOutcomeStatus('interview_completed')}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#4B5563',
+                          borderColor: '#D1D5DB',
+                        }}
+                      >
+                        面接終了にする
+                      </button>
+                    )}
+                    {!isNoShow && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetInterviewOutcomeStatus('interview_no_show')}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#B91C1C',
+                          borderColor: '#FECACA',
+                        }}
+                      >
+                        面接欠席にする
+                      </button>
+                    )}
+                    {showRevert && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetInterviewOutcomeStatus(undefined)}
                         style={{
                           ...baseBtn,
                           backgroundColor: '#fff',
