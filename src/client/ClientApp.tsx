@@ -20,6 +20,7 @@ import EmailTemplateManagement from '@/client/pages/settings/EmailTemplateManage
 import ChatbotManagement from '@/client/pages/settings/ChatbotManagement';
 import ScreeningSettings from '@/client/pages/settings/ScreeningSettings';
 import AccountSettings from '@/client/pages/settings/AccountSettings';
+import AutomationSettings from '@/client/pages/settings/AutomationSettings';
 // MediaCostManagement は RecruitmentReport 内のサブタブに統合済
 import ReportScheduleSettings from '@/client/pages/settings/ReportScheduleSettings';
 import RecruitmentReport from '@/client/pages/RecruitmentReport';
@@ -100,6 +101,7 @@ const AuthenticatedApp: React.FC = () => {
           <Route path="/settings/email-templates" element={<EmailTemplateManagement />} />
           <Route path="/settings/chatbot" element={<ChatbotManagement />} />
           <Route path="/settings/screening" element={<ScreeningSettings />} />
+          <Route path="/settings/automation" element={<AutomationSettings />} />
           <Route path="/settings/account" element={<AccountSettings />} />
         </Routes>
       </main>
