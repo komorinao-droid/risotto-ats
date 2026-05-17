@@ -381,6 +381,27 @@ export function getNoResponseCandidate(
   };
 }
 
+/**
+ * 反応なし／追いかけ中の手動切替を許容するかを判定する (Step 6-C)。
+ *
+ * - filled_received / excluded は通常追客対象外のため操作不可
+ * - 通常応募者 (automationStatus undefined) / no_response / following_up は操作可
+ *   → undefined と no_response/following_up 間で自由に切替可能
+ */
+export function canSetResponseTrackingStatus(
+  applicant: { automationStatus?: ApplicantAutomationStatus } | null | undefined,
+): boolean {
+  const status = applicant?.automationStatus;
+  return status !== 'filled_received' && status !== 'excluded';
+}
+
+/** 反応なし／追いかけ中のいずれかの「追客トラッキング状態」かを判定する (Step 6-C)。 */
+export function isResponseTrackingStatus(
+  status: ApplicantAutomationStatus | undefined,
+): boolean {
+  return status === 'no_response' || status === 'following_up';
+}
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;

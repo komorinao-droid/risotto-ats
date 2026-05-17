@@ -14,7 +14,7 @@ import ScheduleInterviewModal from '@/client/components/ScheduleInterviewModal';
 import { normalizeFurigana } from '@/utils/furigana';
 import { warekiToDate, dateToWareki } from '@/utils/wareki';
 import { calcAge, formatDateJP, today, dayOfWeekJP } from '@/utils/date';
-import type { Applicant, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
+import type { Applicant, ApplicantAutomationStatus, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
 import {
   getApplicantAutomationStatusLabel,
   getApplicantAutomationStatusTone,
@@ -27,6 +27,7 @@ import {
   findFulfillmentEmailTemplate,
   renderEmailTemplate,
   getNoResponseCandidate,
+  canSetResponseTrackingStatus,
 } from '@/utils/applicantAutomation';
 import { getNoResponseThresholdDays } from '@/utils/clientAutomationSettings';
 
@@ -934,6 +935,33 @@ const InfoTab: React.FC<InfoTabProps> = ({
     logAction('applicant', 'ステータス変更', applicant.name || String(applicant.id), `${prev} → ${newStatus}`);
   }
 
+  /**
+   * 追客トラッキング用 automationStatus の手動切替 (Step 6-C)。
+   *  - 反応なし (no_response) / 追いかけ中 (following_up) / 未設定 (undefined) のみ取り扱う
+   *  - filled_received / excluded は呼び出し側 UI で抑止（canSetResponseTrackingStatus）
+   *  - stage / stageHistory / automationTags / contactAttemptCount / MessageLog は変更しない
+   *  - undefined は Repository merge + 永続化（JSON.stringify）でフィールド省略となり、
+   *    再読込時に「未設定」扱いに戻る
+   */
+  function handleSetResponseTrackingStatus(next: ApplicantAutomationStatus | undefined) {
+    if (!applicant) return;
+    if (!client) return;
+    if (!canSetResponseTrackingStatus(applicant)) return;
+    const prev = applicant.automationStatus;
+    if (prev === next) return;
+    const ownerId = resolveDataOwnerId(client);
+    applicantRepository.update(ownerId, applicant.id, { automationStatus: next });
+    reloadClientData();
+    const prevLabel = getApplicantAutomationStatusLabel(prev);
+    const nextLabel = getApplicantAutomationStatusLabel(next);
+    logAction(
+      'applicant',
+      '自動ステータス変更',
+      applicant.name || String(applicant.id),
+      `${prevLabel} → ${nextLabel}`,
+    );
+  }
+
   function handleSubStatusChange(sub: string) {
     updateApplicant((a) => ({ ...a, subStatus: sub }));
   }
@@ -1364,6 +1392,100 @@ const InfoTab: React.FC<InfoTabProps> = ({
                   <span>
                     最終連絡から {noResp.daysSinceLastContact ?? '-'}日経過しています（判定日数: {noResp.thresholdDays}日）
                   </span>
+                </div>
+              );
+            })()}
+
+            {/* 追客トラッキング操作（Step 6-C） — filled_received / excluded では非表示 */}
+            {canSetResponseTrackingStatus(applicant) && (() => {
+              const cur = applicant.automationStatus;
+              const isNoResp = cur === 'no_response';
+              const isFollowing = cur === 'following_up';
+              const showRevert = isNoResp || isFollowing;
+              const baseBtn = {
+                padding: '0.375rem 0.75rem',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: '1px solid',
+              } as const;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', marginBottom: '0.75rem' }}>
+                  {/* 補足表示 */}
+                  {isNoResp && (
+                    <div
+                      style={{
+                        backgroundColor: '#F3F4F6',
+                        color: '#4B5563',
+                        border: '1px solid #E5E7EB',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      応募者からの反応がないため、反応なしとして管理されています。
+                    </div>
+                  )}
+                  {isFollowing && (
+                    <div
+                      style={{
+                        backgroundColor: '#EFF6FF',
+                        color: '#1D4ED8',
+                        border: '1px solid #DBEAFE',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      応募者へ追いかけ対応中です。
+                    </div>
+                  )}
+                  {/* ボタン群 */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
+                    {!isNoResp && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetResponseTrackingStatus('no_response')}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#4B5563',
+                          borderColor: '#D1D5DB',
+                        }}
+                      >
+                        反応なしにする
+                      </button>
+                    )}
+                    {!isFollowing && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetResponseTrackingStatus('following_up')}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#1D4ED8',
+                          borderColor: '#BFDBFE',
+                        }}
+                      >
+                        追いかけ中にする
+                      </button>
+                    )}
+                    {showRevert && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetResponseTrackingStatus(undefined)}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#fff',
+                          color: '#6B7280',
+                          borderColor: '#E5E7EB',
+                        }}
+                      >
+                        通常状態に戻す
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })()}
