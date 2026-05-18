@@ -185,7 +185,9 @@ export type ApplicantAutomationStatus =
   | 'following_up'
   | 'interview_no_show'
   | 'filled_received'
-  | 'excluded';
+  | 'excluded'
+  | 'hired'
+  | 'rejected';
 
 /**
  * 応募者の自動タグ（例外理由・分岐理由・エラー理由）。

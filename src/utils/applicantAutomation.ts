@@ -30,6 +30,8 @@ export const APPLICANT_AUTOMATION_STATUS_LABELS: Record<ApplicantAutomationStatu
   interview_no_show: '面接欠席',
   filled_received: '充足受付',
   excluded: '選考対象外',
+  hired: '採用',
+  rejected: '不採用',
 };
 
 export const APPLICANT_AUTOMATION_TAG_LABELS: Record<ApplicantAutomationTag, string> = {
@@ -438,16 +440,21 @@ const NEUTRAL_TONE: AutomationBadgeTone = { bg: '#F3F4F6', fg: '#4B5563', border
 const AMBER_TONE: AutomationBadgeTone = { bg: '#FEF3C7', fg: '#92400E', border: '#FDE68A' };
 const RED_TONE: AutomationBadgeTone = { bg: '#FEE2E2', fg: '#B91C1C', border: '#FECACA' };
 const PURPLE_TONE: AutomationBadgeTone = { bg: '#F3E8FF', fg: '#6B21A8', border: '#E9D5FF' };
+const GREEN_TONE: AutomationBadgeTone = { bg: '#DCFCE7', fg: '#15803D', border: '#86EFAC' };
 
 /**
  * 自動ステータスのトーンを返す。
  *  - 未設定: ニュートラル（グレー）
+ *  - hired: green（採用成功）
+ *  - rejected: red（不採用）
  *  - filled_received: 注意喚起なので amber
  *  - excluded / interview_no_show / no_response: ニュートラル
  *  - その他: 既定の blue
  */
 export function getApplicantAutomationStatusTone(status?: ApplicantAutomationStatus): AutomationBadgeTone {
   if (!status) return NEUTRAL_TONE;
+  if (status === 'hired') return GREEN_TONE;
+  if (status === 'rejected') return RED_TONE;
   if (status === 'filled_received') return AMBER_TONE;
   if (status === 'excluded' || status === 'interview_no_show' || status === 'no_response') {
     return NEUTRAL_TONE;

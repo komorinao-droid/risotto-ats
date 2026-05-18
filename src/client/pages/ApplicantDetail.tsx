@@ -14,7 +14,7 @@ import ScheduleInterviewModal from '@/client/components/ScheduleInterviewModal';
 import { normalizeFurigana } from '@/utils/furigana';
 import { warekiToDate, dateToWareki } from '@/utils/wareki';
 import { calcAge, formatDateJP, today, dayOfWeekJP } from '@/utils/date';
-import type { Applicant, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
+import type { Applicant, ApplicantAutomationStatus, InterviewEvent, ClientData, PrefDateTime, MessageLog, MessageChannel, MessageDirection, MessageStatus } from '@/types';
 import {
   getApplicantAutomationStatusLabel,
   getApplicantAutomationStatusTone,
@@ -936,7 +936,21 @@ const InfoTab: React.FC<InfoTabProps> = ({
   }
 
   function handleIntResult(result: string) {
-    updateApplicant((a) => ({ ...a, intResult: result }));
+    // intResult と連動して automationStatus も更新する。
+    //  - '合格' → hired
+    //  - '不合格' → rejected
+    //  - '欠席' → interview_no_show
+    //  - 上記以外（想定外値）は automationStatus を変更しない
+    const automationStatus: ApplicantAutomationStatus | undefined =
+      result === '合格' ? 'hired'
+      : result === '不合格' ? 'rejected'
+      : result === '欠席' ? 'interview_no_show'
+      : undefined;
+    updateApplicant((a) => {
+      const next: Applicant = { ...a, intResult: result };
+      if (automationStatus) next.automationStatus = automationStatus;
+      return next;
+    });
   }
 
   // H-5: 面接設定を eventRepository.scheduleInterview 経由に集約。
