@@ -114,64 +114,151 @@ const badgeStyle = (color: string, bg: string, border: string): React.CSSPropert
 const TRIGGER_AUTO = badgeStyle('#1E3A8A', '#DBEAFE', '#BFDBFE');
 const TRIGGER_MANUAL = badgeStyle('#3F3F46', '#F3F4F6', '#E5E7EB');
 const TRIGGER_CANDIDATE = badgeStyle('#92400E', '#FEF3C7', '#FDE68A');
+const TRIGGER_PLANNED = badgeStyle('#6B21A8', '#F3E8FF', '#E9D5FF');
+
+type StatusCategory = 'implemented' | 'candidate' | 'planned';
+type StatusTrigger = 'auto' | 'manual' | 'candidate' | 'planned';
 
 interface StatusRow {
   label: string;
-  trigger: 'auto' | 'manual' | 'candidate';
+  category: StatusCategory;
+  trigger: StatusTrigger;
   triggerLabel: string;
   condition: string;
   effect: string;
 }
 
 const STATUS_ROWS: StatusRow[] = [
+  // ── 実装済み（自動付与 / ボタン操作） ──
   {
-    label: '充足受付',
+    label: '新規',
+    category: 'implemented',
     trigger: 'auto',
     triggerLabel: '自動で付与',
-    condition: '拠点×職種が「充足」になっている応募が登録されたとき',
-    effect: '面接導線停止 / 充足返信メール導線',
+    condition: '応募者を取り込んだ時',
+    effect: '応募直後の初期状態',
   },
   {
-    label: '選考対象外',
+    label: '面接確定',
+    category: 'implemented',
     trigger: 'auto',
     triggerLabel: '自動で付与',
-    condition: '除外リスト該当、または応募条件外の応募が登録されたとき',
-    effect: '面接導線停止',
-  },
-  {
-    label: '反応なし候補',
-    trigger: 'candidate',
-    triggerLabel: '候補表示のみ',
-    condition: '最終連絡から判定日数を超過した応募',
-    effect: '一覧 / 詳細でバッジ表示。自動確定はしない',
-  },
-  {
-    label: '反応なし',
-    trigger: 'manual',
-    triggerLabel: '手動で切替',
-    condition: '応募者詳細から「反応なしにする」で切替',
-    effect: '追客管理用。通常の選考フローから外して管理',
-  },
-  {
-    label: '追いかけ中',
-    trigger: 'manual',
-    triggerLabel: '手動で切替',
-    condition: '応募者詳細から「追いかけ中にする」で切替',
-    effect: '追客管理用。再アプローチ中であることを明示',
-  },
-  {
-    label: '面接終了',
-    trigger: 'manual',
-    triggerLabel: '手動で切替',
-    condition: '応募者詳細から「面接終了にする」で切替',
-    effect: '面接結果管理用',
+    condition: '面接日程を確定した時',
+    effect: '面接情報に確定日時が表示されます',
   },
   {
     label: '面接欠席',
+    category: 'implemented',
     trigger: 'manual',
-    triggerLabel: '手動で切替',
-    condition: '応募者詳細から「面接欠席にする」で切替',
-    effect: '面接結果管理用',
+    triggerLabel: 'ボタン操作で付与',
+    condition: '面接情報の「面接欠席」ボタンを押した時',
+    effect: '面接結果として管理されます',
+  },
+  {
+    label: '採用',
+    category: 'implemented',
+    trigger: 'manual',
+    triggerLabel: 'ボタン操作で付与',
+    condition: '面接情報の「採用」ボタンを押した時',
+    effect: '面接結果として管理されます',
+  },
+  {
+    label: '不採用',
+    category: 'implemented',
+    trigger: 'manual',
+    triggerLabel: 'ボタン操作で付与',
+    condition: '面接情報の「不採用」ボタンを押した時',
+    effect: '面接結果として管理されます',
+  },
+  {
+    label: '選考対象外',
+    category: 'implemented',
+    trigger: 'auto',
+    triggerLabel: '自動で付与',
+    condition: '除外リスト該当 / 応募条件外の応募登録',
+    effect: '通常の日程調整を停止します',
+  },
+  {
+    label: '充足受付',
+    category: 'implemented',
+    trigger: 'auto',
+    triggerLabel: '自動で付与',
+    condition: '充足中の拠点×職種への応募登録',
+    effect: '通常の日程調整を停止し、充足返信導線を表示します',
+  },
+
+  // ── 候補表示（バッジ表示のみ、確定はしない） ──
+  {
+    label: '反応なし候補',
+    category: 'candidate',
+    trigger: 'candidate',
+    triggerLabel: '候補表示のみ',
+    condition: '最終連絡から判定日数を超過',
+    effect: '応募者一覧・詳細で候補として表示します。自動確定はしません',
+  },
+
+  // ── 今後対応（送信基盤・自動判定整備後） ──
+  {
+    label: '日程調整中',
+    category: 'planned',
+    trigger: 'planned',
+    triggerLabel: '今後対応',
+    condition: '日程調整メール / SMS を送信した時',
+    effect: '送信機能整備後に自動付与予定',
+  },
+  {
+    label: '追いかけ中',
+    category: 'planned',
+    trigger: 'planned',
+    triggerLabel: '今後対応',
+    condition: '日程調整後、追加追客を開始した時',
+    effect: '送信回数ルール整備後に自動付与予定',
+  },
+  {
+    label: '反応なし',
+    category: 'planned',
+    trigger: 'planned',
+    triggerLabel: '今後対応',
+    condition: '設定した送信回数を送り切っても反応がない時',
+    effect: '送信回数ルール整備後に自動付与予定',
+  },
+  {
+    label: '面接終了',
+    category: 'planned',
+    trigger: 'planned',
+    triggerLabel: '今後対応',
+    condition: '面接確定済みの日程を過ぎた時',
+    effect: '自動判定の設計後に対応予定',
+  },
+  {
+    label: '送信失敗',
+    category: 'planned',
+    trigger: 'planned',
+    triggerLabel: '今後対応',
+    condition: 'メール / SMS 送信に失敗した時',
+    effect: '実送信基盤整備後に自動付与予定',
+  },
+];
+
+const STATUS_GROUPS: Array<{
+  category: StatusCategory;
+  title: string;
+  description: string;
+}> = [
+  {
+    category: 'implemented',
+    title: '実装済み',
+    description: '応募取込や面接情報の操作で実際に付与・利用されている自動ステータスです。',
+  },
+  {
+    category: 'candidate',
+    title: '候補表示',
+    description: '判定条件を満たした応募者を「候補」として表示します。確定状態ではありません。',
+  },
+  {
+    category: 'planned',
+    title: '今後対応',
+    description: '送信基盤・自動判定の整備後に対応予定の自動ステータスです。現時点では自動付与されません。',
   },
 ];
 
@@ -189,7 +276,22 @@ const TAG_ROWS: TagRow[] = [
 const renderTriggerBadge = (row: StatusRow) => {
   if (row.trigger === 'auto') return <span style={TRIGGER_AUTO}>{row.triggerLabel}</span>;
   if (row.trigger === 'candidate') return <span style={TRIGGER_CANDIDATE}>{row.triggerLabel}</span>;
+  if (row.trigger === 'planned') return <span style={TRIGGER_PLANNED}>{row.triggerLabel}</span>;
   return <span style={TRIGGER_MANUAL}>{row.triggerLabel}</span>;
+};
+
+const subTitleStyle: React.CSSProperties = {
+  margin: '1rem 0 0.25rem',
+  fontSize: '0.875rem',
+  fontWeight: 600,
+  color: '#111827',
+};
+
+const subDescStyle: React.CSSProperties = {
+  margin: '0 0 0.5rem',
+  fontSize: '0.75rem',
+  color: '#6B7280',
+  lineHeight: 1.6,
 };
 
 const AutomationSettings: React.FC = () => {
@@ -289,30 +391,40 @@ const AutomationSettings: React.FC = () => {
       <section style={sectionStyle}>
         <h3 style={sectionTitleStyle}>自動ステータス</h3>
         <p style={sectionDescStyle}>
-          応募者ごとに1つだけ持つ自動処理の現在状態です。自動で付与されるものと、応募者詳細から手動で切り替えるものがあります。「反応なし候補」は判定日数を超えた応募の参考表示で、確定状態ではありません。
+          応募者ごとに1つだけ持つ自動処理の現在状態です。「実装済み」は応募取込や面接情報のボタン操作で実際に付与されます。「候補表示」は条件を満たした応募の参考表示で、確定状態ではありません。「今後対応」は送信基盤や自動判定の整備後に対応予定です。
         </p>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>自動ステータス</th>
-                <th style={thStyle}>付与方法</th>
-                <th style={thStyle}>付与条件</th>
-                <th style={thStyle}>主な挙動</th>
-              </tr>
-            </thead>
-            <tbody>
-              {STATUS_ROWS.map((row) => (
-                <tr key={row.label}>
-                  <td style={{ ...tdStyle, fontWeight: 600, whiteSpace: 'nowrap' }}>{row.label}</td>
-                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{renderTriggerBadge(row)}</td>
-                  <td style={tdStyle}>{row.condition}</td>
-                  <td style={tdStyle}>{row.effect}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {STATUS_GROUPS.map((group) => {
+          const rows = STATUS_ROWS.filter((r) => r.category === group.category);
+          if (rows.length === 0) return null;
+          return (
+            <div key={group.category}>
+              <h4 style={subTitleStyle}>{group.title}</h4>
+              <p style={subDescStyle}>{group.description}</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>自動ステータス</th>
+                      <th style={thStyle}>付与方法</th>
+                      <th style={thStyle}>付与条件</th>
+                      <th style={thStyle}>主な挙動</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.label}>
+                        <td style={{ ...tdStyle, fontWeight: 600, whiteSpace: 'nowrap' }}>{row.label}</td>
+                        <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{renderTriggerBadge(row)}</td>
+                        <td style={tdStyle}>{row.condition}</td>
+                        <td style={tdStyle}>{row.effect}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
       </section>
 
       {/* C. 自動タグ一覧 */}
