@@ -27,6 +27,7 @@ import {
   findFulfillmentEmailTemplate,
   renderEmailTemplate,
   getNoResponseCandidate,
+  getDerivedAutomationStatus,
 } from '@/utils/applicantAutomation';
 import { getNoResponseThresholdDays } from '@/utils/clientAutomationSettings';
 
@@ -1299,7 +1300,9 @@ const InfoTab: React.FC<InfoTabProps> = ({
 
             {/* 自動ステータス / 判定理由（手動 stage とは別軸、表示専用） */}
             {(() => {
-              const autoStatus = applicant.automationStatus;
+              // 面接日程経過後は derived で 'interview_completed' 表示にする (保存はしない)。
+              const derivedStatus = getDerivedAutomationStatus(applicant, events);
+              const autoStatus = derivedStatus ?? applicant.automationStatus;
               const autoTags = applicant.automationTags || [];
               const statusTone = getApplicantAutomationStatusTone(autoStatus);
               return (
@@ -1354,11 +1357,13 @@ const InfoTab: React.FC<InfoTabProps> = ({
               );
             })()}
 
-            {/* 反応なし候補（Step 6-B、表示専用 derived state） */}
+            {/* 反応なし候補（Step 6-B、表示専用 derived state）。
+                面接終了 derived が優先するため、derived = interview_completed の応募者では非表示。 */}
             {(() => {
               const thresholdDays = getNoResponseThresholdDays(client);
               const noResp = getNoResponseCandidate(applicant, thresholdDays);
-              if (!noResp.isCandidate) return null;
+              const derivedStatus = getDerivedAutomationStatus(applicant, events);
+              if (!noResp.isCandidate || derivedStatus === 'interview_completed') return null;
               return (
                 <div
                   style={{

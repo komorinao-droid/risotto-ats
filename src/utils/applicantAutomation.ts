@@ -6,6 +6,7 @@ import type {
   ClientData,
   EmailTemplate,
   ExclusionEntry,
+  InterviewEvent,
 } from '@/types';
 
 /**
@@ -427,6 +428,53 @@ export function isInterviewOutcomeStatus(
   status: ApplicantAutomationStatus | undefined,
 ): boolean {
   return status === 'interview_completed' || status === 'interview_no_show';
+}
+
+/**
+ * 面接日程経過後の derived 自動ステータス表示 (2026-05 追加).
+ *
+ * 表示専用 helper。repository / localStorage / applicant object には書き戻さない。
+ *
+ * 条件 (すべて満たす場合のみ 'interview_completed' を返す):
+ *  - automationStatus === 'interview_confirmed'
+ *  - intResult が未設定 / 空文字
+ *  - 対象 applicant.id に紐づく InterviewEvent が存在する
+ *  - その event の `date + (end || start)` が now より過去
+ *
+ * イベント時刻の扱い:
+ *  - end があれば `date + end` を優先（面接終了時刻基準）
+ *  - end が空で start があれば `date + start` を使う
+ *  - date が無い / start・end どちらも無い event は無視
+ *  - 解析に失敗した event は無視
+ *
+ * 戻り値:
+ *  - 該当 event が 1 つでもあれば 'interview_completed'
+ *  - 上記いずれにも該当しなければ undefined
+ *
+ * 呼び出し側の使い方 (優先順位):
+ *   getDerivedAutomationStatus(a, events) ?? a.automationStatus
+ */
+export function getDerivedAutomationStatus(
+  applicant: Pick<Applicant, 'id' | 'automationStatus' | 'intResult'>,
+  events: InterviewEvent[],
+  now: Date = new Date(),
+): ApplicantAutomationStatus | undefined {
+  if (applicant.automationStatus !== 'interview_confirmed') return undefined;
+  if (applicant.intResult && applicant.intResult.trim() !== '') return undefined;
+
+  const nowMs = now.getTime();
+  for (const ev of events) {
+    if (ev.applicantId !== applicant.id) continue;
+    if (!ev.date) continue;
+    const timePart = ev.end || ev.start;
+    if (!timePart) continue;
+    const ts = Date.parse(`${ev.date}T${timePart}`);
+    if (Number.isNaN(ts)) continue;
+    if (ts < nowMs) {
+      return 'interview_completed';
+    }
+  }
+  return undefined;
 }
 
 /**

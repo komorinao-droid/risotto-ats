@@ -12,6 +12,7 @@ import { formatShortDate } from '@/utils/date';
 import type { Applicant, InterviewEvent, PrefDateTime } from '@/types';
 import {
   getApplicantAutomationStatusLabel,
+  getDerivedAutomationStatus,
   getApplicantAutomationStatusTone,
   getApplicantAutomationTagLabel,
   getApplicantAutomationTagTone,
@@ -48,15 +49,21 @@ function genderAvatarIcon(gender: string): string {
 function ApplicantAutomationBadges({
   applicant,
   thresholdDays,
+  events,
 }: {
   applicant: Applicant;
   thresholdDays: number;
+  events: InterviewEvent[];
 }) {
-  const status = applicant.automationStatus;
+  // 面接日程経過後は derived で 'interview_completed' 表示にする (保存はしない)。
+  const derivedStatus = getDerivedAutomationStatus(applicant, events);
+  const status = derivedStatus ?? applicant.automationStatus;
   const tags = applicant.automationTags || [];
   // 反応なし候補は表示専用の derived state。automationStatus は書き換えない。
+  // 面接終了 derived 表示が優先するため derivedStatus = interview_completed の応募者では非表示。
   const noResp = getNoResponseCandidate(applicant, thresholdDays);
-  if (!status && tags.length === 0 && !noResp.isCandidate) return null;
+  const showNoResp = noResp.isCandidate && derivedStatus !== 'interview_completed';
+  if (!status && tags.length === 0 && !showNoResp) return null;
   const statusTone = getApplicantAutomationStatusTone(status);
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
@@ -100,7 +107,7 @@ function ApplicantAutomationBadges({
           </span>
         );
       })}
-      {noResp.isCandidate && (
+      {showNoResp && (
         <span
           title={
             noResp.daysSinceLastContact != null
@@ -1153,7 +1160,7 @@ const ApplicantList: React.FC = () => {
                               {a.furigana}
                             </div>
                           )}
-                          <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} />
+                          <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} events={events} />
                         </div>
                       </div>
                     </td>
@@ -1411,7 +1418,7 @@ const ApplicantList: React.FC = () => {
                     {a.stage}
                   </span>
                 </div>
-                <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} />
+                <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} events={events} />
                 <div
                   style={{
                     display: 'grid',
