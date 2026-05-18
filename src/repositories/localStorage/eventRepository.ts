@@ -1,6 +1,7 @@
 import type { Applicant, CancelledInterview, InterviewEvent } from '@/types';
 import { storage } from '@/utils/storage';
 import { withStageChange } from '@/utils/applicantLifecycle';
+import { canOverwriteAutomationStatusForInterviewConfirmed } from '@/utils/applicantAutomation';
 import type {
   EventRepository,
   ListEventsByDateRangeParams,
@@ -144,15 +145,23 @@ export class LocalStorageEventRepository implements EventRepository {
     const createdEvent: InterviewEvent = { ...event, id: nextId, applicantId };
 
     // 該当 applicant の stage 遷移（pure helper、same-stage で同参照返却 = no-op）
+    //  - 加えて、強い終端状態（filled_received / excluded / hired / rejected / interview_no_show）
+    //    と既に interview_confirmed のケース以外は automationStatus も 'interview_confirmed' に進める。
     let nextApplicants: Applicant[] = applicants;
     let updatedApplicant: Applicant | undefined;
     const idx = applicants.findIndex((a) => a.id === applicantId);
     if (idx >= 0) {
       const prev = applicants[idx];
-      const next = withStageChange(prev, '面接確定', {
+      const staged = withStageChange(prev, '面接確定', {
         operator: options.operator,
         reason: options.reason,
       });
+      const shouldUpdateAutomation = canOverwriteAutomationStatusForInterviewConfirmed(
+        prev.automationStatus,
+      );
+      const next: Applicant = shouldUpdateAutomation
+        ? { ...staged, automationStatus: 'interview_confirmed' }
+        : staged;
       if (next !== prev) {
         nextApplicants = applicants.slice();
         nextApplicants[idx] = next;

@@ -428,6 +428,36 @@ export function isInterviewOutcomeStatus(
   return status === 'interview_completed' || status === 'interview_no_show';
 }
 
+/**
+ * 面接確定時に automationStatus を 'interview_confirmed' へ上書きしてよいかを判定する。
+ *
+ * 上書きしない（強い終端状態 + 既に interview_confirmed）:
+ *  - filled_received（充足受付）
+ *  - excluded（選考対象外）
+ *  - hired（採用）
+ *  - rejected（不採用）
+ *  - interview_no_show（面接欠席）
+ *  - interview_confirmed（既に同値、不要な更新を避ける）
+ *
+ * 上書きしてOK（中間状態 / 未設定）:
+ *  - undefined / schedule_not_sent / scheduling / questions_answered_no_schedule /
+ *    preferred_dates_collected / interview_pending_confirmation / interview_completed /
+ *    no_response / following_up
+ */
+export function canOverwriteAutomationStatusForInterviewConfirmed(
+  status: ApplicantAutomationStatus | undefined,
+): boolean {
+  if (!status) return true;
+  return (
+    status !== 'filled_received' &&
+    status !== 'excluded' &&
+    status !== 'hired' &&
+    status !== 'rejected' &&
+    status !== 'interview_no_show' &&
+    status !== 'interview_confirmed'
+  );
+}
+
 /** バッジ表示用の色トーン。既存 inline style 流儀に合わせた hex 値ペア。 */
 export interface AutomationBadgeTone {
   bg: string;
