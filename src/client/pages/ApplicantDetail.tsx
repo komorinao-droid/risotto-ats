@@ -328,11 +328,15 @@ const ApplicantDetail: React.FC<ApplicantDetailProps> = ({ applicantId: propId, 
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {onBack && (
-            <button onClick={onBack} style={{ ...btnSecondary, padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-              &#8592; 戻る
-            </button>
-          )}
+          <button
+            onClick={() => {
+              if (onBack) onBack();
+              else window.location.assign('/applicants');
+            }}
+            style={{ ...btnSecondary, padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}
+          >
+            &#8592; 応募一覧に戻る
+          </button>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700 }}>{applicant.name}</h2>
@@ -1638,10 +1642,12 @@ const InfoTab: React.FC<InfoTabProps> = ({
               </div>
               <InfoTableRow label="フリガナ" value={applicant.furigana} editing={isEditing} editValue={editData.furigana || ''} onChange={handleFuriganaChange} placeholder="カタカナで入力" />
               <InfoTableRow label="応募日" value={formatDateJP(applicant.date)} editing={isEditing} editValue={editData.date || ''} onChange={(v) => setEditData((p) => ({ ...p, date: v }))} type="date" />
-              <InfoTableRow label="年齢" value={applicant.age != null ? `${applicant.age}歳` : '-'} editing={false} editValue="" onChange={() => {}} />
               <InfoTableRow label="生年月日" value={applicant.birthDate ? `${formatDateJP(applicant.birthDate)} (${dateToWareki(applicant.birthDate)})` : ''} editing={isEditing} editValue={birthDateInput} onChange={handleBirthDateChange} placeholder="R5.4.1 / 2023-04-01" />
+              <InfoTableRow label="年齢" value={applicant.age != null ? `${applicant.age}歳` : '-'} editing={false} editValue="" onChange={() => {}} />
               <InfoTableRow label="性別" value={applicant.gender} editing={isEditing} editValue={editData.gender || ''} onChange={(v) => setEditData((p) => ({ ...p, gender: v }))} selectOptions={['男性', '女性', 'その他', '未回答']} />
               <InfoTableRow label="現在の職業" value={applicant.currentJob} editing={isEditing} editValue={editData.currentJob || ''} onChange={(v) => setEditData((p) => ({ ...p, currentJob: v }))} />
+              <InfoTableRow label="電話番号" value={applicant.phone} editing={isEditing} editValue={editData.phone || ''} onChange={(v) => setEditData((p) => ({ ...p, phone: v }))} type="tel" />
+              <InfoTableRow label="メールアドレス" value={applicant.email} editing={isEditing} editValue={editData.email || ''} onChange={(v) => setEditData((p) => ({ ...p, email: v }))} type="email" />
               {isEditing ? (
                 <div style={tableRowStyle}>
                   <span style={tableLabelStyle}>拠点</span>
@@ -1655,8 +1661,19 @@ const InfoTab: React.FC<InfoTabProps> = ({
               ) : (
                 <InfoTableRow label="拠点" value={applicant.base} editing={false} editValue="" onChange={() => {}} />
               )}
-              <InfoTableRow label="電話番号" value={applicant.phone} editing={isEditing} editValue={editData.phone || ''} onChange={(v) => setEditData((p) => ({ ...p, phone: v }))} type="tel" />
-              <InfoTableRow label="メールアドレス" value={applicant.email} editing={isEditing} editValue={editData.email || ''} onChange={(v) => setEditData((p) => ({ ...p, email: v }))} type="email" />
+              {isEditing ? (
+                <div style={tableRowStyle}>
+                  <span style={tableLabelStyle}>職種</span>
+                  <SearchableSelect
+                    options={scopedJobs.map((j) => ({ value: j.name, label: j.name }))}
+                    value={editData.job || ''}
+                    onChange={(v) => setEditData((p) => ({ ...p, job: v }))}
+                    placeholder="職種を選択"
+                  />
+                </div>
+              ) : (
+                <InfoTableRow label="職種" value={applicant.job} editing={false} editValue="" onChange={() => {}} />
+              )}
               {/* Source with color badge */}
               {isEditing ? (
                 <div style={tableRowStyle}>
@@ -1689,19 +1706,6 @@ const InfoTab: React.FC<InfoTabProps> = ({
                     )}
                   </span>
                 </div>
-              )}
-              {isEditing ? (
-                <div style={tableRowStyle}>
-                  <span style={tableLabelStyle}>職種</span>
-                  <SearchableSelect
-                    options={scopedJobs.map((j) => ({ value: j.name, label: j.name }))}
-                    value={editData.job || ''}
-                    onChange={(v) => setEditData((p) => ({ ...p, job: v }))}
-                    placeholder="職種を選択"
-                  />
-                </div>
-              ) : (
-                <InfoTableRow label="職種" value={applicant.job} editing={false} editValue="" onChange={() => {}} />
               )}
             </div>
           </div>
