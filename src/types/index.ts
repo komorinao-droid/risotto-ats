@@ -174,6 +174,7 @@ export interface Applicant {
  * - 表示ラベルは src/utils/applicantAutomation.ts を参照
  */
 export type ApplicantAutomationStatus =
+  | 'new_applicant'
   | 'schedule_not_sent'
   | 'scheduling'
   | 'questions_answered_no_schedule'

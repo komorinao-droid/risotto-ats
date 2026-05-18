@@ -275,11 +275,11 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
         { name: applicant.name, phone: applicant.phone },
         { baseName: scopeBase },
       );
-      // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5):
+      // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5 + Step new_applicant):
       //   1. 除外リスト該当       → automationStatus = 'excluded' + tag 'excluded_list_match'
       //   2. 応募条件フィルタ該当 → automationStatus = 'excluded' + tag 'condition_mismatch'
       //   3. 充足求人応募         → automationStatus = 'filled_received' + tag 'filled_opening_application'
-      //   4. どれでもない         → 未設定
+      //   4. どれでもない         → automationStatus = 'new_applicant'（tag は付けない）
       // 手動 stage / 重複判定 / 既存 alert 用 exclusionMsg はここでは上書きしない。
       const excluded = isExcludedListMatch(clientData, applicant);
       const conditionMismatch = !excluded && isFilterConditionMismatch(clientData, applicant);
@@ -303,7 +303,10 @@ const AddApplicantModal: React.FC<AddApplicantModalProps> = ({ isOpen, onClose }
             automationStatus: 'filled_received',
             automationTags: withAutomationTag(applicant.automationTags, 'filled_opening_application'),
           }
-        : applicant;
+        : {
+            ...applicant,
+            automationStatus: 'new_applicant',
+          };
       applicantRepository.create(ownerId, applicantToCreate);
       reloadClientData();
     }

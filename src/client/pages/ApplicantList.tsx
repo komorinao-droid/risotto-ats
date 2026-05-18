@@ -628,11 +628,11 @@ const ApplicantList: React.FC = () => {
       // stage が CSV で明示されていた行のみ initialStageReason='csv_import' を渡し、
       // stageHistory に 1 件「初期 stage」エントリを残す。
       for (const item of pendingItems) {
-        // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5):
+        // 自動ステータス／自動タグの優先順位 (Step 2-α + Step 4 + Step 5 + Step new_applicant):
         //   1. 除外リスト該当       → automationStatus = 'excluded' + tag 'excluded_list_match'
         //   2. 応募条件フィルタ該当 → automationStatus = 'excluded' + tag 'condition_mismatch'
         //   3. 充足求人応募         → automationStatus = 'filled_received' + tag 'filled_opening_application'
-        //   4. どれでもない         → 未設定
+        //   4. どれでもない         → automationStatus = 'new_applicant'（tag は付けない）
         // 既存 item.applicant は mutate せず、新しい object を作って create() に渡す。
         const excluded = isExcludedListMatch(clientData, item.applicant);
         const conditionMismatch =
@@ -659,7 +659,10 @@ const ApplicantList: React.FC = () => {
               automationStatus: 'filled_received',
               automationTags: withAutomationTag(item.applicant.automationTags, 'filled_opening_application'),
             }
-          : item.applicant;
+          : {
+              ...item.applicant,
+              automationStatus: 'new_applicant',
+            };
         if (item.stageExplicit) {
           applicantRepository.create(ownerId, applicantToCreate, {
             initialStageReason: 'csv_import',

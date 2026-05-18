@@ -18,6 +18,7 @@ import type {
  */
 
 export const APPLICANT_AUTOMATION_STATUS_LABELS: Record<ApplicantAutomationStatus, string> = {
+  new_applicant: '新規',
   schedule_not_sent: '日程調整未送信',
   scheduling: '日程調整中',
   questions_answered_no_schedule: '質問回答済・日程未回答',
