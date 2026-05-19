@@ -134,6 +134,100 @@ function ApplicantAutomationBadges({
   );
 }
 
+// ─── ステータス列上部の自動ステータス badge 表示用 helper ───
+// desktop table のステータス列で `<select>` の上に出す badge は 1 件のみ。
+// 表示優先順位:
+//   1. derived interview_completed
+//   2. excluded + condition_mismatch / excluded_list_match / それ以外
+//   3. 強い automationStatus (filled_received / hired / rejected / interview_no_show / interview_confirmed)
+//   4. 反応なし候補
+//   5. その他 automationStatus (new_applicant 等)
+//   6. 何もなければ null
+type RowAutoStatusDisplay = {
+  label: string;
+  tone: {
+    bg: string;
+    fg: string;
+    border: string;
+  };
+};
+
+function getRowAutoStatusDisplay(
+  applicant: Applicant,
+  events: InterviewEvent[],
+  thresholdDays: number,
+): RowAutoStatusDisplay | null {
+  const derivedStatus = getDerivedAutomationStatus(applicant, events);
+  const status = derivedStatus ?? applicant.automationStatus;
+
+  // 1. 面接終了 derived
+  if (derivedStatus === 'interview_completed') {
+    return {
+      label: getApplicantAutomationStatusLabel('interview_completed'),
+      tone: getApplicantAutomationStatusTone('interview_completed'),
+    };
+  }
+
+  // 2. excluded は tags 優先
+  if (status === 'excluded') {
+    const tags = applicant.automationTags || [];
+
+    if (tags.includes('condition_mismatch')) {
+      return {
+        label: getApplicantAutomationTagLabel('condition_mismatch'),
+        tone: getApplicantAutomationTagTone('condition_mismatch'),
+      };
+    }
+
+    if (tags.includes('excluded_list_match')) {
+      return {
+        label: getApplicantAutomationTagLabel('excluded_list_match'),
+        tone: getApplicantAutomationTagTone('excluded_list_match'),
+      };
+    }
+
+    return {
+      label: getApplicantAutomationStatusLabel('excluded'),
+      tone: getApplicantAutomationStatusTone('excluded'),
+    };
+  }
+
+  // 3. 強い automationStatus
+  const STRONG = new Set<string>([
+    'filled_received',
+    'hired',
+    'rejected',
+    'interview_no_show',
+    'interview_confirmed',
+  ]);
+
+  if (status && STRONG.has(status)) {
+    return {
+      label: getApplicantAutomationStatusLabel(status),
+      tone: getApplicantAutomationStatusTone(status),
+    };
+  }
+
+  // 4. 反応なし候補
+  const noResp = getNoResponseCandidate(applicant, thresholdDays);
+  if (noResp.isCandidate) {
+    return {
+      label: '反応なし候補',
+      tone: { bg: '#FEF3C7', fg: '#92400E', border: '#FDE68A' },
+    };
+  }
+
+  // 5. その他 automationStatus（new_applicant 等）
+  if (status) {
+    return {
+      label: getApplicantAutomationStatusLabel(status),
+      tone: getApplicantAutomationStatusTone(status),
+    };
+  }
+
+  return null;
+}
+
 // ─── CSV helpers ───
 function escapeCSV(val: string): string {
   if (!val) return '';
@@ -1160,7 +1254,6 @@ const ApplicantList: React.FC = () => {
                               {a.furigana}
                             </div>
                           )}
-                          <ApplicantAutomationBadges applicant={a} thresholdDays={noResponseThresholdDays} events={events} />
                         </div>
                       </div>
                     </td>
@@ -1219,34 +1312,65 @@ const ApplicantList: React.FC = () => {
 
                     {/* Status (inline select) */}
                     <td style={tdStyle}>
-                      <select
-                        value={a.stage}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => handleStatusChange(a.id, e.target.value)}
+                      <div
                         style={{
-                          padding: '0.1875rem 0.375rem',
-                          border: '1px solid transparent',
-                          borderRadius: '4px',
-                          backgroundColor: stColor + '18',
-                          color: stColor,
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          maxWidth: '100%',
-                          appearance: 'none' as const,
-                          WebkitAppearance: 'none' as const,
-                          backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 5L0 0h8z' fill='${encodeURIComponent(stColor)}'/%3E%3C/svg%3E")`,
-                          backgroundRepeat: 'no-repeat',
-                          backgroundPosition: 'right 6px center',
-                          paddingRight: '1.25rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          gap: '0.125rem',
                         }}
                       >
-                        {statuses.map((s) => (
-                          <option key={s.id} value={s.name}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
+                        {(() => {
+                          const disp = getRowAutoStatusDisplay(a, events, noResponseThresholdDays);
+                          if (!disp) return null;
+                          return (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                backgroundColor: disp.tone.bg,
+                                color: disp.tone.fg,
+                                border: `1px solid ${disp.tone.border}`,
+                                fontSize: '0.625rem',
+                                fontWeight: 600,
+                                padding: '0.0625rem 0.375rem',
+                                borderRadius: '4px',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {disp.label}
+                            </span>
+                          );
+                        })()}
+                        <select
+                          value={a.stage}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => handleStatusChange(a.id, e.target.value)}
+                          style={{
+                            padding: '0.1875rem 0.375rem',
+                            border: '1px solid transparent',
+                            borderRadius: '4px',
+                            backgroundColor: stColor + '18',
+                            color: stColor,
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            maxWidth: '100%',
+                            appearance: 'none' as const,
+                            WebkitAppearance: 'none' as const,
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 5L0 0h8z' fill='${encodeURIComponent(stColor)}'/%3E%3C/svg%3E")`,
+                            backgroundRepeat: 'no-repeat',
+                            backgroundPosition: 'right 6px center',
+                            paddingRight: '1.25rem',
+                          }}
+                        >
+                          {statuses.map((s) => (
+                            <option key={s.id} value={s.name}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
 
                     {/* Needs Action */}
