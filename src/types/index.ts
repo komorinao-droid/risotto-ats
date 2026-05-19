@@ -458,6 +458,14 @@ export interface Client {
    * Step 6-A では設定保存のみで、自動付与は次フェーズで実装する。
    */
   noResponseThresholdDays?: number;
+  /**
+   * 自動送付回数（1〜10、未設定なら DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS 扱い）。
+   * 日程調整メールを最大この回数まで自動送付する想定の上限値。
+   * 最終送付から NO_RESPONSE_AFTER_LAST_SEND_HOURS 時間反応がなければ
+   * automationStatus='no_response' 候補として扱う設計（実送付は次フェーズ）。
+   * 現フェーズでは設定保存のみで、応募者ステータスは自動更新しない。
+   */
+  autoFollowUpMaxSends?: number;
 }
 
 // メールテンプレート カテゴリ (2026-05 Step 3 追加)。

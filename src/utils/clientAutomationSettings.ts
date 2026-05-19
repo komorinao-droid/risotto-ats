@@ -42,3 +42,49 @@ export function getNoResponseThresholdDays(
   }
   return normalizeNoResponseThresholdDays(client.noResponseThresholdDays);
 }
+
+/**
+ * 自動送付回数 設定 (2026-05 追加)。
+ *  - 日程調整メールを最大 N 回まで自動送付する想定の上限値。
+ *  - 最終送付から `NO_RESPONSE_AFTER_LAST_SEND_HOURS` 時間反応がなければ
+ *    automationStatus='no_response' 候補として扱う設計。
+ *  - 現フェーズは設定保存のみ。実送付ロジックとの結線は次フェーズ。
+ */
+export const DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS = 3;
+export const MIN_AUTO_FOLLOW_UP_MAX_SENDS = 1;
+export const MAX_AUTO_FOLLOW_UP_MAX_SENDS = 10;
+
+/** UI の select options。運用ミス低減のため離散値を提示する。 */
+export const AUTO_FOLLOW_UP_MAX_SENDS_OPTIONS: readonly number[] = [1, 2, 3, 5, 7, 10] as const;
+
+/** 最終送付から「反応なし」と判定するまでの時間（時間単位）。 */
+export const NO_RESPONSE_AFTER_LAST_SEND_HOURS = 24;
+
+/**
+ * 任意入力値を 1〜10 の整数にクランプ。
+ *  - 数値化できない / NaN / Infinity は DEFAULT にフォールバック
+ *  - 小数は `trunc` で切り捨て
+ *  - 範囲外は min/max にクランプ
+ */
+export function normalizeAutoFollowUpMaxSends(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS;
+  const truncated = Math.trunc(n);
+  return Math.min(
+    MAX_AUTO_FOLLOW_UP_MAX_SENDS,
+    Math.max(MIN_AUTO_FOLLOW_UP_MAX_SENDS, truncated),
+  );
+}
+
+/**
+ * Client 風オブジェクトから自動送付回数を取り出す。
+ * 未設定 / 不正値は DEFAULT にフォールバックする。
+ */
+export function getAutoFollowUpMaxSends(
+  client: { autoFollowUpMaxSends?: number } | null | undefined,
+): number {
+  if (!client || client.autoFollowUpMaxSends == null) {
+    return DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS;
+  }
+  return normalizeAutoFollowUpMaxSends(client.autoFollowUpMaxSends);
+}

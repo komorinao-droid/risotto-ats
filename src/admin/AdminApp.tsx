@@ -57,6 +57,11 @@ import {
   NO_RESPONSE_THRESHOLD_DAYS_OPTIONS,
   getNoResponseThresholdDays,
   normalizeNoResponseThresholdDays,
+  DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS,
+  AUTO_FOLLOW_UP_MAX_SENDS_OPTIONS,
+  NO_RESPONSE_AFTER_LAST_SEND_HOURS,
+  getAutoFollowUpMaxSends,
+  normalizeAutoFollowUpMaxSends,
 } from '@/utils/clientAutomationSettings';
 import type { ClientOption, ClientOptionKey, ClientOptionStatus } from '@/types';
 import {
@@ -1862,6 +1867,7 @@ const AutomationSettingsSection: React.FC<{
   onUpdateClient: (id: string, mutator: (c: Client) => Client) => void;
   onLog?: (action: string, target: string, detail?: string) => void;
 }> = ({ client, onUpdateClient, onLog }) => {
+  // ── 反応なし判定日数 ──
   const currentValue = getNoResponseThresholdDays(client);
   const isUnset = client.noResponseThresholdDays == null;
   const [editing, setEditing] = useState(false);
@@ -1892,6 +1898,38 @@ const AutomationSettingsSection: React.FC<{
     setEditing(false);
   };
 
+  // ── 自動送付回数 ──
+  const currentSends = getAutoFollowUpMaxSends(client);
+  const isSendsUnset = client.autoFollowUpMaxSends == null;
+  const [editingSends, setEditingSends] = useState(false);
+  const [draftSends, setDraftSends] = useState<number>(currentSends);
+  const [savedSendsAt, setSavedSendsAt] = useState<string>('');
+
+  const startEditSends = () => {
+    setDraftSends(currentSends);
+    setEditingSends(true);
+  };
+
+  const handleSaveSends = () => {
+    const next = normalizeAutoFollowUpMaxSends(draftSends);
+    if (next === currentSends && !isSendsUnset) {
+      setEditingSends(false);
+      return;
+    }
+    onUpdateClient(client.id, (c) => ({ ...c, autoFollowUpMaxSends: next }));
+    const beforeLabel = isSendsUnset
+      ? `未設定(${DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS}回扱い)`
+      : `${currentSends}回`;
+    onLog?.('自動送付回数 変更', client.companyName, `${beforeLabel} → ${next}回`);
+    setSavedSendsAt(new Date().toLocaleTimeString());
+    setEditingSends(false);
+  };
+
+  const handleCancelSends = () => {
+    setDraftSends(currentSends);
+    setEditingSends(false);
+  };
+
   return (
     <div style={{ ...cardStyle, padding: '1.25rem', marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -1899,14 +1937,16 @@ const AutomationSettingsSection: React.FC<{
           <Settings size={16} color="#0891B2" />
           自動処理設定
         </h3>
-        {!editing && (
-          <button onClick={startEdit} style={btnSecondary}>編集</button>
-        )}
       </div>
 
       <div style={{ marginTop: '0.5rem' }}>
-        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>
-          反応なし判定日数
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>
+            反応なし判定日数
+          </div>
+          {!editing && (
+            <button onClick={startEdit} style={btnSecondary}>編集</button>
+          )}
         </div>
         <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '0.625rem' }}>
           日程調整や連絡後、この日数を超えて応募者の反応がない場合に「反応なし」候補として扱います。
@@ -1940,6 +1980,51 @@ const AutomationSettingsSection: React.FC<{
             <button onClick={handleSave} style={btnPrimary}>保存</button>
             <button onClick={handleCancel} style={btnSecondary}>キャンセル</button>
             <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>1〜30日の範囲で設定できます</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid #E5E7EB' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>
+            自動送付回数
+          </div>
+          {!editingSends && (
+            <button onClick={startEditSends} style={btnSecondary}>編集</button>
+          )}
+        </div>
+        <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '0.625rem' }}>
+          設定回数まで自動で日程調整メールを送付します。最終送付から{NO_RESPONSE_AFTER_LAST_SEND_HOURS}時間反応がない場合、自動ステータスを「反応なし」にします。
+        </div>
+
+        {!editingSends && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+            <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#111827' }}>{currentSends}回</div>
+            {isSendsUnset && (
+              <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>
+                （未設定のためデフォルト {DEFAULT_AUTO_FOLLOW_UP_MAX_SENDS}回 を表示）
+              </span>
+            )}
+            {savedSendsAt && !isSendsUnset && (
+              <span style={{ fontSize: '0.6875rem', color: '#059669' }}>{savedSendsAt} 保存済</span>
+            )}
+          </div>
+        )}
+
+        {editingSends && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <select
+              value={draftSends}
+              onChange={(e) => setDraftSends(normalizeAutoFollowUpMaxSends(e.target.value))}
+              style={{ ...inputStyle, width: 'auto', minWidth: '100px' }}
+            >
+              {AUTO_FOLLOW_UP_MAX_SENDS_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}回</option>
+              ))}
+            </select>
+            <button onClick={handleSaveSends} style={btnPrimary}>保存</button>
+            <button onClick={handleCancelSends} style={btnSecondary}>キャンセル</button>
+            <span style={{ fontSize: '0.6875rem', color: '#9CA3AF' }}>1〜10回の範囲で設定できます</span>
           </div>
         )}
       </div>
