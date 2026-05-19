@@ -196,6 +196,14 @@ const STATUS_ROWS: StatusRow[] = [
     condition: '最終連絡から判定日数を超過',
     effect: '応募者一覧・詳細で候補として表示します。自動確定はしません',
   },
+  {
+    label: '面接終了',
+    category: 'candidate',
+    trigger: 'candidate',
+    triggerLabel: '自動判定表示',
+    condition: '面接確定済みの日程を過ぎ、面接結果が未入力',
+    effect: '応募者一覧・詳細で面接終了として表示します。保存はしません',
+  },
 
   // ── 今後対応（送信基盤・自動判定整備後） ──
   {
@@ -221,14 +229,6 @@ const STATUS_ROWS: StatusRow[] = [
     triggerLabel: '今後対応',
     condition: '設定した送信回数を送り切っても反応がない時',
     effect: '送信回数ルール整備後に自動付与予定',
-  },
-  {
-    label: '面接終了',
-    category: 'planned',
-    trigger: 'planned',
-    triggerLabel: '今後対応',
-    condition: '面接確定済みの日程を過ぎた時',
-    effect: '自動判定の設計後に対応予定',
   },
   {
     label: '送信失敗',
