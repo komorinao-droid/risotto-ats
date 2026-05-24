@@ -51,7 +51,6 @@ const NAV_ITEMS: NavItem[] = [
       { path: '/settings/email-templates', label: 'メールテンプレート', icon: null, permission: 'mailtemplate' },
       { path: '/settings/chatbot', label: 'チャットボット', icon: null, permission: 'chatbot' },
       { path: '/settings/screening', label: 'AIスクリーニング', icon: null, optionRequired: 'aiScreening' },
-      { path: '/settings/automation', label: '自動処理設定', icon: null },
       { path: '/reports', label: '採用レポート', icon: null, optionRequired: 'recruitmentReport' },
       { path: '/settings/report-schedule', label: 'レポート定期配信', icon: null, optionRequired: 'recruitmentReport' },
       { path: '/settings/account', label: 'アカウント', icon: null },

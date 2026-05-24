@@ -20,20 +20,17 @@ import type {
 
 export const APPLICANT_AUTOMATION_STATUS_LABELS: Record<ApplicantAutomationStatus, string> = {
   new_applicant: '新規',
-  schedule_not_sent: '日程調整未送信',
   scheduling: '日程調整中',
-  questions_answered_no_schedule: '質問回答済・日程未回答',
-  preferred_dates_collected: '希望日回収済',
-  interview_pending_confirmation: '面接確定待ち',
-  interview_confirmed: '面接確定済',
-  interview_completed: '面接終了',
-  no_response: '反応なし',
   following_up: '追いかけ中',
+  no_response: '反応なし',
+  interview_confirmed: '面接確定',
+  interview_completed: '面接終了',
   interview_no_show: '面接欠席',
   filled_received: '充足受付',
   excluded: '選考対象外',
   hired: '採用',
   rejected: '不採用',
+  send_failed: '送信失敗',
 };
 
 export const APPLICANT_AUTOMATION_TAG_LABELS: Record<ApplicantAutomationTag, string> = {
@@ -487,11 +484,10 @@ export function getDerivedAutomationStatus(
  *  - rejected（不採用）
  *  - interview_no_show（面接欠席）
  *  - interview_confirmed（既に同値、不要な更新を避ける）
+ *  - send_failed（送信失敗）
  *
  * 上書きしてOK（中間状態 / 未設定）:
- *  - undefined / schedule_not_sent / scheduling / questions_answered_no_schedule /
- *    preferred_dates_collected / interview_pending_confirmation / interview_completed /
- *    no_response / following_up
+ *  - undefined / scheduling / following_up / no_response / interview_completed
  */
 export function canOverwriteAutomationStatusForInterviewConfirmed(
   status: ApplicantAutomationStatus | undefined,
@@ -503,7 +499,8 @@ export function canOverwriteAutomationStatusForInterviewConfirmed(
     status !== 'hired' &&
     status !== 'rejected' &&
     status !== 'interview_no_show' &&
-    status !== 'interview_confirmed'
+    status !== 'interview_confirmed' &&
+    status !== 'send_failed'
   );
 }
 
@@ -525,7 +522,7 @@ const GREEN_TONE: AutomationBadgeTone = { bg: '#DCFCE7', fg: '#15803D', border: 
  * 自動ステータスのトーンを返す。
  *  - 未設定: ニュートラル（グレー）
  *  - hired: green（採用成功）
- *  - rejected: red（不採用）
+ *  - rejected / send_failed: red（不採用 / 送信失敗）
  *  - filled_received: 注意喚起なので amber
  *  - excluded / interview_no_show / no_response: ニュートラル
  *  - その他: 既定の blue
@@ -533,7 +530,7 @@ const GREEN_TONE: AutomationBadgeTone = { bg: '#DCFCE7', fg: '#15803D', border: 
 export function getApplicantAutomationStatusTone(status?: ApplicantAutomationStatus): AutomationBadgeTone {
   if (!status) return NEUTRAL_TONE;
   if (status === 'hired') return GREEN_TONE;
-  if (status === 'rejected') return RED_TONE;
+  if (status === 'rejected' || status === 'send_failed') return RED_TONE;
   if (status === 'filled_received') return AMBER_TONE;
   if (status === 'excluded' || status === 'interview_no_show' || status === 'no_response') {
     return NEUTRAL_TONE;

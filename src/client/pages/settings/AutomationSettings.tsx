@@ -201,7 +201,7 @@ const STATUS_ROWS: StatusRow[] = [
     category: 'candidate',
     trigger: 'candidate',
     triggerLabel: '自動判定表示',
-    condition: '面接確定済みの日程を過ぎ、面接結果が未入力',
+    condition: '確定済みの面接日程を過ぎ、面接結果が未入力',
     effect: '応募者一覧・詳細で面接終了として表示します。保存はしません',
   },
 

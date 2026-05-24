@@ -175,20 +175,17 @@ export interface Applicant {
  */
 export type ApplicantAutomationStatus =
   | 'new_applicant'
-  | 'schedule_not_sent'
   | 'scheduling'
-  | 'questions_answered_no_schedule'
-  | 'preferred_dates_collected'
-  | 'interview_pending_confirmation'
+  | 'following_up'
+  | 'no_response'
   | 'interview_confirmed'
   | 'interview_completed'
-  | 'no_response'
-  | 'following_up'
   | 'interview_no_show'
   | 'filled_received'
   | 'excluded'
   | 'hired'
-  | 'rejected';
+  | 'rejected'
+  | 'send_failed';
 
 /**
  * 応募者の自動タグ（例外理由・分岐理由・エラー理由）。
