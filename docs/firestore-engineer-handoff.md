@@ -1,6 +1,7 @@
 # Firestore / Firebase 実装担当向けハンドオフ
 
 > **作成日**: 2026-05-13
+> **最終更新**: 2026-05-25（§9 自動ステータス仕様を追加）
 > **対象**: Firestore / Firebase Auth / Cloud Storage を実装する担当エンジニア
 > **目的**: 実装に入る前の現在地、触ってよい境界、最初の着手順を 1 枚で把握できるようにする。
 > **重要**: このフェーズでは本リポ側で Firebase SDK 導入・Firestore 実装・Auth 差し替えは開始しない。実装は担当エンジニアへ引き継ぐ。
@@ -143,4 +144,74 @@ Repository 内部 (`src/repositories/localStorage/*.ts`) や `storage.ts` / `cli
 ## 8. 引き継ぎ時の一言まとめ
 
 ここまでの作業で、RISOTTO の画面コードは保存先に直接依存しない形まで整理済み。次の担当者は Firebase SDK を入れて即差し替えるのではなく、まず Firestore / Firebase Auth / Cloud Storage の実装を既存 interface の横に追加し、Emulator と migration 検証で localStorage 実装と同じ挙動を確認してから切り替える。
+
+---
+
+## 9. 自動ステータス仕様 (`Applicant.automationStatus`)
+
+> 2026-05-25 追記 — 最終仕様確定。手動 `stage`（採用フロー画面の operator 操作値）とは別軸で、応募者の自動処理フロー状態を 1 つだけ保持するフィールド。
+
+### 9.1 確定値（12 種）
+
+型定義: `src/types/index.ts` の `ApplicantAutomationStatus`  
+ラベル: `src/utils/applicantAutomation.ts` の `APPLICANT_AUTOMATION_STATUS_LABELS`
+
+| automationStatus | 表示名 | 付与タイミング | 実装状態 | tone |
+|---|---|---|---|---|
+| `new_applicant` | 新規 | 応募取込時のデフォルト | ✅ 実装済 | blue |
+| `scheduling` | 日程調整中 | 日程調整メール / SMS 送信時 | ⏳ 送信基盤待ち | blue |
+| `following_up` | 追いかけ中 | 日程調整後の追客開始時 | ⏳ 送信基盤待ち | blue |
+| `no_response` | 反応なし | 送信回数を送り切っても反応なし | ⏳ 送信基盤待ち | neutral |
+| `interview_confirmed` | 面接確定 | 面接日程確定時 (`eventRepository.scheduleInterview`) | ✅ 実装済 | blue |
+| `interview_completed` | 面接終了 | 面接日経過 + `intResult` 空 (derived、persist しない) | ✅ derived 表示のみ | blue |
+| `interview_no_show` | 面接欠席 | 応募者詳細「面接欠席」ボタン | ✅ 実装済 | neutral |
+| `filled_received` | 充足受付 | 充足求人への応募取込 | ✅ 実装済 | amber |
+| `excluded` | 選考対象外 | 除外リスト該当 / 応募条件外の応募取込 | ✅ 実装済 | neutral |
+| `hired` | 採用 | 応募者詳細「採用」ボタン | ✅ 実装済 | green |
+| `rejected` | 不採用 | 応募者詳細「不採用」ボタン | ✅ 実装済 | red |
+| `send_failed` | 送信失敗 | メール / SMS 送信失敗時 | ⏳ 送信基盤待ち | red |
+
+### 9.2 周辺フィールド
+
+| field | 用途 |
+|---|---|
+| `automationTags: ApplicantAutomationTag[]` | 例外 / 分岐理由を 0..N 個。`condition_mismatch` / `excluded_list_match` / `filled_opening_application` / `invalid_contact` / `outside_interview_slots` / `email_send_failed` / `chat_send_failed` |
+| `lastContactedAt?: string` / `firstContactedAt?: string` | 「反応なし候補」derived 判定の起点。閾値は会社単位の `Client.noResponseThresholdDays`（default 3 日） |
+| `Client.autoFollowUpMaxSends?: number` | 自動送付回数（1〜10、default 3）。最終送付から 24 時間反応なしで `no_response` 候補に遷移する設計。**現状は AdminApp で設定保存のみ、実送付ロジック未配線** |
+
+### 9.3 強い終端状態（面接確定で上書き不可）
+
+`canOverwriteAutomationStatusForInterviewConfirmed` (`src/utils/applicantAutomation.ts`) で保護:
+
+- `filled_received` / `excluded` / `hired` / `rejected` / `interview_no_show` / `interview_confirmed` / `send_failed`
+
+これらの状態にある応募者は、追加で面接イベントが入っても `automationStatus` を `interview_confirmed` に上書きしない。Firestore 実装時も同等の guard を維持すること。
+
+### 9.4 derived 表示（persist しない）
+
+`interview_completed` は localStorage / Firestore に保存しない。表示時に `getDerivedAutomationStatus` (`src/utils/applicantAutomation.ts`) が以下の AND 条件で算出する:
+
+- `automationStatus === 'interview_confirmed'`
+- `intResult` が空文字 / 未設定
+- 該当 applicant の `InterviewEvent` のうち `date + (end || start)` が現在時刻より過去
+
+Firestore 化時も「保存しない derived 表示」方針を維持。移行は不要。
+
+### 9.5 設定 UI
+
+| 画面 | 内容 | サイドバー |
+|---|---|---|
+| `/settings/automation`（クライアント側） | 自動ステータス一覧 / 反応なし判定日数 設定 | **非表示**（route は残置、資料リンク / 直 URL のみ） |
+| AdminApp クライアント詳細「自動処理設定」 | 反応なし判定日数 + 自動送付回数（運営側だけが触れる会社単位設定） | AdminApp サイドバー → クライアント管理 → 詳細 |
+
+### 9.6 削除済み（過去案、Firestore 設計時に登場しても無視すること）
+
+以下 4 種は 2026-05-25 に型 / label から完全削除済み。Firestore schema にも入れない:
+
+- `schedule_not_sent` / `日程調整未送信`
+- `questions_answered_no_schedule` / `質問回答済・日程未回答`
+- `preferred_dates_collected` / `希望日回収済`
+- `interview_pending_confirmation` / `面接確定待ち`
+
+また旧ラベル `面接確定済` は `面接確定` に統一済み。古いスクリーンショット / メモにこれらが出てきたら最新仕様（§9.1）が正。
 
